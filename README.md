@@ -45,6 +45,13 @@ npm run dev
 
 Open **http://localhost:5173** in your browser.
 
+### 5. Activate the virtual environment each time PowerShell is launched
+The project requires a virtual environment for its specific Python library dependencies (FastAPI, PyTest, Uvicorn). Run these two commands at the start of every PowerShell session before working on the project:
+```powershell
+cd C:\Users\Valerie.Cumbie\Documents\qa-log-analyzer
+.\venv\Scripts\activate
+```
+
 ## Project Structure
 
 ```
