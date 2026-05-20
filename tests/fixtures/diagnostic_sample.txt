@@ -1,0 +1,75 @@
+2026-04-27 07:35:59.206
+Received Message
+id: 9018000051660311777246559
+data type: broadcast
+message type: location
+frames used: 1
+frequency set: Primary
+hop count: 1
+rssi: 147 dBm
+receiver gid: 901713243926847
+receiver callsign: RSO_HagenM
+receiver timestamp: 2026-04-27 07:35:59.206
+receiver location: 25.0783, 121.5817
+receiver pli interval: 300 seconds
+originator gid: 903244139412710
+originator callsign: gT Ratti
+originator timestamp: 2026-04-27 07:35:59.000
+originator location: 25.0808, 121.5591
+originator pli interval: 300 seconds
+
+2026-04-27 07:35:59.353
+Message Count Details
+pli messages sent: 0
+chat and map messages sent: 0
+pli messages received: 1
+chat and map messages received: 0
+
+2026-04-27 07:36:48.290
+System Information
+STORED MESSAGES: 0
+BATTERY LEVEL: 99
+POWER AMP TEMP: 33
+FIRMWARE VERSION: 3.1.11
+
+2026-04-27 07:37:48.076
+Frequency Set
+name: Primary
+power level: 5.0 watts
+bandwidth: 11.8 kHz
+control channels: [471.265, 478.265] Mhz
+data channels: [475.265, 476.265, 479.265] Mhz
+
+2026-04-27 08:02:59.220
+Received Message
+id: 9021189077932051777248172
+data type: 1to1
+message type: text
+frames used: 2
+frequency set: Primary
+hop count: 2
+rssi: 153 dBm
+receiver gid: 901713243926847
+receiver callsign: RSO_HagenM
+receiver timestamp: 2026-04-27 08:02:59.220
+receiver location: 25.0783, 121.5817
+receiver pli interval: 300 seconds
+originator gid: 903244139412710
+originator callsign: gT Ratti
+originator timestamp: 2026-04-27 08:02:59.000
+originator location: 25.0808, 121.5591
+originator pli interval: 300 seconds
+
+2026-04-27 08:02:59.353
+Message Count Details
+pli messages sent: 0
+chat and map messages sent: 0
+pli messages received: 45
+chat and map messages received: 3
+
+2026-04-27 08:37:06.609
+Device & Application Info
+device: iPhone 15
+log version: v1
+app version: 2.2.1
+build number: 15

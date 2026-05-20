@@ -1,0 +1,15 @@
+2026-03-03T15:15:22.613846Z DEBUG Device - PNE234100381 MESSAGE_QUEUE: Radio state changed to: CONNECTED
+2026-03-03T15:15:53.507273Z INFO Device - PNE234100381 IosBleRadio: Peripheral 2A5E62E5-C0EA-F71D-5A28-AF6441D550BD disconnected (error: The specified device has been disconnected)
+2026-03-03T15:15:53.512469Z INFO Device - PNE234100381 Radio: Connection state update for PNE234100381 : CONNECTING
+2026-03-03T15:15:53.512606Z INFO Device - PNE234100381 IosBleRadio: Attempting BLE reconnection to 2A5E62E5-C0EA-F71D-5A28-AF6441D550BD
+2026-03-03T15:16:13.515351Z WARN Device - PNE234100381 IosBleRadio: BLE reconnection failed, retrying in 2000ms
+2026-03-03T15:16:35.522345Z WARN Device - PNE234100381 IosBleRadio: BLE reconnection failed, retrying in 2000ms
+2026-03-03T15:17:00.123456Z DEBUG Device - PNE234100381 SYSTEM: batteryLevel=98 powerAmpTemp=31 firmwareVersion=3.1.11
+2026-03-03T15:17:19.538682Z WARN Device - PNE234100381 IosBleRadio: BLE reconnection failed, retrying in 2000ms
+2026-03-03T15:17:41.543740Z WARN Device - PNE234100381 IosBleRadio: BLE reconnection failed, retrying in 2000ms
+2026-03-03T15:18:03.555016Z WARN Device - PNE234100381 IosBleRadio: BLE reconnection failed, retrying in 2000ms
+2026-03-03T15:22:00.100000Z DEBUG Device - PNE234100381 SYSTEM: batteryLevel=97 powerAmpTemp=33 firmwareVersion=3.1.11
+2026-03-03T16:00:00.000000Z DEBUG Device - PNE234100381 SYSTEM: batteryLevel=91 powerAmpTemp=36 firmwareVersion=3.1.11
+2026-03-03T16:01:00.000000Z INFO Device - PNE234100381 SendMessageResponse: outcome=FINAL_ACK id=msg001abc
+2026-03-03T16:02:00.000000Z INFO Device - PNE234100381 SendMessageResponse: outcome=NACK id=msg002def
+2026-03-03T16:03:00.000000Z INFO Device - PNE234100381 SendMessageResponse: outcome=TIMEOUT id=msg003ghi
