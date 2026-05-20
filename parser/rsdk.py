@@ -28,7 +28,7 @@ _LINE_RE = re.compile(
     r"^(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z)"
     r"\s+(?P<level>\w+)"
     r"\s+Device - (?P<serial>\w+)"
-    r"\s+(?P<rest>.+)$"
+    r"\s+(?P<component>\w+):\s*(?P<rest>.+)$"
 )
 
 _TS_FMT_IN  = "%Y-%m-%dT%H:%M:%S.%fZ"
@@ -47,7 +47,9 @@ def _fmt(dt: datetime) -> str:
 # ── Patterns for specific log lines ──────────────────────────────────────────
 
 # BLE reconnection failure (iOS only)
-_BLE_FAIL_RE = re.compile(r"IosBleRadio: BLE reconnection failed, retrying in 2000ms")
+# Note: component "IosBleRadio" is captured separately by _LINE_RE;
+# rest contains only the message body, so we match without the component prefix.
+_BLE_FAIL_RE = re.compile(r"BLE reconnection failed, retrying in 2000ms")
 
 # Device info from DeviceInfo(...) blocks
 _DEV_INFO_RE = re.compile(r"DeviceInfo\(.*?deviceSerial=(\w+).*?firmwareVersion=([^\s,)]+)")
@@ -55,21 +57,29 @@ _DEV_INFO_RE = re.compile(r"DeviceInfo\(.*?deviceSerial=(\w+).*?firmwareVersion=
 # Battery level: "BATTERY_LEVEL: 98" or "battery: 98%"
 _BATTERY_RE = re.compile(r"(?:BATTERY_LEVEL|battery)[:\s]+(\d+\.?\d*)\s*%?", re.I)
 
-# PA temperature: "POWER_AMP_TEMP: 31" (Celsius)
+# PA temperature: "POWER_AMP_TEMP: 31" (Celsius) — legacy/fallback pattern
 _TEMP_RE = re.compile(r"POWER_AMP_TEMP[:\s]+(\d+)", re.I)
 
 # Firmware version in log lines
 _FW_RE = re.compile(r"firmwareVersion=([^\s,)]+)")
 
-# Unicast TX outcomes in SendMessageResponse
+# Unicast TX outcomes in SendMessageResponse (iOS pattern)
 _FINAL_ACK_RE  = re.compile(r"SendMessageResponse.*?FINAL_ACK.*?id=(\w+)", re.I)
-_NACK_RE       = re.compile(r"SendMessageResponse.*?NACK.*?id=(\w+)", re.I)
+_IOS_NACK_RE   = re.compile(r"SendMessageResponse.*?NACK.*?id=(\w+)", re.I)
 _TIMEOUT_RE    = re.compile(r"SendMessageResponse.*?TIMEOUT.*?id=(\w+)", re.I)
 _KEEPALIVE_RE  = re.compile(r"SendMessageResponse.*?KEEPALIVE_ACK.*?id=(\w+)", re.I)
 
-# Battery/temp from system poll lines
-_SYS_BATT_RE  = re.compile(r"batteryLevel[=:\s]+(\d+\.?\d*)")
-_SYS_TEMP_RE  = re.compile(r"powerAmpTemp[=:\s]+(\d+)")
+# Battery/temp from DeviceInfo system poll lines
+_SYS_BATT_RE = re.compile(r"batteryLevel[=:\s]+(\d+\.?\d*)")
+
+# BUG FIX: was r"powerAmpTemp[=:\s]+(\d+)" — missed field name "powerAmpTemperature"
+_SYS_TEMP_RE = re.compile(r"powerAmpTemperature[=:\s]+(\d+)")
+
+# Android NACK component patterns (Android only — component tag is "NACK")
+# Matches: "SRC: missing segments [0] for msgId: 891 from -32453 to 17451"
+_AND_NACK_MSGID_RE = re.compile(r"missing segments \[[\d,\s]+\] for msgId:\s*(\d+)", re.I)
+# Matches: "src: nack triggered for GoTennaTransportFrame(...messageId=891...)"
+_AND_NACK_FRAME_RE = re.compile(r"nack triggered.*?messageId=(\d+)", re.I)
 
 
 # ── Line-by-line processing ───────────────────────────────────────────────────
@@ -93,10 +103,11 @@ def _process_line(
     if not m:
         return
 
-    ts_str = m.group("ts")
-    serial = m.group("serial")
-    rest   = m.group("rest")
-    dt     = _parse_ts(ts_str)
+    ts_str    = m.group("ts")
+    serial    = m.group("serial")
+    component = m.group("component")
+    rest      = m.group("rest")
+    dt        = _parse_ts(ts_str)
     if not dt:
         return
 
@@ -120,7 +131,7 @@ def _process_line(
             result.device.radio_firmware = fw_m.group(1)
 
     # ── BLE failure (iOS only) ────────────────────────────────────────────────
-    if _BLE_FAIL_RE.search(rest):
+    if component == "IosBleRadio" and _BLE_FAIL_RE.search(rest):
         result.ble_fail_events.append(BleFailEvent(
             timestamp=ts_out,
             radio_serial=serial,
@@ -131,17 +142,25 @@ def _process_line(
     batt_m = _SYS_BATT_RE.search(rest) or _BATTERY_RE.search(rest)
     if batt_m:
         try:
-            pending_samples.setdefault(serial, {})["ts"]      = ts_out
-            pending_samples[serial]["battery"] = float(batt_m.group(1))
+            batt_val = float(batt_m.group(1))
+            # Sentinel value: -1 means not yet valid on first connect
+            if batt_val >= 0:
+                pending_samples.setdefault(serial, {})["ts"]      = ts_out
+                pending_samples[serial]["battery"] = batt_val
         except ValueError:
             pass
 
     # ── PA Temperature ────────────────────────────────────────────────────────
+    # _SYS_TEMP_RE matches "powerAmpTemperature=<n>" (DeviceInfo lines)
+    # _TEMP_RE matches "POWER_AMP_TEMP: <n>" (legacy/other formats)
     temp_m = _SYS_TEMP_RE.search(rest) or _TEMP_RE.search(rest)
     if temp_m:
         try:
-            pending_samples.setdefault(serial, {})["ts"]   = ts_out
-            pending_samples[serial]["temp_c"] = int(temp_m.group(1))
+            temp_val = int(temp_m.group(1))
+            # Sentinel value: -1 means not yet valid on first connect
+            if temp_val >= 0:
+                pending_samples.setdefault(serial, {})["ts"]     = ts_out
+                pending_samples[serial]["temp_c"] = temp_val
         except ValueError:
             pass
 
@@ -157,11 +176,12 @@ def _process_line(
         pending_samples[serial] = {}
 
     # ── Unicast TX outcomes ───────────────────────────────────────────────────
+    # iOS: outcomes embedded in SendMessageResponse lines
     for pattern, outcome in (
         (_FINAL_ACK_RE, "final_ack"),
-        (_NACK_RE,       "nack"),
-        (_TIMEOUT_RE,    "timeout"),
-        (_KEEPALIVE_RE,  "keepalive_ack"),
+        (_IOS_NACK_RE,  "nack"),
+        (_TIMEOUT_RE,   "timeout"),
+        (_KEEPALIVE_RE, "keepalive_ack"),
     ):
         tx_m = pattern.search(rest)
         if tx_m:
@@ -169,6 +189,17 @@ def _process_line(
                 timestamp=ts_out,
                 message_id=tx_m.group(1),
                 outcome=outcome,
+                radio_serial=serial,
+            ))
+
+    # Android: NACKs surface as a dedicated "NACK" component tag
+    if component == "NACK":
+        nack_m = _AND_NACK_MSGID_RE.search(rest) or _AND_NACK_FRAME_RE.search(rest)
+        if nack_m:
+            result.tx_events.append(TxEvent(
+                timestamp=ts_out,
+                message_id=nack_m.group(1),
+                outcome="nack",
                 radio_serial=serial,
             ))
 

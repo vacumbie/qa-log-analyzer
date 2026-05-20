@@ -1,6 +1,6 @@
 """
 parser/models.py
-Shared dataclasses used by both the diagnostic and RSDK parsers.
+Shared dataclasses used by the diagnostic, RSDK, and ATAK parsers.
 Every parser returns a ParseResult; the API and UI only need to know this shape.
 """
 
@@ -149,16 +149,142 @@ class TxEvent:
     radio_serial: str = ""
 
 
+# ── ATAK-specific primitives ──────────────────────────────────────────────────
+
+@dataclass
+class AtakMessage:
+    """
+    A single RF message record from an ATAK plug-in log.
+
+    RSSI here is real dBm (already signed, not an unsigned byte like
+    the diagnostic format). Callsign/UUID fields are always empty strings
+    in the current log format — identity is GID-only.
+    """
+    timestamp: str                          # ISO 8601 converted to _TS_FMT_OUT
+    log_id: Optional[int] = None           # Can be negative (signed 32-bit int)
+    message_timestamp: str = ""            # Originator send time
+    is_sender: bool = False
+    sender_gid: Optional[int] = None
+    delivery_status: str = ""              # FULLY_RECEIVED | SENT | DELIVERED |
+                                           # PARTIALLY_RECEIVED
+    segment_count: int = 1
+    open_segments: int = 0                 # > 0 means partially received
+    retry_count: int = 0
+    delivery_time_ms: Optional[int] = None # Can be negative (clock skew)
+    message_protocol: str = ""             # BROADCAST | UNICAST
+    message_type: str = ""                 # pli | textChat | mapObject | fileTransfer
+    message_object_type: str = ""          # PIN | SHAPE | CIRCLE | ROUTE |
+                                           # VEHICLE | CASEVAC | etc.
+    pli_interval: str = ""                 # PLI messages only
+    file_name: str = ""                    # fileTransfer messages only
+    receiver_gid: Optional[int] = None
+    hop_count: Optional[int] = None        # 0 when is_sender=True
+    rssi: Optional[int] = None             # Real dBm (signed); 0 when is_sender=True
+
+    @property
+    def is_pli(self) -> bool:
+        return self.message_type == "pli"
+
+    @property
+    def is_chat(self) -> bool:
+        return self.message_type == "textChat"
+
+    @property
+    def is_map_object(self) -> bool:
+        return self.message_type == "mapObject"
+
+    @property
+    def is_file_transfer(self) -> bool:
+        return self.message_type == "fileTransfer"
+
+    @property
+    def rssi_is_valid(self) -> bool:
+        """RSSI of 0 on sent messages is a placeholder, not a real reading."""
+        return self.rssi is not None and not self.is_sender
+
+
+@dataclass
+class AtakDeviceHealth:
+    """
+    One periodic radio health poll from an ATAK plug-in log (~every 30s).
+
+    Temperatures are Celsius from the log; UI must convert to °F.
+    transmit_power_differential=255 and system_temperature=0 during
+    CONNECTING state are sentinel/placeholder values — treat as None.
+    """
+    timestamp: str
+    serial_number: str = ""
+    connection_state: str = ""             # CONNECTED | CONNECTING
+    battery_pct: Optional[int] = None
+    is_charging: bool = False
+    connection_type: str = ""              # BLE
+    mode: str = ""                         # NORMAL
+    firmware_version: str = ""
+    stored_messages: int = 0
+    pa_temp_c: Optional[int] = None        # Celsius; UI converts to °F
+    system_temp_c: Optional[int] = None    # Celsius; UI converts to °F
+                                           # 0 during CONNECTING = placeholder
+    transmit_power_differential: Optional[int] = None  # 255 = not yet valid
+    hardware_version: Optional[int] = None
+    bootloader_version: Optional[int] = None
+    chip_architecture: str = ""
+    error_code: str = ""
+    gid: Optional[int] = None
+
+
+@dataclass
+class AtakEvent:
+    """
+    A lifecycle or configuration event from an ATAK plug-in log.
+
+    event_type covers: deviceConnected | deviceDisconnected |
+    powerLevelUpdated | pliSettingUpdated | frequencyUpdated
+    """
+    timestamp: str
+    event_type: str = ""
+
+    # deviceConnected
+    serial_number: str = ""
+    connection_type: str = ""
+
+    # powerLevelUpdated
+    power_watts: Optional[float] = None
+
+    # pliSettingUpdated
+    pli_interval_sec: Optional[int] = None
+    pli_is_distance: Optional[bool] = None
+    pli_auto_send: Optional[bool] = None
+
+    # frequencyUpdated (regular log) — full channel list
+    bandwidth_khz: Optional[float] = None
+    channels: list = field(default_factory=list)  # list of {"frequency": float,
+                                                   #          "isControlChannel": bool}
+
+
+@dataclass
+class AtakAppInfo:
+    """
+    App launch record from an ATAK plug-in log.
+    One record per app launch; regular logs accumulate multiple over time.
+    """
+    launch_timestamp: str
+    app_version: str = ""
+    build_number: Optional[int] = None
+    atak_version: str = ""
+    device_model: str = ""
+    android_api_version: Optional[int] = None
+
+
 # ── Top-level parse result ────────────────────────────────────────────────────
 
 @dataclass
 class ParseResult:
     """
     The complete output of parsing one log file.
-    Both diagnostic.py and rsdk.py return this shape.
+    diagnostic.py, rsdk.py, and atak.py all return this shape.
     """
     # Metadata
-    log_format: str = ""        # "diagnostic" | "rsdk"
+    log_format: str = ""        # "diagnostic" | "rsdk" | "atak"
     source_filename: str = ""
     parse_errors: list[str] = field(default_factory=list)
 
@@ -188,6 +314,12 @@ class ParseResult:
     # RSDK only
     ble_fail_events: list[BleFailEvent] = field(default_factory=list)
     tx_events: list[TxEvent] = field(default_factory=list)
+
+    # ATAK only
+    atak_messages: list[AtakMessage] = field(default_factory=list)
+    atak_health_samples: list[AtakDeviceHealth] = field(default_factory=list)
+    atak_events: list[AtakEvent] = field(default_factory=list)
+    atak_app_launches: list[AtakAppInfo] = field(default_factory=list)
 
     # ── Convenience properties ────────────────────────────────────────────────
 
@@ -219,3 +351,25 @@ class ParseResult:
     @property
     def final_message_counts(self) -> Optional[MessageCountSnapshot]:
         return self.message_count_snapshots[-1] if self.message_count_snapshots else None
+
+    # ── ATAK convenience properties ───────────────────────────────────────────
+
+    @property
+    def atak_pli_messages(self) -> list[AtakMessage]:
+        return [m for m in self.atak_messages if m.is_pli]
+
+    @property
+    def atak_chat_messages(self) -> list[AtakMessage]:
+        return [m for m in self.atak_messages if m.is_chat]
+
+    @property
+    def atak_unique_sender_gids(self) -> set[int]:
+        return {m.sender_gid for m in self.atak_messages if m.sender_gid is not None}
+
+    @property
+    def atak_received_messages(self) -> list[AtakMessage]:
+        return [m for m in self.atak_messages if not m.is_sender]
+
+    @property
+    def atak_sent_messages(self) -> list[AtakMessage]:
+        return [m for m in self.atak_messages if m.is_sender]
