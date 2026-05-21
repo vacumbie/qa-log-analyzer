@@ -14,8 +14,8 @@ from routes.export import router as export_router
 
 app = FastAPI(
     title="goTenna Log Analyzer API",
-    description="Parse and analyze goTenna diagnostic and RSDK log files.",
-    version="0.1.0",
+    description="Parse and analyze goTenna diagnostic, RSDK, and ATAK plug-in log files.",
+    version="0.2.0",
 )
 
 # Allow the Vite dev server to call the API
@@ -33,4 +33,4 @@ app.include_router(export_router)
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "0.1.0"}
+    return {"status": "ok", "version": "0.2.0"}
