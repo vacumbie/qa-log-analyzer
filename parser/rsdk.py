@@ -69,6 +69,9 @@ _IOS_NACK_RE   = re.compile(r"SendMessageResponse.*?NACK.*?id=(\w+)", re.I)
 _TIMEOUT_RE    = re.compile(r"SendMessageResponse.*?TIMEOUT.*?id=(\w+)", re.I)
 _KEEPALIVE_RE  = re.compile(r"SendMessageResponse.*?KEEPALIVE_ACK.*?id=(\w+)", re.I)
 
+# ContactManager: "Created contact for user <name>  with UUID <uuid>"
+_CONTACT_RE = re.compile(r'Created contact for user (.+?) {1,3}with UUID (\S+)')
+
 # Battery/temp from DeviceInfo system poll lines
 _SYS_BATT_RE = re.compile(r"batteryLevel[=:\s]+(\d+\.?\d*)")
 
@@ -137,6 +140,14 @@ def _process_line(
             radio_serial=serial,
             hour=hour,
         ))
+
+    # ── Contact discovery ────────────────────────────────────────────────────
+    contact_m = _CONTACT_RE.search(rest)
+    if contact_m:
+        name = contact_m.group(1).strip()
+        uuid = contact_m.group(2).strip()
+        if uuid and name:
+            result.contacts[uuid] = name
 
     # ── Battery ───────────────────────────────────────────────────────────────
     batt_m = _SYS_BATT_RE.search(rest) or _BATTERY_RE.search(rest)

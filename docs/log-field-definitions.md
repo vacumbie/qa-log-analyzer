@@ -51,12 +51,21 @@ Written approximately every 5 minutes while the app is active and in the foregro
 | `BATTERY LEVEL` | integer | `system_sample.battery_pct` | Percent (0–100). Parsed as integer only if purely numeric. |
 | `POWER AMP TEMP` | integer | `system_sample.pa_temp_c` | **Celsius.** Must be converted to °F for display: `°F = (°C × 9/5) + 32` |
 | `FIRMWARE VERSION` | string | `device.radio_firmware` | Captured from first System Information block only |
-| `STORED MESSAGES` | *(not parsed)* | — | Present in log but not currently extracted |
+| `SERIAL NUMBER` | string | `device.radio_serial` | Radio serial number, e.g. `PNE234300142`. Present in every System Information block; captured from first occurrence. |
+| `SYSTEM TEMP` | integer | *(not parsed)* | Celsius. Secondary temperature sensor (board/system), distinct from PA amp temp. Not currently extracted. |
+| `TRANSMIT POWER DIFF` | integer | *(not parsed)* | Observed range 5–11. Meaning not fully documented. Not currently extracted. |
+| `BATTERY CHARGE STATE` | boolean string | *(not parsed)* | `true` / `false`. Not currently extracted. |
+| `HW VERSION` | integer | *(not parsed)* | Radio hardware revision, e.g. `9`. Not currently extracted. |
+| `LED ENABLED` | boolean string | *(not parsed)* | `true` / `false`. Not currently extracted. |
+| `BOOT VERSION` | integer | *(not parsed)* | Bootloader version, e.g. `20`. Not currently extracted. |
+| `STORED MESSAGES` | *(not parsed)* | — | Present in log but not currently extracted. |
 | Block timestamp | string | `system_sample.timestamp` | Wall clock time at the moment of polling |
 
 > ⚠️ **Polling gap = app not active.** A gap of >5 min between System Information blocks means the app was closed, backgrounded, or the device was asleep. This is the primary crash/interruption proxy.
 >
 > ⚠️ **Temperature is Celsius in the log.** The raw value (e.g. `33`) means 33°C = 91°F. Never display the raw value directly.
+>
+> ⚠️ **Firmware 3.1.11 vs 3.2.10 — missing identity fields in Received Message blocks.** Devices on firmware 3.1.11 omit `receiver callsign`, `receiver gid`, `originator callsign`, `originator gid`, and `receiver location` from every `Received Message` block. Hop count, RSSI, timestamps, and PLI intervals are still present. Confirmed on serial `PNE235200117` (firmware 3.1.11, Apr 27 test) — all 150 received message blocks are missing identity fields. Devices on 3.2.10 include these fields normally. The parser must not fail on their absence.
 
 ---
 
@@ -241,20 +250,23 @@ Lines containing `DeviceInfo(...)` provide periodic radio health data.
 |---------|-----------|-------------|-------|
 | `missing segments [...] for msgId: N` | TxEvent | `tx_event.outcome = "nack"` | Segment retransmit request |
 | `nack triggered for GoTennaTransportFrame(...messageId=N...)` | TxEvent | `tx_event.outcome = "nack"` | NACK for specific message |
-| `SRC a nack has been received but doesn't match...discarding` | *(skipped)* | — | Stale NACK with no message ID — intentionally ignored |
+| `SRC a nack has been received but doesn't match the pending outbound file, discarding.` | TxEvent | `tx_event.outcome = "nack"`, `message_id = ""` | Stale NACK — captured with empty message ID |
 
 ---
 
-### Component: `SendMessageResponse` — Unicast TX Outcomes (iOS)
+### Component: `GRIP_Receiver` — Unicast TX Outcomes (iOS and Android)
 
-**iOS only** (this pattern). Android surfaces NACKs via the `NACK` component instead.
+TX outcome lines appear on the `GRIP_Receiver` component on both platforms. There are no
+`SendMessageResponse`-based outcome lines in the actual logs — that pattern was incorrect.
 
 | Pattern | Parsed As | Model Field | Notes |
 |---------|-----------|-------------|-------|
-| `SendMessageResponse.*FINAL_ACK.*id=(\w+)` | TxEvent | `outcome = "final_ack"` | Unicast confirmed delivered |
-| `SendMessageResponse.*NACK.*id=(\w+)` | TxEvent | `outcome = "nack"` | Negative acknowledgment |
-| `SendMessageResponse.*TIMEOUT.*id=(\w+)` | TxEvent | `outcome = "timeout"` | No response received |
-| `SendMessageResponse.*KEEPALIVE_ACK.*id=(\w+)` | TxEvent | `outcome = "keepalive_ack"` | Mid-transfer keep-alive ACK |
+| `SRC: Final ACK received, message fully delivered` | TxEvent | `outcome = "final_ack"` | Unicast confirmed delivered. No message ID in this log line — `message_id` stored as empty string. |
+| `SRC: Keep-alive ACK received. Segment ID: N msgId: N` | TxEvent | `outcome = "keepalive_ack"` | Mid-transfer ACK. `msgId` value stored as `message_id`. |
+
+> ⚠️ **No timeout-outcome lines exist in the logs.** The line `"expected timeout of Xms"` (from `GRIP_SENDER`) is a send-start log, not a delivery failure. No `outcome = "timeout"` events will be produced by this parser.
+>
+> ⚠️ **NACKs are not surfaced on `GRIP_Receiver`.** They surface via the `NACK` component tag — see section below.
 
 ---
 
@@ -485,4 +497,4 @@ These fields are computed by the parser or API layer — they do not appear dire
 
 ---
 
-_Last updated: 2026-05-20_
+_Last updated: 2026-05-22_

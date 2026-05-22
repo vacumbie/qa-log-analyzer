@@ -75,9 +75,12 @@ def _handle_system_info(block: dict, result: ParseResult) -> None:
     temp = block.get("POWER AMP TEMP")
     fw   = block.get("FIRMWARE VERSION", "")
 
-    # Capture radio firmware on first system info block
+    # Capture radio firmware and serial on first system info block
     if not result.device.radio_firmware and fw:
         result.device.radio_firmware = fw
+    serial = block.get("SERIAL NUMBER", "")
+    if not result.device.radio_serial and serial:
+        result.device.radio_serial = serial
 
     result.system_samples.append(SystemSample(
         timestamp=ts,

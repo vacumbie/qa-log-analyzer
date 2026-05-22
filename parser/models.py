@@ -314,6 +314,7 @@ class ParseResult:
     # RSDK only
     ble_fail_events: list[BleFailEvent] = field(default_factory=list)
     tx_events: list[TxEvent] = field(default_factory=list)
+    contacts: dict[str, str] = field(default_factory=dict)  # {uuid: callsign} from ContactManager
 
     # ATAK only
     atak_messages: list[AtakMessage] = field(default_factory=list)

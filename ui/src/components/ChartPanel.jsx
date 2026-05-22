@@ -19,10 +19,14 @@ const TT_CFG  = {
 function shortLabel(r) {
   if (r.device?.callsign) return r.device.callsign
   const name = r.source_filename || ''
+  // ATAK: diagnostic_ATAK_CALLSIGN_GID_...
   const atakMatch = name.match(/diagnostic_ATAK_([^_]+)_/)
   if (atakMatch) return atakMatch[1]
-  const valMatch = name.match(/diagnostic_([A-Z]+)_/)
-  if (valMatch) return valMatch[1]
+  // Diagnostic named: diagnostic_CALLSIGN_... (uppercase letters only)
+  const namedMatch = name.match(/diagnostic_([A-Z][A-Z_]+)_/)
+  if (namedMatch) return namedMatch[1]
+  // Fallback to radio serial if available — more useful than truncated filename
+  if (r.device?.radio_serial) return r.device.radio_serial.slice(-6)
   return name.replace(/\.[^.]+$/, '').slice(0, 12)
 }
 
@@ -38,33 +42,56 @@ function buildTimeLabels(results, key = 'system_samples', max = 40) {
 }
 
 /**
- * Build relative-time series for line charts.
- * X-axis: minutes from session start (0m, 5m, 10m...).
- * Buckets samples evenly across the session span.
+ * Build per-device normalized time series for line charts.
+ *
+ * Each device's samples are mapped to a 0–100% session-progress axis
+ * independently, so a 3-day log and a 70-minute log both show their
+ * full shape across the chart width. This avoids the sparse-data problem
+ * that occurs when sessions of very different lengths share an absolute
+ * time axis.
+ *
+ * X labels show % of each device's own session (0%, 10%, … 100%).
  */
 function buildRelativeTimeSeries(results, key = 'system_samples', maxPoints = 15) {
-  const allSamples = results.flatMap(r => (r[key] || []).filter(s => s.timestamp))
-  if (!allSamples.length) return { labels: [], getDataset: () => [] }
+  const toMs = ts => {
+    if (!ts) return NaN
+    const s = ts.includes('T') ? ts : ts.replace(' ', 'T')
+    const ms = new Date(s.endsWith('Z') ? s : s + 'Z').getTime()
+    return isNaN(ms) ? new Date(ts).getTime() : ms
+  }
 
-  const toMs = ts => new Date(ts.replace(' ', 'T')).getTime()
-  const sessionStart = Math.min(...allSamples.map(s => toMs(s.timestamp)))
-  const sessionEnd   = Math.max(...allSamples.map(s => toMs(s.timestamp)))
-  const spanMin      = Math.max(1, (sessionEnd - sessionStart) / 60000)
+  const hasAny = results.some(r => (r[key] || []).some(s => s.timestamp))
+  if (!hasAny) return { labels: [], getDataset: () => [] }
 
-  const bucketCount = Math.min(maxPoints, Math.ceil(spanMin / 5) + 1)
-  const bucketMin   = spanMin / (bucketCount - 1 || 1)
-  const labels      = Array.from({ length: bucketCount }, (_, i) => `${Math.round(i * bucketMin)}m`)
+  // Shared normalized labels: 0% → 100% in maxPoints steps
+  const labels = Array.from({ length: maxPoints }, (_, i) =>
+    `${Math.round((i / (maxPoints - 1)) * 100)}%`
+  )
 
+  // Per-device: normalize each device's own session to 0-100%
   const getDataset = (r, valueKey) => {
-    const samples = (r[key] || []).filter(s => s.timestamp && s[valueKey] != null)
+    const samples = (r[key] || [])
+      .filter(s => s.timestamp && s[valueKey] != null)
+      .map(s => ({ ms: toMs(s.timestamp), val: s[valueKey] }))
+      .filter(s => !isNaN(s.ms))
+      .sort((a, b) => a.ms - b.ms)
+
+    if (!samples.length) return labels.map(() => null)
+
+    const devMin  = samples[0].ms
+    const devSpan = Math.max(1, samples[samples.length - 1].ms - devMin)
+
     return labels.map((_, i) => {
-      const targetMs = sessionStart + i * bucketMin * 60000
+      const targetPct = i / (maxPoints - 1)
+      const targetMs  = devMin + targetPct * devSpan
       let closest = null, minDist = Infinity
       for (const s of samples) {
-        const dist = Math.abs(toMs(s.timestamp) - targetMs)
+        const dist = Math.abs(s.ms - targetMs)
         if (dist < minDist) { minDist = dist; closest = s }
       }
-      return (closest && minDist < bucketMin * 60000 * 2) ? closest[valueKey] : null
+      // Allow up to 2 bucket-widths gap before treating as null
+      const bucketSpan = devSpan / (maxPoints - 1)
+      return (closest && minDist <= bucketSpan * 2) ? closest.val : null
     })
   }
 

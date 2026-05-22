@@ -51,35 +51,49 @@ Dark tactical aesthetic. All colors defined as CSS variables:
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  HEADER (title, sub, badge, KPI row)            │
+│  HEADER (frosted glass, 8px padding)            │
+│    goTenna Log Parser · Log selector ·          │
+│    Time window badge · + Add Log Files · Clear  │
 ├─────────────────────────────────────────────────┤
-│  TAB BAR (10 tabs)                              │
+│  TAB BAR                                        │
 ├─────────────────────────────────────────────────┤
 │  TAB PANEL (active tab content)                 │
-│    section-header                               │
-│    chart-wrap / table / data grid               │
+│    [Overview only] KPI row                      │
 │    section-header                               │
 │    chart-wrap / table / data grid               │
 │    ...                                          │
 └─────────────────────────────────────────────────┘
 ```
 
+**Header:** Frosted glass (`rgba(5,8,15,0.92)` + `backdrop-filter: blur(12px)`), `8px` vertical padding. Title is "goTenna Log Parser" in Barlow Condensed with "Log Parser" in `--accent`. Separated from content by `var(--border2)` bottom border.
+
+**KPI row:** Rendered inside the Overview tab only — not pinned globally. Scrolls with tab content.
+
+**Time window badge:** When a filter is active, a compact badge appears in the header between the log selector and the upload button showing `WINDOW start → end UTC` with an ✕ to clear.
+
 ---
 
 ## KPI Header Row
 
-Displayed at all times above the tab bar. One KPI card per metric.
+Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per metric. Cards support an optional `tooltip` prop — on hover shows a dropdown with per-device detail.
 
-| KPI | Color | Value | Sub-label |
-|-----|-------|-------|-----------|
-| Devices Logged | `--accent` | Count | Device names + date ranges |
-| Network Nodes | `--green` | Count | Unique originators seen |
-| Peak Temp | `--yellow` | °F | Device that hit peak |
-| Avg Hop Count | `--accent2` | hops | Range across all logs |
-| App Version | `--green` | version + build | All devices / firmware note |
-| PLI Changers | `--purple` | n/total | Nodes that changed rate |
-| Radio Firmware | `--red` | version(s) | Flag mismatched versions |
-| Chat Messages | `--accent` | Count | Across all devices |
+| KPI | Color | Value | Sub-label | Tooltip |
+|-----|-------|-------|-----------|---------|
+| Devices Logged | `--accent` | Count | "hover for details" | callsign · FORMAT · firmware per log |
+| Network Nodes | `--green` | Count | "Unique GIDs / peers observed" | — |
+| Peak Temp | threshold | °F | Device that hit peak | — |
+| Avg Hop Count | `--accent2` | hops | "diagnostic + ATAK only" | — |
+| App Version | green/red | version (build) | "N devices" or "⚠ version mismatch" | callsign · vX.X.X (build) · PLATFORM per log |
+| Radio Firmware | green/red | version(s) | "all match" or "⚠ version mismatch" | — |
+| PLI Changers | `--purple` | n/total | "N nodes changed rate" | — |
+| Avg PLI Rate | threshold | e.g. "5m" | median across N nodes or "⚠ N high-freq nodes ≤30s" | — |
+| Chat Messages | `--accent` | Count | "received across all devices" | — |
+
+**Peak Temp color:** red ≥ 131°F · yellow ≥ 113°F · green below 113°F.
+
+**App Version / Radio Firmware color:** red = mismatch · green = all match.
+
+**Avg PLI Rate:** Median dominant interval across all observed nodes (diagnostic only). Color follows PLI thresholds: red ≤ 30s · yellow ≤ 180s · green > 180s. High-freq warning shown if any node's dominant interval is ≤ 30s.
 
 > **Temperature rule:** Always display in °F. Source data is Celsius — convert before display.
 
@@ -88,14 +102,33 @@ Displayed at all times above the tab bar. One KPI card per metric.
 ## Tabs
 
 ### 1. Overview (`overview`)
-- **Session Timeline** — active windows per device; horizontal bar chart showing date/time ranges
-- **Messages Received by Device** — PLI vs chat breakdown; stacked bar chart from final Message Count Details block
-- **Network Participants** — table of all unique originators; columns: callsign, PLI rate, firmware (if known), ⚠ flag if PLI changed
+- **KPI Row** — rendered at top of this tab only (see KPI Header Row section)
+- **Session Timeline** — active windows per device; horizontal bar per log showing start → end with gap count
+- **Messages Received by Device** — PLI vs chat breakdown bar chart
+- **Network Participants** — grid of all unique originators; shows callsign, GID, PLI rate
 
 ### 2. PLI Frequency (`pli`)
-- **Receiver PLI Interval** — own PLI rate per logging device; bar chart
-- **Originator PLI — All Network Nodes** — dominant PLI rate per originator; table with ⚠ for nodes that changed rate; flag 5s intervals as anomalous (stress test / misconfiguration)
-- **PLI Change Events** — nodes observed switching PLI rate; bar chart of transition counts per node
+- **Originator PLI — All Network Nodes** — one card per originator node; shows dominant PLI rate (by message count), interval label, STABLE / ⚠ CHANGES badge, and an ALSO OBSERVED section listing every other interval seen with its message count
+
+**PLI interval color thresholds (applied to dominant interval and all ALSO OBSERVED chips):**
+
+| Interval | Color | Label |
+|----------|-------|-------|
+| ≤ 5 seconds | Red | VERY HIGH |
+| 6–15 seconds | Red | CRITICAL |
+| 16–30 seconds | Red | HIGH |
+| 31–180 seconds | Yellow | ELEVATED |
+| > 180 seconds | Green | STANDARD |
+
+> ⚠️ **5s and 15s intervals are critical data points.** These indicate deliberate high-frequency testing or misconfiguration and must always be clearly visible in red.
+>
+> ⚠️ **`N/A` is not an interval.** It indicates the originator's radio was disconnected at time of receipt. Exclude from dominant interval calculation and from ALSO OBSERVED chips.
+>
+> ⚠️ **Dominant interval is determined by message count**, not first-seen. A node that sent 110 messages at 5s and 9 at 300s shows 5s as dominant.
+>
+> ⚠️ **CHANGES badge fires when more than one real (non-N/A) interval was observed** for a node, even if the non-dominant interval count is very small. Nodes with a single stable interval show **no badge** — STABLE is intentionally not shown since interval changes are normal on a live network.
+
+**Below the cards:** Stacked horizontal bar chart — "Estimated Time per PLI Interval". Each row is one node; each colored segment is an interval. Duration computed from consecutive message gaps capped at 3× the interval. N/A gaps bridged when same interval appears on both sides.
 
 ### 3. TX / RX Analysis (`txrx`)
 - **Chat Message TX/RX — What the Logs Can Tell Us** — explanatory section on data limitations
@@ -112,11 +145,11 @@ Displayed at all times above the tab bar. One KPI card per metric.
 - **Radio Lifetime Uptime** — all-time cumulative firmware counter (not session duration); bar chart; captured at each stat snapshot
 
 ### 5. Thermal (`thermal`)
-- **PA Temperature Over Time** — line chart per device; °F; thresholds: yellow = 113°F caution, red = 131°F peak
+- **PA Temperature Over Time** — line chart per device; °F; thresholds: yellow = 113°F caution, red = 131°F peak. X-axis uses **normalized session progress (0–100%)** per device so sessions of different lengths all render fully across the chart width.
 - **Peak Temperature by Device** — bar chart; highlight max per device
 
 ### 6. Battery (`battery`)
-- **Battery Level Over Time** — line chart per device; %; red threshold line at 30%
+- **Battery Level Over Time** — line chart per device; %; red threshold line at 30%. X-axis uses **normalized session progress (0–100%)** — same approach as Thermal.
 - **Minimum Battery Recorded** — bar chart; lowest % reached per device
 
 ### 7. Hop Count (`hops`)
@@ -146,11 +179,14 @@ Displayed at all times above the tab bar. One KPI card per metric.
 - **App crash detection** is not possible from diagnostic log format v1 — no crash markers present; surface this limitation honestly in the Sessions tab
 - **Health Score dimensions** not yet fully defined — placeholder radar chart in reference implementation
 - **Topology tab** — Alpha/Beta feature; see Tab 11. Accuracy is inherently limited by what the logs can surface — the hardest data point in the dashboard to get right; must be clearly labeled as experimental in the UI
-- **Multi-log upload** — reference HTML is a static export; dynamic React UI will need file upload supporting multiple logs simultaneously
+- **Multi-log upload** — supported; drag-and-drop or file picker; multiple files processed simultaneously
+- **Duplicate log detection** — files with matching `radio_serial + session_start + session_end` are deduplicated automatically; only first occurrence used. Handles named files (`RSO_HagenM.txt`) loaded alongside auto-exported equivalents (`diagnostic_2026*.txt`).
+- **Time window filtering** — client-side; filters all time-series arrays (`received_messages`, `system_samples`, `ble_fail_events`, `tx_events`, `atak_messages`, `atak_health_samples`). Computable summary fields recomputed from filtered arrays; static fields retain parse-time values.
+- **Chart time axis** — line charts use per-device normalized session-progress axis (0–100%) rather than shared absolute time axis, ensuring sessions of very different lengths all render fully.
 
 ---
 
-_Last updated: 2026-05-20_
+_Last updated: 2026-05-22_
 
 ---
 
@@ -192,11 +228,14 @@ _Last updated: 2026-05-20_
 
 ---
 
-_Last updated: 2026-05-20_
+_Last updated: 2026-05-22_
 
 ---
 
 ## To Do / Backlog
+
+### Time Window Filtering — ✅ Implemented
+Two-step upload flow: drop files → app scans timestamps client-side → dual-handle range slider with hour-level snapping. Start handle snaps down to hour, end snaps up (2:30–5:30 → 2:00–6:00). Adaptive tick marks: every 1hr if ≤24hr span, every 6hr for multi-day. Selected window displayed as header badge with ✕ to clear. Filtering recomputes summaries client-side.
 
 ### Session Persistence
 Allow a user to save a parsed session so it can be retrieved later and compared alongside other test data.

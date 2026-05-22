@@ -179,6 +179,7 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             }
             for t in r.tx_events
         ],
+        "contacts": r.contacts,  # {uuid: callsign} from ContactManager (RSDK only)
     }
 
     # ── ATAK-specific fields ──────────────────────────────────────────────────
@@ -295,6 +296,12 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             "session_count":      len(r.session_gaps) + 1,
             "final_chat_sent":    r.final_message_counts.chat_sent if r.final_message_counts else None,
             "final_chat_recv":    r.final_message_counts.chat_received if r.final_message_counts else None,
+            # RSDK-specific network identity
+            "contact_count":      len(r.contacts),  # unique peers discovered via ContactManager
+            "contact_names":      sorted(set(r.contacts.values())),  # list of peer callsigns
+            "tx_final_ack":       sum(1 for t in r.tx_events if t.outcome == "final_ack"),
+            "tx_nack":            sum(1 for t in r.tx_events if t.outcome == "nack"),
+            "tx_timeout":         sum(1 for t in r.tx_events if t.outcome == "timeout"),
         }
 
     return base

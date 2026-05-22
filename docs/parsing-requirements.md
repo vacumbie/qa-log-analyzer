@@ -304,7 +304,7 @@ All parseable data comes from lines tagged `I flutter` (Flutter app output):
 
 ---
 
-_Last updated: 2026-05-20_
+_Last updated: 2026-05-22_
 
 ---
 
@@ -582,9 +582,12 @@ Example:
 
 | Event | Pattern | Notes |
 |-------|---------|-------|
-| Final ACK received | `SRC: Final ACK received, message fully delivered` | Unicast confirmed |
-| Final ACK created | `Creating final ack for message: <id>` | This device acking |
-| Keep-alive ACK | `DST: Source is requesting a keep alive ack` | Mid-transfer ACK |
+| Final ACK | `SRC: Final ACK received, message fully delivered` | Unicast confirmed delivered. No message ID in line — stored as empty string. |
+| Keep-alive ACK | `SRC: Keep-alive ACK received. Segment ID: N msgId: N` | Mid-transfer ACK. `msgId` captured as `message_id`. |
+
+> ⚠️ **No timeout-outcome lines exist.** `"expected timeout of Xms"` (GRIP_SENDER) is a send-start log, not a delivery failure. No `outcome = "timeout"` events are produced.
+>
+> ⚠️ **NACKs on iOS** surface via the `NACK` component tag (same as Android), not via `GRIP_Receiver`.
 
 #### Radio Error (from `Radio` lines)
 
@@ -616,7 +619,7 @@ Example:
 - **`systemTemperature=0`** on first connect is a placeholder, not a real reading — cannot distinguish from a genuine 0°C reading without context
 - **`reflectedPowerRatio=255`** meaning is not fully documented; appears as a sentinel for "not yet valid"
 - **Contact callsigns** are available via `ContactManager` lines but not currently parsed by `rsdk.py`
-- **GRIP ACK events** (Final ACK, keep-alive ACK) are present in `GRIP_Receiver` lines but use different patterns than the `SendMessageResponse` patterns currently targeted by the parser
+- ✅ **TX pattern bug fixed:** `rsdk.py` previously targeted `SendMessageResponse.*FINAL_ACK` etc. — patterns that don't exist in the logs. Now correctly matches `GRIP_Receiver` lines: `"Final ACK received, message fully delivered"` and `"Keep-alive ACK received. Segment ID: N msgId: N"`. NACKs handled via `component == "NACK"` (unchanged).
 - **`Send_Defferred`** and `Remaining_messages` components contain potentially useful data not currently captured
 
 ### Sample File Observations (rsdk_log_JonathaniOS.txt)
@@ -734,7 +737,8 @@ All iOS RSDK parsing rules apply. Android-specific additions:
 ### Known Limitations — Pro+ Android RSDK Log
 
 - **⚠️ PA Temperature bug** — same as iOS: `_SYS_TEMP_RE` in `rsdk.py` will not match `powerAmpTemperature=` on Android either
-- **NACK parsing not implemented** — `rsdk.py` currently targets `SendMessageResponse.*NACK` patterns but Android surfaces NACKs as a dedicated `NACK:` component with richer detail; current patterns may not fire
+- ✅ **NACK parsing fixed:** `rsdk.py` previously targeted `SendMessageResponse.*NACK` patterns that don't exist in Android logs. NACKs are correctly handled via the `component == "NACK"` path, which was already working. The `SendMessageResponse` patterns have been removed.
+- ✅ **PA Temperature bug fixed (both platforms):** `_SYS_TEMP_RE` updated to match `powerAmpTemperature=` — temperature data now captured correctly for both iOS and Android RSDK logs.
 - **`ContactManager` empty UUID warnings** — `Tried to update contact storage but sender uuid was empty` appears frequently; contact lookups may be incomplete for some messages
 - **`reflectedPowerRatio` meaning** — real values observed (4–10) but no documentation found on what range is normal vs anomalous
 
