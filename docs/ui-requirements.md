@@ -193,3 +193,29 @@ _Last updated: 2026-05-20_
 ---
 
 _Last updated: 2026-05-20_
+
+---
+
+## To Do / Backlog
+
+### Session Persistence
+Allow a user to save a parsed session so it can be retrieved later and compared alongside other test data.
+
+**User story:** As a QA engineer, I want to save a parsed log session by name (e.g. "TW Field Exercise Apr 27") so I can reload it in a future session without re-uploading the original log files, and compare it against other saved sessions.
+
+**Scope:**
+- Save the full parsed result (the JSON returned by `POST /parse/`) with a user-defined name and timestamp
+- List saved sessions on the landing page or in a sidebar panel
+- Load a saved session back into the dashboard exactly as if the logs were just uploaded
+- Allow multiple saved sessions to be loaded simultaneously for cross-exercise comparison
+- Delete saved sessions
+
+**Implementation notes:**
+- Backend: extend `api/routes/export.py` session store with persistence (file-based JSON or SQLite — no database server needed for a local tool)
+- Frontend: session list UI on the landing page, save button in the header when results are loaded
+- Consider naming convention: exercise name + date + device count (e.g. "TW Exercise · Apr 27 · 4 devices")
+- Saved sessions should include the original source filenames for traceability
+
+**Dependencies:** Requires API session store to persist beyond in-memory (currently lost on server restart)
+
+**Priority:** Deferred — capture only

@@ -12,17 +12,39 @@
   --green:    #00e5a0;
   --yellow:   #ffd166;
   --red:      #ff4757;
+  --purple:   #c77dff;
   --mono:     'Share Tech Mono', monospace;
 }
 
 html, body, #root {
   height: 100%;
-  background: var(--bg);
   color: var(--text);
   font-family: 'Rajdhani', 'Segoe UI', sans-serif;
   font-size: 14px;
 }
 
+/* Backdrop applied to body */
+body {
+  background-color: #1a1f1a;
+  background-image: url('/forterra_backdrop.jpg');
+  background-size: cover;
+  background-position: center top;
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+
+/* Dark overlay — light at top so backdrop logos bleed through, darker below for content */
+#root {
+  background: linear-gradient(
+    180deg,
+    rgba(5, 8, 15, 0.45) 0%,
+    rgba(5, 8, 15, 0.75) 25%,
+    rgba(5, 8, 15, 0.93) 50%,
+    rgba(5, 8, 15, 0.97) 100%
+  );
+}
+
+/* Panels stay dark/opaque */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }

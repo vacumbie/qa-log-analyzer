@@ -111,8 +111,8 @@ export default function FileUpload({ onFiles, loading, error, variant = 'header'
       <>
         <div style={{ maxWidth: 520, margin: '0 auto', width: '100%', textAlign: 'center' }}>
           <div style={{ fontSize: 42, marginBottom: 16 }}>📡</div>
-          <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#c8ddf4', marginBottom: 8 }}>
-            goTenna Log Analyzer
+          <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 28, fontWeight: 400, letterSpacing: '0.04em', color: '#e8f4ff', marginBottom: 8 }}>
+            go<span style={{ color: '#e8f4ff' }}>Tenna</span> Log Parser
           </div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', marginBottom: 28 }}>
             Upload diagnostic, RSDK, or ATAK log files to begin analysis

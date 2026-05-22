@@ -413,15 +413,14 @@ export default function App() {
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <header style={{
-        padding: '14px 36px', borderBottom: '1px solid var(--border2)', flexShrink: 0,
+        padding: '14px 36px', borderBottom: 'none', flexShrink: 0,
         background: 'linear-gradient(180deg,#08111f 0%,transparent 100%)',
         backgroundImage: 'repeating-linear-gradient(90deg,transparent,transparent 40px,#ffffff03 40px,#ffffff03 41px)',
         display: 'flex', alignItems: 'center', gap: 20,
       }}>
-        <div>
-          <div style={{ fontSize: 9, fontFamily: 'var(--mono)', color: C.muted, letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: 2 }}>goTenna Mesh · Log Analysis</div>
-          <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#e8f4ff', fontFamily: "'Barlow Condensed',sans-serif" }}>
-            Log <span style={{ color: 'var(--accent)' }}>Analyzer</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <div style={{ fontSize: 9, fontFamily: 'var(--mono)', color: C.muted, letterSpacing: '0.15em', textTransform: 'uppercase' }}>
+            goTenna · Mesh Log Analysis · Autonomous Mission Systems
           </div>
         </div>
 
