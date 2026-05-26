@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from parser.diagnostic import parse_diagnostic_log
 from parser.rsdk import parse_rsdk_log
 from parser.atak import parse_atak_log
+from parser.relay_manager import parse_relay_manager_log
 from parser.models import ParseResult
 
 router = APIRouter(prefix="/parse", tags=["parse"])
@@ -26,16 +27,17 @@ router = APIRouter(prefix="/parse", tags=["parse"])
 def _detect_format(filename: str, content: str) -> str:
     """
     Heuristically detect log format from filename and content.
-    Returns 'atak', 'diagnostic', or 'rsdk'.
+    Returns 'atak', 'relay_manager', 'diagnostic', or 'rsdk'.
 
     Detection order:
-      1. ATAK  — filename starts with 'diagnostic_ATAK_' or content is JSON
-         with ATAK-specific fields (logId, connectionState, appVersion)
-      2. RSDK  — filename contains 'rsdk' or content has RSDK line markers
-      3. Diagnostic — fallback (goTenna Pro+ block format)
+      1. ATAK          — filename starts with 'diagnostic_ATAK_' or content is JSON
+                         with ATAK-specific fields (logId, connectionState, appVersion)
+      2. Relay Manager — filename or content signals the goTenna Relay Manager app
+      3. RSDK          — filename contains 'rsdk' or content has RSDK line markers
+      4. Diagnostic    — fallback (goTenna Pro+ block format)
     """
     name = filename.lower()
-    snippet = content[:500]
+    snippet = content[:2000]   # wider window for relay manager detection
 
     # ── ATAK detection ────────────────────────────────────────────────────────
     # Filename convention: diagnostic_ATAK_<CALLSIGN>_<GID>_<DATE>.log
@@ -49,6 +51,28 @@ def _detect_format(filename: str, content: str) -> str:
         or '"deliveryStatus"' in snippet
     ):
         return "atak"
+
+    # ── Relay Manager detection ───────────────────────────────────────────────
+    # Filename conventions used in the field:
+    if any(kw in name for kw in (
+        "networkpolling",
+        "scheduledhealth",
+        "relaymanager",
+        "relay_manager",
+        "relay_health",
+    )):
+        return "relay_manager"
+    # Content signals: the Relay Manager package name or io_stats PID marker
+    if "na.relaymanager(" in content or "com.gotenna.relaymanager" in content:
+        return "relay_manager"
+    # Secondary content signal: Services Plugin emitting relayHealthRequestCall
+    if "relayHealthRequestCall" in content:
+        return "relay_manager"
+    # Tertiary: AndroidBleRadio + Services Plugin combination is present in both
+    # RSDK and Relay Manager logs, but "Services Plugin" alone only appears in
+    # Relay Manager logs (RSDK uses component tags like "Radio", "IosBleRadio").
+    if "Services Plugin" in snippet and "AndroidBleRadio" in snippet:
+        return "relay_manager"
 
     # ── RSDK detection ────────────────────────────────────────────────────────
     if "rsdk" in name or "rsdk_log" in name:
@@ -179,7 +203,43 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             }
             for t in r.tx_events
         ],
-        "contacts": r.contacts,  # {uuid: callsign} from ContactManager (RSDK only)
+        "contacts": r.contacts,
+        "grip_messages": [
+            {
+                "timestamp":      g.timestamp,
+                "direction":      g.direction,
+                "msg_type":       g.msg_type,
+                "msg_type_label": g.msg_type_label,
+                "msg_id":         g.msg_id,
+                "src_gid":        g.src_gid,
+                "dst_gid":        g.dst_gid,
+                "app_id":         g.app_id,
+                "seq_no":         g.seq_no,
+                "is_first_packet": g.is_first_packet,
+                "is_ack":         g.is_ack,
+                "requires_ack":   g.requires_ack,
+                "is_periodic":    g.is_periodic,
+                "rep_counter":    g.rep_counter,
+                "segment_size":   g.segment_size,
+                "hops":           g.hops,
+                "rssi":           g.rssi,
+                "radio_serial":   g.radio_serial,
+            }
+            for g in r.grip_messages
+        ],
+        "grip_transfers": [
+            {
+                "msg_id":          t.msg_id,
+                "radio_serial":    t.radio_serial,
+                "start_timestamp": t.start_timestamp,
+                "end_timestamp":   t.end_timestamp,
+                "delivery_ms":     t.delivery_ms,
+                "outcome":         t.outcome,
+                "max_rep_counter": t.max_rep_counter,
+                "segment_count":   t.segment_count,
+            }
+            for t in r.grip_transfers
+        ],
     }
 
     # ── ATAK-specific fields ──────────────────────────────────────────────────
@@ -197,67 +257,99 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
         ]
         base["atak_health_samples"] = [
             {
-                "timestamp":                    h.timestamp,
-                "serial_number":                h.serial_number,
-                "connection_state":             h.connection_state,
-                "battery_pct":                  h.battery_pct,
-                "is_charging":                  h.is_charging,
-                "connection_type":              h.connection_type,
-                "mode":                         h.mode,
-                "firmware_version":             h.firmware_version,
-                "stored_messages":              h.stored_messages,
-                "pa_temp_c":                    h.pa_temp_c,
-                "pa_temp_f":                    round(h.pa_temp_c * 9 / 5 + 32) if h.pa_temp_c is not None else None,
-                "system_temp_c":                h.system_temp_c,
-                "system_temp_f":                round(h.system_temp_c * 9 / 5 + 32) if h.system_temp_c is not None else None,
-                "transmit_power_differential":  h.transmit_power_differential,
-                "hardware_version":             h.hardware_version,
-                "bootloader_version":           h.bootloader_version,
-                "chip_architecture":            h.chip_architecture,
-                "error_code":                   h.error_code,
-                "gid":                          h.gid,
+                "timestamp":                   h.timestamp,
+                "serial_number":               h.serial_number,
+                "connection_state":            h.connection_state,
+                "battery_pct":                 h.battery_pct,
+                "is_charging":                 h.is_charging,
+                "connection_type":             h.connection_type,
+                "mode":                        h.mode,
+                "firmware_version":            h.firmware_version,
+                "stored_messages":             h.stored_messages,
+                "pa_temp_c":                   h.pa_temp_c,
+                "pa_temp_f":                   round(h.pa_temp_c * 9 / 5 + 32) if h.pa_temp_c is not None else None,
+                "system_temp_c":               h.system_temp_c,
+                "system_temp_f":               round(h.system_temp_c * 9 / 5 + 32) if h.system_temp_c is not None else None,
+                "transmit_power_differential": h.transmit_power_differential,
+                "hardware_version":            h.hardware_version,
+                "bootloader_version":          h.bootloader_version,
+                "chip_architecture":           h.chip_architecture,
+                "error_code":                  h.error_code,
+                "gid":                         h.gid,
             }
             for h in r.atak_health_samples
         ]
         base["atak_messages"] = [
             {
-                "timestamp":          m.timestamp,
-                "log_id":             m.log_id,
-                "message_timestamp":  m.message_timestamp,
-                "is_sender":          m.is_sender,
-                "sender_gid":         m.sender_gid,
-                "delivery_status":    m.delivery_status,
-                "segment_count":      m.segment_count,
-                "open_segments":      m.open_segments,
-                "retry_count":        m.retry_count,
-                "delivery_time_ms":   m.delivery_time_ms,
-                "message_protocol":   m.message_protocol,
-                "message_type":       m.message_type,
+                "timestamp":           m.timestamp,
+                "log_id":              m.log_id,
+                "message_timestamp":   m.message_timestamp,
+                "is_sender":           m.is_sender,
+                "sender_gid":          m.sender_gid,
+                "delivery_status":     m.delivery_status,
+                "segment_count":       m.segment_count,
+                "open_segments":       m.open_segments,
+                "retry_count":         m.retry_count,
+                "delivery_time_ms":    m.delivery_time_ms,
+                "message_protocol":    m.message_protocol,
+                "message_type":        m.message_type,
                 "message_object_type": m.message_object_type,
-                "pli_interval":       m.pli_interval,
-                "file_name":          m.file_name,
-                "receiver_gid":       m.receiver_gid,
-                "hop_count":          m.hop_count,
-                "rssi":               m.rssi,
-                "rssi_is_valid":      m.rssi_is_valid,
+                "pli_interval":        m.pli_interval,
+                "file_name":           m.file_name,
+                "receiver_gid":        m.receiver_gid,
+                "hop_count":           m.hop_count,
+                "rssi":                m.rssi,
+                "rssi_is_valid":       m.rssi_is_valid,
             }
             for m in r.atak_messages
         ]
         base["atak_events"] = [
             {
-                "timestamp":       e.timestamp,
-                "event_type":      e.event_type,
-                "serial_number":   e.serial_number,
-                "connection_type": e.connection_type,
-                "power_watts":     e.power_watts,
+                "timestamp":        e.timestamp,
+                "event_type":       e.event_type,
+                "serial_number":    e.serial_number,
+                "connection_type":  e.connection_type,
+                "power_watts":      e.power_watts,
                 "pli_interval_sec": e.pli_interval_sec,
-                "pli_is_distance": e.pli_is_distance,
-                "pli_auto_send":   e.pli_auto_send,
-                "bandwidth_khz":   e.bandwidth_khz,
-                "channels":        e.channels,
+                "pli_is_distance":  e.pli_is_distance,
+                "pli_auto_send":    e.pli_auto_send,
+                "bandwidth_khz":    e.bandwidth_khz,
+                "channels":         e.channels,
             }
             for e in r.atak_events
         ]
+
+    # ── Relay Manager-specific fields ─────────────────────────────────────────
+    if r.log_format == "relay_manager":
+        base["relay_manager"] = {
+            "subtype":             r.relay_manager_subtype,
+            "environment":         r.relay_manager_environment,
+            "app_pid":             r.relay_manager_app_pid,
+            "ble_address":         r.relay_manager_ble_address,
+            "relay_serial":        r.device.radio_serial,
+            "health_request_count": len(r.relay_health_requests),
+            "health_requests": [
+                {
+                    "timestamp":          req.timestamp,
+                    "internal_timestamp": req.internal_timestamp,
+                    "ble_payload":        req.ble_payload,
+                }
+                for req in r.relay_health_requests
+            ],
+            "notification_counts": {
+                str(code): count
+                for code, count in r.relay_manager_notification_counts.items()
+            },
+            "events": [
+                {
+                    "timestamp":          ev.timestamp,
+                    "internal_timestamp": ev.internal_timestamp,
+                    "event_type":         ev.event_type,
+                    "raw_message":        ev.raw_message,
+                }
+                for ev in r.relay_manager_events
+            ],
+        }
 
     # ── Computed summaries for the UI ─────────────────────────────────────────
     if r.log_format == "atak":
@@ -281,6 +373,44 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             "partially_received": sum(1 for m in r.atak_messages if m.delivery_status == "PARTIALLY_RECEIVED"),
             "negative_delivery_time_count": sum(1 for m in r.atak_messages if m.delivery_time_ms is not None and m.delivery_time_ms < 0),
         }
+
+    elif r.log_format == "relay_manager":
+        # Compute average polling interval for the summary
+        avg_interval_sec: float | None = None
+        reqs = r.relay_health_requests
+        if len(reqs) >= 2:
+            try:
+                from datetime import datetime as _dt
+                _fmt = "%Y-%m-%d %H:%M:%S.%f"
+                dts = [_dt.strptime(req.timestamp, _fmt) for req in reqs]
+                dts.sort()
+                span = (dts[-1] - dts[0]).total_seconds()
+                avg_interval_sec = round(span / (len(dts) - 1), 1)
+            except (ValueError, ZeroDivisionError):
+                pass
+
+        ncounts = r.relay_manager_notification_counts
+        base["summary"] = {
+            "health_request_count":     len(reqs),
+            "avg_interval_sec":         avg_interval_sec,
+            "subtype":                  r.relay_manager_subtype,
+            "environment":              r.relay_manager_environment,
+            "response_ready_count":     sum(
+                1 for e in r.relay_manager_events
+                if e.event_type == "health_response_ready"
+            ),
+            "device_alert_count":       sum(
+                1 for e in r.relay_manager_events
+                if e.event_type == "device_alert"
+            ),
+            "battery_event_count":      sum(
+                1 for e in r.relay_manager_events
+                if e.event_type == "battery_state_changed"
+            ),
+            "dominant_notification_type": max(ncounts, key=ncounts.get) if ncounts else None,
+            "total_notifications":       sum(ncounts.values()),
+        }
+
     else:
         base["summary"] = {
             "total_messages":     len(r.received_messages),
@@ -296,12 +426,32 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             "session_count":      len(r.session_gaps) + 1,
             "final_chat_sent":    r.final_message_counts.chat_sent if r.final_message_counts else None,
             "final_chat_recv":    r.final_message_counts.chat_received if r.final_message_counts else None,
-            # RSDK-specific network identity
-            "contact_count":      len(r.contacts),  # unique peers discovered via ContactManager
-            "contact_names":      sorted(set(r.contacts.values())),  # list of peer callsigns
+            "contact_count":      len(r.contacts),
+            "contact_names":      sorted(set(r.contacts.values())),
             "tx_final_ack":       sum(1 for t in r.tx_events if t.outcome == "final_ack"),
             "tx_nack":            sum(1 for t in r.tx_events if t.outcome == "nack"),
             "tx_timeout":         sum(1 for t in r.tx_events if t.outcome == "timeout"),
+            # GRIP transfer summary
+            "grip_transfer_count":     len(r.grip_transfers),
+            "grip_delivered_count":    sum(1 for t in r.grip_transfers if t.outcome == "delivered"),
+            "grip_cancelled_count":    sum(1 for t in r.grip_transfers if t.outcome == "cancelled"),
+            "grip_incomplete_count":   sum(1 for t in r.grip_transfers if t.outcome == "incomplete"),
+            "grip_avg_delivery_ms":    round(
+                sum(t.delivery_ms for t in r.grip_transfers if t.delivery_ms is not None) /
+                max(1, sum(1 for t in r.grip_transfers if t.delivery_ms is not None)), 1
+            ) if any(t.delivery_ms is not None for t in r.grip_transfers) else None,
+            "grip_retransmit_count":   sum(1 for g in r.grip_messages if g.rep_counter > 0),
+            "grip_broadcast_count":    sum(1 for g in r.grip_messages if g.msg_type == 2 and g.direction == "outgoing"),
+            "grip_private_count":      sum(1 for g in r.grip_messages if g.msg_type == 0 and g.direction == "outgoing"),
+            # Incoming hop/rssi data (genuine RF routing data)
+            "grip_avg_hops":  round(
+                sum(g.hops for g in r.grip_messages if g.hops is not None) /
+                max(1, sum(1 for g in r.grip_messages if g.hops is not None)), 2
+            ) if any(g.hops is not None for g in r.grip_messages) else None,
+            "grip_avg_rssi":  round(
+                sum(g.rssi for g in r.grip_messages if g.rssi is not None) /
+                max(1, sum(1 for g in r.grip_messages if g.rssi is not None)), 1
+            ) if any(g.rssi is not None for g in r.grip_messages) else None,
         }
 
     return base
@@ -313,7 +463,9 @@ async def parse_logs(files: list[UploadFile] = File(...)) -> dict:
     Upload one or more log files. Returns an array of parsed results.
 
     Supports goTenna Pro+ diagnostic logs, RSDK iOS/Android logs,
-    and ATAK plug-in logs (regular and enhanced).
+    ATAK plug-in logs (regular and enhanced), and Relay Manager logs
+    (networkPolling and scheduledHealthRequest sub-types).
+
     Format is auto-detected from filename and content.
     """
     if not files:
@@ -328,7 +480,6 @@ async def parse_logs(files: list[UploadFile] = File(...)) -> dict:
 
         fmt = _detect_format(upload.filename or "", text)
 
-        # Write to a temp file so the parsers can use Path
         suffix = ".log" if fmt == "atak" else ".txt"
         with tempfile.NamedTemporaryFile(
             suffix=suffix, delete=False, mode="w", encoding="utf-8"
@@ -341,6 +492,8 @@ async def parse_logs(files: list[UploadFile] = File(...)) -> dict:
                 result = parse_rsdk_log(tmp_path)
             elif fmt == "atak":
                 result = parse_atak_log(tmp_path)
+            elif fmt == "relay_manager":
+                result = parse_relay_manager_log(tmp_path)
             else:
                 result = parse_diagnostic_log(tmp_path)
             result.source_filename = upload.filename or result.source_filename

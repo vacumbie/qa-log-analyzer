@@ -18,6 +18,7 @@ const TABS = [
   { id:'rssi',      label:'RSSI' },
   { id:'chat',      label:'Chat' },
   { id:'health',    label:'Health Score' },
+  { id:'relay-health', label:'Relay Health', relayOnly: true },
   { id:'atak',      label:'ATAK', atakOnly: true },
 ]
 
@@ -76,14 +77,30 @@ function KpiCard({ label, value, sub, color = C.accent, tooltip = null }) {
 // ── KPI row ───────────────────────────────────────────────────────────────────
 
 function KpiRow({ results }) {
-  // Hop counts — diagnostic and ATAK only (RSDK excluded — not genuine RF data)
+  // When all loaded logs are relay_manager format, the standard KPI cards don't
+  // apply (no RF messages, PLI, chat, etc.). Show a compact relay summary instead.
+  const allRelay = results.length > 0 && results.every(r => r.log_format === 'relay_manager')
+  if (allRelay) return <RelayKpiRow results={results} />
+
+  // Hop counts — diagnostic, ATAK, and RSDK via GRIP_Receiver incoming messages
   const allHops = results.flatMap(r => {
-    if (r.log_format === 'atak') return (r.atak_messages || []).filter(m => !m.is_sender && m.hop_count).map(m => m.hop_count)
-    if (r.log_format === 'diagnostic') return (r.received_messages || []).map(m => m.hop_count).filter(Boolean)
-    return [] // RSDK excluded
+    if (r.log_format === 'atak')
+      return (r.atak_messages || []).filter(m => !m.is_sender && m.hop_count).map(m => m.hop_count)
+    if (r.log_format === 'diagnostic')
+      return (r.received_messages || []).map(m => m.hop_count).filter(Boolean)
+    if (r.log_format === 'rsdk') {
+      // GRIP_Receiver incoming fields lines carry genuine RF hop counts
+      return (r.grip_messages || [])
+        .filter(g => g.direction === 'incoming' && g.hops != null)
+        .map(g => g.hops)
+    }
+    return []
   })
   const avgHops = allHops.length ? (allHops.reduce((a, b) => a + b, 0) / allHops.length).toFixed(1) : null
-  const hopSub  = allHops.length ? 'diagnostic + ATAK only' : 'n/a for RSDK logs'
+  const hasGripHopsKpi = results.some(r => r.log_format === 'rsdk' && (r.grip_messages || []).some(g => g.hops != null))
+  const hopSub  = allHops.length
+    ? (hasGripHopsKpi ? 'diagnostic + ATAK + GRIP (RSDK)' : 'diagnostic + ATAK only')
+    : 'n/a — no hop data in loaded files'
 
   // Peak temp
   const peakTempF  = Math.max(0, ...results.map(r => r.summary?.peak_temp_f || 0))
@@ -567,7 +584,90 @@ function PliTab({ results }) {
   )
 }
 
+// ── GRIP delivery time histogram ─────────────────────────────────────────────
+function GripDeliveryChart({ transfers }) {
+  if (!transfers || !transfers.length) return null
+  const completed = transfers.filter(t => t.delivery_ms != null)
+  if (!completed.length) return null
+
+  // Bucket into bins: 0-500ms, 500-1000, 1000-2000, 2000-5000, 5000+
+  const BINS = [
+    { label: '<500ms',    min: 0,    max: 500   },
+    { label: '500ms–1s',  min: 500,  max: 1000  },
+    { label: '1–2s',      min: 1000, max: 2000  },
+    { label: '2–5s',      min: 2000, max: 5000  },
+    { label: '5s+',       min: 5000, max: Infinity },
+  ]
+  const counts = BINS.map(b => ({
+    ...b,
+    count: completed.filter(t => t.delivery_ms >= b.min && t.delivery_ms < b.max).length,
+  }))
+  const max = Math.max(...counts.map(b => b.count), 1)
+  const avg = Math.round(completed.reduce((s, t) => s + t.delivery_ms, 0) / completed.length)
+
+  return (
+    <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '16px 18px', marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}>
+        <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 14, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#c8ddf4' }}>
+          Delivery Time Distribution
+        </div>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted }}>
+          avg {avg.toLocaleString()}ms · {completed.length} transfers
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 80 }}>
+        {counts.map((b, i) => {
+          const pct = (b.count / max) * 100
+          const color = b.min >= 5000 ? C.red : b.min >= 2000 ? C.yellow : C.green
+          return (
+            <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted }}>{b.count || ''}</div>
+              <div style={{ width: '100%', background: 'var(--bg)', borderRadius: '3px 3px 0 0', height: 56, display: 'flex', alignItems: 'flex-end' }}>
+                <div style={{ width: '100%', height: `${Math.max(pct, b.count ? 4 : 0)}%`, background: color, opacity: 0.85, borderRadius: '3px 3px 0 0', transition: 'height 0.3s ease' }} />
+              </div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, textAlign: 'center' }}>{b.label}</div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function GripOutcomeBar({ transfers }) {
+  if (!transfers || !transfers.length) return null
+  const delivered  = transfers.filter(t => t.outcome === 'delivered').length
+  const cancelled  = transfers.filter(t => t.outcome === 'cancelled').length
+  const incomplete = transfers.filter(t => t.outcome === 'incomplete').length
+  const total = transfers.length
+  return (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+      {[
+        { label: 'Delivered',  count: delivered,  color: C.green },
+        { label: 'Cancelled',  count: cancelled,  color: C.red   },
+        { label: 'Incomplete', count: incomplete, color: C.yellow },
+      ].filter(x => x.count > 0).map(({ label, count, color }) => (
+        <div key={label} style={{ background: `${color}12`, border: `1px solid ${color}40`, borderRadius: 6, padding: '8px 14px', minWidth: 100 }}>
+          <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 24, fontWeight: 700, color, lineHeight: 1 }}>{count}</div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginTop: 3 }}>{label} · {Math.round(count/total*100)}%</div>
+        </div>
+      ))}
+      {transfers.some(t => t.max_rep_counter > 0) && (
+        <div style={{ background: `${C.yellow}12`, border: `1px solid ${C.yellow}40`, borderRadius: 6, padding: '8px 14px', minWidth: 100 }}>
+          <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 24, fontWeight: 700, color: C.yellow, lineHeight: 1 }}>
+            {transfers.filter(t => t.max_rep_counter > 0).length}
+          </div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginTop: 3 }}>Had retransmits</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function TxRxTab({ results }) {
+  const allGripTransfers = results.flatMap(r => r.grip_transfers || [])
+  const hasGrip = allGripTransfers.length > 0
+
   return (
     <div>
       <SectionHeader icon="📤" title="Sent vs Received" sub="App-reported cumulative totals" />
@@ -578,6 +678,47 @@ function TxRxTab({ results }) {
       <ChartPanel results={results} selectedPoints={['tx_outcomes']} />
       <SectionHeader icon="⚠️" title="Partially Received (ATAK only)" />
       <ChartPanel results={results} selectedPoints={['atak_partial_received']} />
+
+      {hasGrip && (
+        <>
+          <SectionHeader
+            icon="🔁"
+            title="GRIP Transfer Analysis"
+            sub="From GRIP_SENDER / GRIP_Receiver structured log fields — RSDK logs only"
+          />
+          <Note>
+            GRIP data is sourced from structured <code>Outgoing/Incoming message fields</code> log lines.
+            Delivery time = sender-side "File transmission started" → "File has been successfully delivered".
+            repCounter tracks retransmissions per segment; max 3 before firmware cancels the transfer.
+          </Note>
+          <GripOutcomeBar transfers={allGripTransfers} />
+          <GripDeliveryChart transfers={allGripTransfers} />
+
+          {/* Retransmit detail — only show if any occurred */}
+          {allGripTransfers.some(t => t.max_rep_counter > 0) && (
+            <>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8, marginTop: 4 }}>
+                Transfers with retransmissions
+              </div>
+              <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 16px', marginBottom: 16 }}>
+                {allGripTransfers.filter(t => t.max_rep_counter > 0).map((t, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '5px 0', borderBottom: '1px solid var(--bg2)' }}>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted, minWidth: 130 }}>{t.start_timestamp?.slice(5, 19)}</span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#94a3b8' }}>id {t.msg_id}</span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: t.max_rep_counter >= 2 ? C.red : C.yellow }}>
+                      max rep {t.max_rep_counter}/2
+                    </span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted }}>{t.segment_count != null ? `${t.segment_count} seg` : ''}</span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: t.delivery_ms != null ? C.green : C.muted }}>
+                      {t.delivery_ms != null ? `${t.delivery_ms.toLocaleString()}ms` : t.outcome}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
     </div>
   )
 }
@@ -637,26 +778,161 @@ function BatteryTab({ results }) {
 }
 
 function HopsTab({ results }) {
-  const hasRsdk = results.some(r => r.log_format === 'rsdk')
+  const hasRsdk   = results.some(r => r.log_format === 'rsdk')
+  const hasGripHops = results.some(r =>
+    (r.grip_messages || []).some(g => g.direction === 'incoming' && g.hops != null)
+  )
+
+  // Build a per-device hop summary from GRIP incoming messages
+  const gripHopSummary = React.useMemo(() => {
+    return results
+      .filter(r => r.log_format === 'rsdk')
+      .map(r => {
+        const incoming = (r.grip_messages || []).filter(g => g.direction === 'incoming' && g.hops != null)
+        if (!incoming.length) return null
+        const hops = incoming.map(g => g.hops)
+        const avg  = (hops.reduce((a, b) => a + b, 0) / hops.length).toFixed(1)
+        const dist = hops.reduce((acc, h) => { acc[h] = (acc[h] || 0) + 1; return acc }, {})
+        return {
+          serial: r.device?.radio_serial || r.source_filename,
+          avg,
+          dist,
+          count: incoming.length,
+        }
+      })
+      .filter(Boolean)
+  }, [results])
+
   return (
     <div>
-      <SectionHeader icon="🔁" title="Hop Count Distribution" sub="Diagnostic and ATAK logs only — RSDK hop count is not genuine RF routing data" />
-      {hasRsdk && <Note>⚠ RSDK logs are present but excluded — hop count in RSDK format does not reflect real RF mesh routing.</Note>}
+      <SectionHeader
+        icon="🔁"
+        title="Hop Count Distribution"
+        sub="Diagnostic · ATAK · RSDK via GRIP_Receiver incoming fields (genuine RF data)"
+      />
+      {hasRsdk && !hasGripHops && (
+        <Note>⚠ RSDK logs present but no GRIP_Receiver incoming fields found — hop count unavailable for these logs. Legacy SendMessageResponse hop count (SDK sequence counter) is excluded.</Note>
+      )}
+      {hasRsdk && hasGripHops && (
+        <Note>RSDK hop counts sourced from <code>GRIP_Receiver</code> incoming message fields — genuine RF mesh routing data. Distinct from legacy SDK sequence counter (excluded).</Note>
+      )}
       <ChartPanel results={results} selectedPoints={['hop_distribution']} />
       <SectionHeader icon="📊" title="Average Hop Count per Device" />
       <ChartPanel results={results} selectedPoints={['hop_avg']} />
+
+      {gripHopSummary.length > 0 && (
+        <>
+          <SectionHeader icon="📡" title="GRIP Hop Count Detail" sub="Per-device breakdown from RSDK GRIP_Receiver incoming lines" />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10 }}>
+            {gripHopSummary.map((s, i) => (
+              <div key={i} style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '14px 16px' }}>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 14, fontWeight: 700, color: PALETTE[i % PALETTE.length], marginBottom: 10 }}>
+                  {s.serial}
+                </div>
+                <div style={{ display: 'flex', gap: 16, marginBottom: 10 }}>
+                  <div>
+                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 28, fontWeight: 700, color: '#ff6b35', lineHeight: 1 }}>{s.avg}</div>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted }}>avg hops</div>
+                  </div>
+                  <div>
+                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 28, fontWeight: 700, color: '#94a3b8', lineHeight: 1 }}>{s.count}</div>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted }}>messages</div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {Object.entries(s.dist).sort((a,b)=>Number(a[0])-Number(b[0])).map(([hop, cnt]) => (
+                    <div key={hop} style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#94a3b8', background: 'var(--bg2)', borderRadius: 3, padding: '2px 7px' }}>
+                      {hop} hop{hop !== '1' ? 's' : ''}: {cnt}
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#334155', marginTop: 8 }}>Source: GRIP (RSDK)</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }
 
 function RssiTab({ results }) {
+  const hasGripRssi = results.some(r =>
+    (r.grip_messages || []).some(g => g.direction === 'incoming' && g.rssi != null)
+  )
+
+  // Per-device GRIP RSSI summary
+  const gripRssiSummary = React.useMemo(() => {
+    return results
+      .filter(r => r.log_format === 'rsdk')
+      .map(r => {
+        const incoming = (r.grip_messages || []).filter(g => g.direction === 'incoming' && g.rssi != null)
+        if (!incoming.length) return null
+        const vals = incoming.map(g => g.rssi)
+        const avg  = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length)
+        const min  = Math.min(...vals)
+        const max  = Math.max(...vals)
+        return {
+          serial: r.device?.radio_serial || r.source_filename,
+          avg, min, max,
+          count: incoming.length,
+        }
+      })
+      .filter(Boolean)
+  }, [results])
+
+  const rssiColor = (dbm) => dbm >= -70 ? C.green : dbm >= -85 ? C.yellow : C.red
+
   return (
     <div>
-      <SectionHeader icon="📡" title="RSSI by Hop Count" sub="Real dBm — diagnostic format stores as unsigned byte (value − 256)" />
+      <SectionHeader
+        icon="📡"
+        title="RSSI by Hop Count"
+        sub="Real dBm — diagnostic: unsigned byte (value − 256) · ATAK/RSDK GRIP: already signed dBm"
+      />
       <ChartPanel results={results} selectedPoints={['rssi_by_hop']} />
       <SectionHeader icon="📶" title="Average RSSI per Device" />
       <ChartPanel results={results} selectedPoints={['rssi_avg_device']} />
-      <Note>Diagnostic RSSI stored as unsigned byte (137–237). Real dBm = value − 256 (−119 to −19 dBm). ATAK RSSI values are already signed dBm. Sent-message RSSI (always 0) is excluded.</Note>
+      <Note>
+        Diagnostic RSSI stored as unsigned byte (137–237). Real dBm = value − 256 (−119 to −19 dBm).
+        ATAK and RSDK GRIP RSSI values are already signed dBm — no conversion needed.
+        Sent-message RSSI (always 0) is excluded.
+      </Note>
+
+      {hasGripRssi && gripRssiSummary.length > 0 && (
+        <>
+          <SectionHeader icon="📡" title="GRIP RSSI Detail" sub="From RSDK GRIP_Receiver incoming message fields — genuine RF signal strength" />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+            {gripRssiSummary.map((s, i) => (
+              <div key={i} style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '14px 16px' }}>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 14, fontWeight: 700, color: PALETTE[i % PALETTE.length], marginBottom: 10 }}>
+                  {s.serial}
+                </div>
+                <div style={{ display: 'flex', gap: 14, marginBottom: 6 }}>
+                  <div>
+                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 28, fontWeight: 700, color: rssiColor(s.avg), lineHeight: 1 }}>
+                      {s.avg} dBm
+                    </div>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted }}>avg RSSI</div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8 }}>
+                    <span style={{ color: C.muted }}>min </span>
+                    <span style={{ color: rssiColor(s.min) }}>{s.min} dBm</span>
+                  </div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8 }}>
+                    <span style={{ color: C.muted }}>max </span>
+                    <span style={{ color: rssiColor(s.max) }}>{s.max} dBm</span>
+                  </div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted }}>{s.count} msgs</div>
+                </div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#334155', marginTop: 8 }}>Source: GRIP (RSDK)</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -745,6 +1021,252 @@ function AtakTab({ results }) {
   )
 }
 
+
+// ── Relay Manager helpers ─────────────────────────────────────────────────────
+
+const NOTIF_LABELS = {
+  8:   'BLE keepalive',
+  9:   'BLE secondary event',
+  72:  'BLE poll heartbeat',
+  73:  'Health response ready',
+  74:  'Device alert',
+  75:  'Device alert variant',
+  104: 'Battery/charging change',
+}
+
+const NOTIF_COLORS = {
+  8:   '#6366f1',
+  9:   '#64748b',
+  72:  '#3b82f6',
+  73:  '#10b981',
+  74:  '#f59e0b',
+  75:  '#f59e0b',
+  104: '#8b5cf6',
+}
+
+const EVENT_COLORS = {
+  health_response_ready: '#10b981',
+  device_alert:          '#f59e0b',
+  battery_state_changed: '#8b5cf6',
+  empty_sender_uuid:     '#64748b',
+}
+
+const EVENT_LABELS = {
+  health_response_ready: 'Health Response Ready',
+  device_alert:          'Device Alert',
+  battery_state_changed: 'Battery State Changed',
+  empty_sender_uuid:     'Empty Sender UUID',
+}
+
+function RelayLimitationBanner({ parseErrors }) {
+  const limits = (parseErrors || []).filter(e => e.startsWith('DATA LIMITATION'))
+  if (!limits.length) return null
+  return (
+    <div style={{ background: '#1c1400', border: '1px solid #854d0e', borderRadius: 8, padding: '12px 16px', marginBottom: 20 }}>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#fbbf24', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>
+        ⚠️ Data Limitations
+      </div>
+      {limits.map((item, i) => (
+        <div key={i} style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#d97706', marginBottom: i < limits.length - 1 ? 6 : 0, paddingLeft: 12 }}>
+          • {item.replace('DATA LIMITATION — ', '')}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function RelayKpiRow({ results }) {
+  // Compact KPI strip shown in the Overview when all logs are relay_manager format
+  const totalRequests = results.reduce((n, r) => n + (r.summary?.health_request_count || 0), 0)
+  const totalResponses = results.reduce((n, r) => n + (r.summary?.response_ready_count || 0), 0)
+  const totalAlerts    = results.reduce((n, r) => n + (r.summary?.device_alert_count || 0), 0)
+  const subtypes = [...new Set(results.map(r => r.summary?.subtype).filter(Boolean))]
+  const envs     = [...new Set(results.map(r => r.summary?.environment).filter(Boolean))]
+
+  return (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '12px 36px', borderBottom: '1px solid var(--border2)', background: 'rgba(5,8,15,0.75)', flexShrink: 0, backdropFilter: 'blur(4px)' }}>
+      <KpiCard label="Logs Loaded"       value={results.length}   sub="relay manager format"          color='#22d3ee' />
+      <KpiCard label="Health Requests"   value={totalRequests}    sub="relayHealthRequestCall events"  color='#22d3ee' />
+      <KpiCard label="Responses Ready"   value={totalResponses}   sub="health response ready events"  color='#10b981' />
+      <KpiCard label="Device Alerts"     value={totalAlerts || '—'} sub="unsolicited pull-required alerts" color='#f59e0b' />
+      <KpiCard label="Sub-Type"          value={subtypes.join(' + ') || '—'} sub="auto-detected"      color='#6366f1' />
+      <KpiCard label="Environment"       value={envs.join(' / ').toUpperCase() || '—'} sub="stage confirmed · prod TBD" color={envs.includes('stage') ? '#22d3ee' : '#f59e0b'} />
+    </div>
+  )
+}
+
+function RelayNotifChart({ notifCounts }) {
+  // notifCounts is { "72": 6612, "73": 27, ... } — string keys from JSON
+  const entries = Object.entries(notifCounts || {})
+    .map(([code, count]) => ({ code: parseInt(code), count }))
+    .sort((a, b) => b.count - a.count)
+  if (!entries.length) return <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted }}>No notification data.</div>
+
+  const max = entries[0].count
+  return (
+    <div>
+      {entries.map(({ code, count }) => {
+        const label = NOTIF_LABELS[code] || `Type ${code}`
+        const color = NOTIF_COLORS[code] || '#64748b'
+        const pct   = Math.max(1, Math.round((count / max) * 100))
+        return (
+          <div key={code} style={{ marginBottom: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#94a3b8' }}>
+                <span style={{ color, marginRight: 6 }}>type {code}</span>{label}
+              </span>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted }}>{count.toLocaleString()}</span>
+            </div>
+            <div style={{ height: 4, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden' }}>
+              <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 2 }} />
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function RelayEventList({ events }) {
+  if (!events?.length) return <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted }}>No events recorded.</div>
+  // Show max 60 events
+  const shown = events.slice(0, 60)
+  return (
+    <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+      {shown.map((ev, i) => {
+        const color = EVENT_COLORS[ev.event_type] || C.muted
+        const label = EVENT_LABELS[ev.event_type] || ev.event_type
+        return (
+          <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '4px 0', borderBottom: '1px solid var(--bg2)' }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: color, marginTop: 4, flexShrink: 0 }} />
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted, minWidth: 135, flexShrink: 0 }}>{ev.timestamp?.slice(0, 19)}</span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color }}>{label}</span>
+          </div>
+        )
+      })}
+      {events.length > 60 && (
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted, padding: '6px 0' }}>
+          +{events.length - 60} more events
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RelayHealthTab({ results }) {
+  const relayResults = results.filter(r => r.log_format === 'relay_manager')
+  if (!relayResults.length) {
+    return (
+      <Note>No Relay Manager logs loaded. Upload a networkPolling or scheduledHealthRequest logcat .txt file to see relay health data.</Note>
+    )
+  }
+
+  return (
+    <div>
+      {relayResults.map((r, i) => {
+        const rm     = r.relay_manager || {}
+        const sum    = r.summary || {}
+        const color  = PALETTE[i % PALETTE.length]
+
+        const subtype = rm.subtype || sum.subtype || '—'
+        const env     = rm.environment || sum.environment || '—'
+        const envColor = env === 'stage' ? '#22d3ee' : '#f59e0b'
+
+        // Average interval label
+        const avgSec = sum.avg_interval_sec
+        const intervalLabel = avgSec
+          ? (avgSec >= 3600 ? `~${(avgSec/3600).toFixed(1)}h` : avgSec >= 60 ? `~${Math.round(avgSec/60)}m` : `~${Math.round(avgSec)}s`)
+          : '—'
+
+        return (
+          <div key={i} style={{ marginBottom: 24 }}>
+            {/* Session header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, paddingBottom: 10, borderBottom: `1px solid ${color}30` }}>
+              <div style={{ width: 3, height: 32, background: color, borderRadius: 2, flexShrink: 0 }} />
+              <div>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 16, fontWeight: 700, color }}>{r.source_filename}</div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 3, flexWrap: 'wrap' }}>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: envColor, background: `${envColor}15`, border: `1px solid ${envColor}40`, borderRadius: 3, padding: '1px 7px', textTransform: 'uppercase' }}>{env}</span>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#6366f1', background: '#6366f115', border: '1px solid #6366f140', borderRadius: 3, padding: '1px 7px' }}>{subtype || 'unknown subtype'}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Data limitations banner */}
+            <RelayLimitationBanner parseErrors={r.parse_errors} />
+
+            {/* Two-column layout */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+
+              {/* Session Info */}
+              <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: 16 }}>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 12 }}>Session Info</div>
+                {[
+                  ['Device Serial',  rm.relay_serial || r.device?.radio_serial || '—'],
+                  ['BLE Address',    rm.ble_address || '—'],
+                  ['App PID',        rm.app_pid || '—'],
+                  ['Session Start',  r.session_start?.slice(0, 19) || '—'],
+                  ['Session End',    r.session_end?.slice(0, 19)   || '—'],
+                  ['Gaps',           r.session_gaps?.length ? `${r.session_gaps.length} gap(s)` : 'none detected'],
+                ].map(([k, v]) => (
+                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid var(--bg2)' }}>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted }}>{k}</span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#94a3b8', maxWidth: '55%', textAlign: 'right', wordBreak: 'break-all' }}>{v}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Health Requests */}
+              <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: 16 }}>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 12 }}>Health Requests</div>
+                <div style={{ display: 'flex', gap: 20, marginBottom: 12 }}>
+                  <div>
+                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 28, fontWeight: 700, color: '#22d3ee', lineHeight: 1 }}>{sum.health_request_count ?? '—'}</div>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginTop: 2 }}>total requests</div>
+                  </div>
+                  <div>
+                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 28, fontWeight: 700, color: '#38bdf8', lineHeight: 1 }}>{intervalLabel}</div>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginTop: 2 }}>avg interval</div>
+                  </div>
+                  <div>
+                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 28, fontWeight: 700, color: '#10b981', lineHeight: 1 }}>{sum.response_ready_count ?? '—'}</div>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginTop: 2 }}>responses ready</div>
+                  </div>
+                </div>
+                {(rm.health_requests || []).length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {(rm.health_requests || []).map((req, j) => (
+                      <div key={j} style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 4, padding: '3px 8px', fontFamily: 'var(--mono)', fontSize: 8, color: '#22d3ee' }}>
+                        {req.timestamp?.slice(5, 19)}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Notification breakdown + event log side by side */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: 16 }}>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 12 }}>Firmware Notifications</div>
+                <RelayNotifChart notifCounts={rm.notification_counts} />
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#334155', marginTop: 10 }}>
+                  Types 72/8 = BLE keepalive · 73 = response ready · 74 = device alert · 104 = battery event
+                </div>
+              </div>
+
+              <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: 16 }}>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 12 }}>Event Log</div>
+                <RelayEventList events={rm.events} />
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── Tab content router ────────────────────────────────────────────────────────
 
 function TabContent({ tab, results }) {
@@ -758,8 +1280,9 @@ function TabContent({ tab, results }) {
     case 'hops':      return <HopsTab      results={results} />
     case 'rssi':      return <RssiTab      results={results} />
     case 'chat':      return <ChatTab      results={results} />
-    case 'health':    return <HealthTab    results={results} />
-    case 'atak':      return <AtakTab      results={results} />
+    case 'health':      return <HealthTab      results={results} />
+    case 'relay-health': return <RelayHealthTab results={results} />
+    case 'atak':         return <AtakTab        results={results} />
     default:          return null
   }
 }
@@ -909,12 +1432,14 @@ export default function App() {
     const cToF = c => c != null ? Math.round(c * 9 / 5 + 32) : null
 
     return results.map(r => {
-      const msgs    = (r.received_messages  || []).filter(m => inWindow(m.timestamp))
-      const samples = (r.system_samples     || []).filter(s => inWindow(s.timestamp))
-      const bleEvts = (r.ble_fail_events    || []).filter(b => inWindow(b.timestamp))
-      const txEvts  = (r.tx_events          || []).filter(t => inWindow(t.timestamp))
-      const atakMsg = (r.atak_messages      || []).filter(m => inWindow(m.timestamp))
-      const atakHlth= (r.atak_health_samples|| []).filter(h => inWindow(h.timestamp))
+      const msgs      = (r.received_messages  || []).filter(m => inWindow(m.timestamp))
+      const samples   = (r.system_samples     || []).filter(s => inWindow(s.timestamp))
+      const bleEvts   = (r.ble_fail_events    || []).filter(b => inWindow(b.timestamp))
+      const txEvts    = (r.tx_events          || []).filter(t => inWindow(t.timestamp))
+      const atakMsg   = (r.atak_messages      || []).filter(m => inWindow(m.timestamp))
+      const atakHlth  = (r.atak_health_samples|| []).filter(h => inWindow(h.timestamp))
+      const gripMsgs  = (r.grip_messages      || []).filter(g => inWindow(g.timestamp))
+      const gripXfers = (r.grip_transfers     || []).filter(t => inWindow(t.start_timestamp))
 
       // Recompute summary fields that derive from the filtered arrays
       const hops     = msgs.map(m => m.hop_count).filter(Boolean)
@@ -971,6 +1496,8 @@ export default function App() {
         tx_events:            txEvts,
         atak_messages:        atakMsg,
         atak_health_samples:  atakHlth,
+        grip_messages:        gripMsgs,
+        grip_transfers:       gripXfers,
         summary: { ...r.summary, ...recomputed },
       }
     })
@@ -1001,7 +1528,11 @@ export default function App() {
   }, [filteredResults])
 
   const activeResults = activeDevice !== null ? [dedupedResults[activeDevice]] : dedupedResults
-  const visibleTabs   = TABS.filter(t => !t.atakOnly || results.some(r => r.log_format === 'atak'))
+  const visibleTabs   = TABS.filter(t => {
+    if (t.atakOnly)   return results.some(r => r.log_format === 'atak')
+    if (t.relayOnly)  return results.some(r => r.log_format === 'relay_manager')
+    return true
+  })
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
@@ -1079,7 +1610,8 @@ export default function App() {
                 marginBottom: -1, transition: 'color 0.15s, border-color 0.15s',
               }}>
                 {t.label}
-                {t.atakOnly && <span style={{ marginLeft: 4, fontSize: 8, color: C.yellow, fontFamily: 'var(--mono)' }}>α</span>}
+                {t.atakOnly   && <span style={{ marginLeft: 4, fontSize: 8, color: C.yellow,   fontFamily: 'var(--mono)' }}>α</span>}
+                {t.relayOnly  && <span style={{ marginLeft: 4, fontSize: 8, color: '#22d3ee', fontFamily: 'var(--mono)' }}>📡</span>}
               </button>
             ))}
           </div>

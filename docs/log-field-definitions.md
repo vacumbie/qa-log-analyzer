@@ -12,6 +12,8 @@
 
 - [Format 1: goTenna Pro+ Diagnostic Log](#format-1-gotenna-pro-diagnostic-log)
 - [Format 2: RSDK iOS/Android SDK Log](#format-2-rsdk-iosandroid-sdk-log)
+  - [GRIP Message Fields](#grip-message-fields-grip_sender--grip_receiver)
+  - [GRIP Transfer Lifecycle](#grip-transfer-lifecycle)
 - [Format 3: Android ATAK Plug-in Log](#format-3-android-atak-plug-in-log)
 - [Derived / Computed Fields](#derived--computed-fields)
 - [Cross-Format Notes](#cross-format-notes)
@@ -270,6 +272,65 @@ TX outcome lines appear on the `GRIP_Receiver` component on both platforms. Ther
 
 ---
 
+
+### GRIP Message Fields (`GRIP_SENDER` / `GRIP_Receiver`)
+
+Parsed from structured `Outgoing message fields` and `Incoming message fields` log lines.
+One `GripMessage` record per line. Incoming lines (GRIP_Receiver) include `hops` and `rssi`.
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `MsgType` | integer | `grip_message.msg_type` | `0` = private · `2` = broadcast |
+| *(derived)* | string | `grip_message.msg_type_label` | `"private"` · `"broadcast"` · `"unknown(N)"` |
+| `SRC` | signed integer | `grip_message.src_gid` | Hashed GID — signed 32-bit; not reversible to full GID |
+| `DST` | signed integer | `grip_message.dst_gid` | Hashed GID; `0` for broadcast |
+| `appId` | integer | `grip_message.app_id` | SDK app ID |
+| `msgId` | integer | `grip_message.msg_id` | Matches `file id` in COMMANDHANDLER lines |
+| `seqNo` | integer | `grip_message.seq_no` | Reverse order — highest seqNo = first packet |
+| `isFirstPacket` | bool | `grip_message.is_first_packet` | `true` = highest seqNo packet |
+| `isAck` | bool | `grip_message.is_ack` | `true` = this is an ACK segment, not data |
+| `requiresAck` | bool | `grip_message.requires_ack` | `true` = receiver must send keep-alive ACK |
+| `isPeriodic` | bool | `grip_message.is_periodic` | `true` = periodic PLI broadcast |
+| `repCounter` | integer | `grip_message.rep_counter` | Retransmission count. `0` = first attempt. Max 3 before firmware cancels. |
+| `segment size` | integer | `grip_message.segment_size` | Segment byte size |
+| `hops` | integer | `grip_message.hops` | **Incoming only.** Genuine RF mesh hop count. Null on outgoing. |
+| `rssi` | integer | `grip_message.rssi` | **Incoming only.** Real dBm (signed). Null on outgoing. |
+| *(line serial)* | string | `grip_message.radio_serial` | From `Device - SERIAL` on the same line |
+| *(line direction)* | string | `grip_message.direction` | `"outgoing"` (GRIP_SENDER) · `"incoming"` (GRIP_Receiver) |
+
+> ⚠️ **SRC and DST are hashed GID values.** They are consistent across messages from the same node but cannot be reversed to the full 64-bit GID without a lookup. Use them for correlation, not identity.
+>
+> ⚠️ **hops and rssi on incoming lines are genuine RF data.** These are not SDK counters — they reflect actual mesh routing and signal strength. This is the first source of genuine hop count and RSSI in RSDK format logs.
+>
+> ⚠️ **repCounter tracks retransmissions per segment.** `repCounter = 1` means the segment was sent twice; `= 2` means three times (one more failure = firmware cancel). Monitor for `repCounter > 0` as a link quality indicator.
+
+---
+
+### GRIP Transfer Lifecycle
+
+Aggregated from `COMMANDHANDLER` and `GRIP_SENDER` lines. One `GripTransfer` record per file transfer.
+
+| Raw Log Pattern | Component | Parsed As | Model Field | Notes |
+|----------------|-----------|-----------|-------------|-------|
+| `File transmission started, file id: N` | `COMMANDHANDLER` | start event | `grip_transfer.start_timestamp` | Transfer start time on sender |
+| `File has been successfully delivered to destination, file id: N` | `COMMANDHANDLER` | end event | `grip_transfer.end_timestamp` | Transfer end time on sender |
+| `sent file msgId: N stopped with true in Nms earlyCancel: false` | `GRIP_SENDER` | duration | `grip_transfer.delivery_ms` | End-to-end delivery time in milliseconds |
+| `sent file msgId: N stopped with false ... earlyCancel: true` | `GRIP_SENDER` | cancelled | `grip_transfer.outcome = "cancelled"` | Transfer cancelled; link failure |
+| `Full grip file received! id: N number of segments: N` | `COMMANDHANDLER` | receiver done | `grip_transfer.segment_count` | Populated from receiver-side line |
+| *(EOF with open transfer)* | — | incomplete | `grip_transfer.outcome = "incomplete"` | Transfer started but no completion log found |
+
+| Field | Model Field | Notes |
+|-------|-------------|-------|
+| Computed | `grip_transfer.delivery_ms` | `end_timestamp − start_timestamp` in ms. Null if incomplete. |
+| Computed | `grip_transfer.outcome` | `"delivered"` · `"cancelled"` (earlyCancel=true) · `"incomplete"` |
+| Computed | `grip_transfer.max_rep_counter` | Max `repCounter` seen across all segments. `0` = clean. `2` = near-cancel. |
+
+> ⚠️ **delivery_ms reflects sender-side timing only.** The receiver assembles the file slightly later. For a cross-device view, correlate `grip_transfer.start_timestamp` on sender with `Full grip file received` timestamp on receiver.
+>
+> ⚠️ **segment_count comes from the receiver side.** If only a sender log is loaded, `segment_count` will be null.
+
+---
+
 ### Platform Detection (RSDK)
 
 | Log Content | Inferred Platform |
@@ -497,4 +558,4 @@ These fields are computed by the parser or API layer — they do not appear dire
 
 ---
 
-_Last updated: 2026-05-22_
+_Last updated: 2026-05-26_

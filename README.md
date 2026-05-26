@@ -2,10 +2,11 @@
 
 A local log parsing and visualization tool for goTenna mesh network diagnostic data.
 
-Supports three log formats:
+Supports four log formats:
 - **Diagnostic** — goTenna Pro+ app export (`diagnostic_*.txt`, named device files)
 - **RSDK** — Android/iOS SDK logs from field sessions (Pro+ app)
 - **ATAK** — Android ATAK plug-in logs (regular and enhanced)
+- **Relay Manager** — Android logcat dumps from the goTenna Relay Manager app (network polling and scheduled health check sub-types)
 
 ## Stack
 
@@ -64,6 +65,7 @@ qa-log-analyzer/
 │   ├── diagnostic.py         # Parses goTenna Pro+ diagnostic format
 │   ├── rsdk.py               # Parses RSDK iOS/Android SDK log format
 │   ├── atak.py               # Parses Android ATAK plug-in log format
+│   ├── relay_manager.py      # Parses Relay Manager Android logcat format
 │   └── models.py             # Shared dataclasses (ParseResult, SystemSample, etc.)
 ├── api/                      # FastAPI REST bridge
 │   ├── main.py               # App entry point — uvicorn main:app
@@ -126,6 +128,19 @@ qa-log-analyzer/
 - Delivery status: FULLY_RECEIVED, SENT, DELIVERED, PARTIALLY_RECEIVED
 - Hop count and RSSI (real RF data — signed dBm)
 - Device lifecycle events: connect/disconnect, power changes, PLI setting changes, frequency updates
+
+### Relay Manager format (Android logcat)
+- Log sub-type auto-detection: `networkPolling` vs `scheduledHealthRequest`
+- Environment detection: stage (confirmed) vs prod (TBD — not yet analyzed)
+- Relay device serial number and BLE MAC address
+- `relayHealthRequestCall` event timestamps and poll interval
+- Raw BLE payload bytes captured per health request (decoded values pending BLE protocol implementation)
+- Firmware notification type breakdown (type 72/8 = keepalive, type 73 = response ready, type 74 = alert, type 104 = battery change)
+- Named events: health response ready, device alert, battery state change
+
+> ⚠️ Relay health attribute values (SNR, battery %, temperature °F, uptime, firmware version) are present in BLE payload bytes but not yet decoded — requires BLE protocol implementation.
+>
+> ⚠️ Stage logs confirmed. Prod logs not yet analyzed — environment detection will be updated when prod samples are available.
 
 ---
 

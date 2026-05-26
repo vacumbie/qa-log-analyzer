@@ -304,7 +304,7 @@ All parseable data comes from lines tagged `I flutter` (Flutter app output):
 
 ---
 
-_Last updated: 2026-05-22_
+_Last updated: 2026-05-26_
 
 ---
 
@@ -578,6 +578,57 @@ Example:
 | `callsign` | `Created contact for user <callsign>` | `MikeRiOS` | |
 | `uuid` | `with UUID <uuid>` | `899bc6d1-072c-58fe-bb5b-eba3a2c13f16` | |
 
+
+#### GRIP Structured Message Fields (GRIP_SENDER and GRIP_Receiver)
+
+Both `GRIP_SENDER` (outgoing) and `GRIP_Receiver` (incoming) emit a structured
+fields line for every message segment. This is the richest per-message data in
+the RSDK format.
+
+**Line format:**
+```
+GRIP_SENDER:   Outgoing message fields: MsgType: N; SRC: N; DST: N; appId: N; msgId: N; seqNo: N; isFirstPacket: N; segReserved: N; isAck: N; requiresAck: N; agOriginated: N; isPeriodic: N; repCounter: N; reservedByte: N segment size: N
+GRIP_Receiver: Incoming message fields: MsgType: N; SRC: N; DST: N; appId: N; msgId: N; seqNo: N; isFirstPacket: N; segReserved: N; isAck: N; requiresAck: N; agOriginated: N; isPeriodic: N; repCounter: N; reservedByte: N hops: N rssi: N segment size: N
+```
+
+Note: incoming lines include `hops` and `rssi` **before** `segment size`. Outgoing lines do not include these fields.
+
+| Field | Parsed As | Notes |
+|-------|-----------|-------|
+| `MsgType` | `grip_message.msg_type` | `0` = private/unicast · `2` = broadcast |
+| `SRC` | `grip_message.src_gid` | Sender's **hashed** GID — signed 32-bit integer |
+| `DST` | `grip_message.dst_gid` | Destination hashed GID; `0` for broadcast |
+| `appId` | `grip_message.app_id` | App ID used when initializing SDK |
+| `msgId` | `grip_message.msg_id` | Message ID; matches `file id` in COMMANDHANDLER lines |
+| `seqNo` | `grip_message.seq_no` | Segment sequence number — **reverse order** (highest = first packet) |
+| `isFirstPacket` | `grip_message.is_first_packet` | `1` = this is the first (highest seqNo) segment |
+| `isAck` | `grip_message.is_ack` | `1` = this segment is an ACK, not data |
+| `requiresAck` | `grip_message.requires_ack` | `1` = receiver must send keep-alive ACK after this segment |
+| `isPeriodic` | `grip_message.is_periodic` | `1` = message is a periodic (PLI) broadcast |
+| `repCounter` | `grip_message.rep_counter` | Retransmission count for this segment. `0` = first attempt. Firmware cancels transfer after 3 attempts. |
+| `segment size` | `grip_message.segment_size` | Byte size of this segment |
+| `hops` | `grip_message.hops` | **Incoming only.** Genuine RF mesh hop count. |
+| `rssi` | `grip_message.rssi` | **Incoming only.** Real dBm (signed). |
+
+> ⚠️ **SRC and DST are hashed GID values, not full GIDs.** They are signed 32-bit integers derived from the full 64-bit GID. The same node will always produce the same hash, enabling correlation across messages, but the hash cannot be reversed to the full GID without a lookup table.
+>
+> ⚠️ **repCounter on outgoing lines only.** The retransmission count appears on `GRIP_SENDER` outgoing lines. A `repCounter > 0` means the firmware retried that segment. `repCounter = 2` means one more failure will cancel the transfer.
+>
+> ⚠️ **hops and rssi are genuine RF data on incoming lines.** Unlike the RSDK hop count from older `SendMessageResponse` patterns (which was an SDK sequence counter), these values from `GRIP_Receiver` incoming message fields are real RF mesh hop count and received signal strength.
+
+#### GRIP Transfer Lifecycle (COMMANDHANDLER + GRIP_SENDER)
+
+Three additional log lines enable end-to-end delivery time tracking:
+
+| Line pattern | Component | Meaning |
+|-------------|-----------|---------|
+| `File transmission started, file id: N` | `COMMANDHANDLER` | Transfer begins on sender |
+| `File has been successfully delivered to destination, file id: N` | `COMMANDHANDLER` | Transfer complete on sender |
+| `sent file msgId: N stopped with true in Nms earlyCancel: false` | `GRIP_SENDER` | Sender stopped; delivery time in ms; `earlyCancel: true` = cancelled |
+| `Full grip file received! id: N number of segments: N` | `COMMANDHANDLER` | Transfer complete on receiver side |
+
+The delta between `File transmission started` and `File has been successfully delivered` is the end-to-end delivery time (`delivery_ms` in `GripTransfer`).
+
 #### GRIP ACK Events (from `GRIP_Receiver` lines)
 
 | Event | Pattern | Notes |
@@ -619,7 +670,9 @@ Example:
 - **`systemTemperature=0`** on first connect is a placeholder, not a real reading — cannot distinguish from a genuine 0°C reading without context
 - **`reflectedPowerRatio=255`** meaning is not fully documented; appears as a sentinel for "not yet valid"
 - **Contact callsigns** are available via `ContactManager` lines but not currently parsed by `rsdk.py`
-- ✅ **TX pattern bug fixed:** `rsdk.py` previously targeted `SendMessageResponse.*FINAL_ACK` etc. — patterns that don't exist in the logs. Now correctly matches `GRIP_Receiver` lines: `"Final ACK received, message fully delivered"` and `"Keep-alive ACK received. Segment ID: N msgId: N"`. NACKs handled via `component == "NACK"` (unchanged).
+- ✅ **TX pattern bug fixed:** `rsdk.py` previously targeted `SendMessageResponse.*FINAL_ACK` etc. Now correctly matches `GRIP_Receiver` structured fields lines and final ACK text lines. NACKs handled via `component == "NACK"` (unchanged).
+- **GRIP structured fields now parsed:** `GRIP_SENDER` outgoing and `GRIP_Receiver` incoming message fields lines are fully parsed into `GripMessage` records. `hops` and `rssi` from incoming lines are genuine RF data. `repCounter` tracks retransmissions per segment.
+- **GRIP transfer lifecycle now tracked:** End-to-end delivery time (`delivery_ms`) computed from `File transmission started` → `File has been successfully delivered` delta. Stored in `GripTransfer` records.
 - **`Send_Defferred`** and `Remaining_messages` components contain potentially useful data not currently captured
 
 ### Sample File Observations (rsdk_log_JonathaniOS.txt)
@@ -737,7 +790,8 @@ All iOS RSDK parsing rules apply. Android-specific additions:
 ### Known Limitations — Pro+ Android RSDK Log
 
 - **⚠️ PA Temperature bug** — same as iOS: `_SYS_TEMP_RE` in `rsdk.py` will not match `powerAmpTemperature=` on Android either
-- ✅ **NACK parsing fixed:** `rsdk.py` previously targeted `SendMessageResponse.*NACK` patterns that don't exist in Android logs. NACKs are correctly handled via the `component == "NACK"` path, which was already working. The `SendMessageResponse` patterns have been removed.
+- ✅ **NACK parsing correct:** NACKs handled via `component == "NACK"` path. `SendMessageResponse` patterns were removed.
+- **GRIP structured fields and transfer lifecycle:** Same as iOS — see iOS RSDK section above.
 - ✅ **PA Temperature bug fixed (both platforms):** `_SYS_TEMP_RE` updated to match `powerAmpTemperature=` — temperature data now captured correctly for both iOS and Android RSDK logs.
 - **`ContactManager` empty UUID warnings** — `Tried to update contact storage but sender uuid was empty` appears frequently; contact lookups may be incomplete for some messages
 - **`reflectedPowerRatio` meaning** — real values observed (4–10) but no documentation found on what range is normal vs anomalous

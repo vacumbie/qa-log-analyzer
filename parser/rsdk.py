@@ -19,7 +19,7 @@ from typing import Optional
 
 from .models import (
     ParseResult, DeviceInfo, SystemSample, BleFailEvent,
-    TxEvent, SessionGap,
+    TxEvent, SessionGap, GripMessage, GripTransfer,
 )
 
 # ── Line pattern ──────────────────────────────────────────────────────────────
@@ -47,8 +47,6 @@ def _fmt(dt: datetime) -> str:
 # ── Patterns for specific log lines ──────────────────────────────────────────
 
 # BLE reconnection failure (iOS only)
-# Note: component "IosBleRadio" is captured separately by _LINE_RE;
-# rest contains only the message body, so we match without the component prefix.
 _BLE_FAIL_RE = re.compile(r"BLE reconnection failed, retrying in 2000ms")
 
 # Device info from DeviceInfo(...) blocks
@@ -63,11 +61,11 @@ _TEMP_RE = re.compile(r"POWER_AMP_TEMP[:\s]+(\d+)", re.I)
 # Firmware version in log lines
 _FW_RE = re.compile(r"firmwareVersion=([^\s,)]+)")
 
-# Unicast TX outcomes in SendMessageResponse (iOS pattern)
-_FINAL_ACK_RE  = re.compile(r"SendMessageResponse.*?FINAL_ACK.*?id=(\w+)", re.I)
-_IOS_NACK_RE   = re.compile(r"SendMessageResponse.*?NACK.*?id=(\w+)", re.I)
-_TIMEOUT_RE    = re.compile(r"SendMessageResponse.*?TIMEOUT.*?id=(\w+)", re.I)
-_KEEPALIVE_RE  = re.compile(r"SendMessageResponse.*?KEEPALIVE_ACK.*?id=(\w+)", re.I)
+# Unicast TX outcomes in GRIP_Receiver lines
+# "SRC: Final ACK received, message fully delivered"
+_GRIP_FINAL_ACK_RE = re.compile(r"SRC:\s*Final ACK received,\s*message fully delivered", re.I)
+# "SRC: Keep-alive ACK received. Segment ID: N msgId: N"
+_GRIP_KEEPALIVE_RE = re.compile(r"SRC:\s*Keep-alive ACK received.*?msgId:\s*(\d+)", re.I)
 
 # ContactManager: "Created contact for user <name>  with UUID <uuid>"
 _CONTACT_RE = re.compile(r'Created contact for user (.+?) {1,3}with UUID (\S+)')
@@ -79,10 +77,57 @@ _SYS_BATT_RE = re.compile(r"batteryLevel[=:\s]+(\d+\.?\d*)")
 _SYS_TEMP_RE = re.compile(r"powerAmpTemperature[=:\s]+(\d+)")
 
 # Android NACK component patterns (Android only — component tag is "NACK")
-# Matches: "SRC: missing segments [0] for msgId: 891 from -32453 to 17451"
 _AND_NACK_MSGID_RE = re.compile(r"missing segments \[[\d,\s]+\] for msgId:\s*(\d+)", re.I)
-# Matches: "src: nack triggered for GoTennaTransportFrame(...messageId=891...)"
 _AND_NACK_FRAME_RE = re.compile(r"nack triggered.*?messageId=(\d+)", re.I)
+
+# ── GRIP structured message fields ────────────────────────────────────────────
+#
+# Both GRIP_SENDER (outgoing) and GRIP_Receiver (incoming) emit a structured
+# fields line. Incoming lines additionally include hops and rssi before
+# segment size.
+#
+# Outgoing: "...reservedByte: N segment size: N"
+# Incoming: "...reservedByte: N hops: N rssi: N segment size: N"
+_GRIP_FIELDS_RE = re.compile(
+    r"(?P<direction>Outgoing|Incoming) message fields:\s*"
+    r"MsgType:\s*(?P<msg_type>-?\d+);\s*"
+    r"SRC:\s*(?P<src>-?\d+);\s*"
+    r"DST:\s*(?P<dst>-?\d+);\s*"
+    r"appId:\s*(?P<app_id>\d+);\s*"
+    r"msgId:\s*(?P<msg_id>\d+);\s*"
+    r"seqNo:\s*(?P<seq_no>\d+);\s*"
+    r"isFirstPacket:\s*(?P<is_first_packet>\d+);\s*"
+    r"segReserved:\s*(?P<seg_reserved>\d+);\s*"
+    r"isAck:\s*(?P<is_ack>\d+);\s*"
+    r"requiresAck:\s*(?P<requires_ack>\d+);\s*"
+    r"agOriginated:\s*(?P<ag_originated>\d+);\s*"
+    r"isPeriodic:\s*(?P<is_periodic>\d+);\s*"
+    r"repCounter:\s*(?P<rep_counter>\d+);\s*"
+    r"reservedByte:\s*(?P<reserved_byte>\d+)\s*"
+    r"(?:hops:\s*(?P<hops>\d+)\s+rssi:\s*(?P<rssi>-?\d+)\s+)?"
+    r"segment size:\s*(?P<segment_size>\d+)"
+)
+
+# MsgType values
+# 0 = PRIVATE (unicast)
+# 2 = BROADCAST
+_MSG_TYPE_LABELS = {0: "private", 2: "broadcast"}
+
+# ── GRIP transfer lifecycle patterns ─────────────────────────────────────────
+# "File transmission started, file id: 3196"
+_FILE_START_RE = re.compile(r"File transmission started,\s*file id:\s*(\d+)", re.I)
+
+# "File has been successfully delivered to destination, file id: 3196"
+_FILE_DONE_RE = re.compile(r"File has been successfully delivered to destination,\s*file id:\s*(\d+)", re.I)
+
+# "sent file msgId: 2640 stopped with true in 2006ms earlyCancel: false"
+_SENT_STOP_RE = re.compile(
+    r"sent file msgId:\s*(\d+)\s+stopped with\s+(\w+)\s+in\s+(\d+)ms\s+earlyCancel:\s*(\w+)",
+    re.I
+)
+
+# "Full grip file received! id: 3196 number of segments: 1"
+_GRIP_RECV_DONE_RE = re.compile(r"Full grip file received!\s*id:\s*(\d+)\s+number of segments:\s*(\d+)", re.I)
 
 
 # ── Line-by-line processing ───────────────────────────────────────────────────
@@ -91,7 +136,8 @@ def _process_line(
     raw_line: str,
     seen_lines: set,
     result: ParseResult,
-    pending_samples: dict,     # serial -> {ts, battery, temp}
+    pending_samples: dict,      # serial -> {ts, battery, temp}
+    open_transfers: dict,       # (serial, msg_id) -> {start_ts, max_rep, segment_count}
 ) -> None:
     """Process one deduplicated log line, updating result in place."""
     line = raw_line.strip()
@@ -141,7 +187,7 @@ def _process_line(
             hour=hour,
         ))
 
-    # ── Contact discovery ────────────────────────────────────────────────────
+    # ── Contact discovery ─────────────────────────────────────────────────────
     contact_m = _CONTACT_RE.search(rest)
     if contact_m:
         name = contact_m.group(1).strip()
@@ -154,23 +200,19 @@ def _process_line(
     if batt_m:
         try:
             batt_val = float(batt_m.group(1))
-            # Sentinel value: -1 means not yet valid on first connect
-            if batt_val >= 0:
+            if batt_val >= 0:   # sentinel: -1 = not yet valid on first connect
                 pending_samples.setdefault(serial, {})["ts"]      = ts_out
                 pending_samples[serial]["battery"] = batt_val
         except ValueError:
             pass
 
     # ── PA Temperature ────────────────────────────────────────────────────────
-    # _SYS_TEMP_RE matches "powerAmpTemperature=<n>" (DeviceInfo lines)
-    # _TEMP_RE matches "POWER_AMP_TEMP: <n>" (legacy/other formats)
     temp_m = _SYS_TEMP_RE.search(rest) or _TEMP_RE.search(rest)
     if temp_m:
         try:
             temp_val = int(temp_m.group(1))
-            # Sentinel value: -1 means not yet valid on first connect
-            if temp_val >= 0:
-                pending_samples.setdefault(serial, {})["ts"]     = ts_out
+            if temp_val >= 0:   # sentinel: -1 = not yet valid on first connect
+                pending_samples.setdefault(serial, {})["ts"]      = ts_out
                 pending_samples[serial]["temp_c"] = temp_val
         except ValueError:
             pass
@@ -186,24 +228,118 @@ def _process_line(
         ))
         pending_samples[serial] = {}
 
-    # ── Unicast TX outcomes ───────────────────────────────────────────────────
-    # iOS: outcomes embedded in SendMessageResponse lines
-    for pattern, outcome in (
-        (_FINAL_ACK_RE, "final_ack"),
-        (_IOS_NACK_RE,  "nack"),
-        (_TIMEOUT_RE,   "timeout"),
-        (_KEEPALIVE_RE, "keepalive_ack"),
-    ):
-        tx_m = pattern.search(rest)
-        if tx_m:
+    # ── GRIP structured message fields ────────────────────────────────────────
+    # Parsed from both GRIP_SENDER (outgoing) and GRIP_Receiver (incoming).
+    # Incoming lines carry hops and rssi — genuine RF routing data.
+    if component in ("GRIP_SENDER", "GRIP_Receiver"):
+        gf = _GRIP_FIELDS_RE.search(rest)
+        if gf:
+            gd = gf.groupdict()
+            msg_type_int = int(gd["msg_type"])
+            grip_msg = GripMessage(
+                timestamp=ts_out,
+                direction="outgoing" if gd["direction"] == "Outgoing" else "incoming",
+                msg_type=msg_type_int,
+                msg_type_label=_MSG_TYPE_LABELS.get(msg_type_int, f"unknown({msg_type_int})"),
+                msg_id=int(gd["msg_id"]),
+                src_gid=int(gd["src"]),
+                dst_gid=int(gd["dst"]),
+                app_id=int(gd["app_id"]),
+                seq_no=int(gd["seq_no"]),
+                is_first_packet=gd["is_first_packet"] == "1",
+                is_ack=gd["is_ack"] == "1",
+                requires_ack=gd["requires_ack"] == "1",
+                is_periodic=gd["is_periodic"] == "1",
+                rep_counter=int(gd["rep_counter"]),
+                segment_size=int(gd["segment_size"]),
+                hops=int(gd["hops"]) if gd["hops"] is not None else None,
+                rssi=int(gd["rssi"]) if gd["rssi"] is not None else None,
+                radio_serial=serial,
+            )
+            result.grip_messages.append(grip_msg)
+
+            # Track max rep_counter per open transfer for retransmit detection
+            key = (serial, int(gd["msg_id"]))
+            if key in open_transfers:
+                open_transfers[key]["max_rep"] = max(
+                    open_transfers[key].get("max_rep", 0),
+                    int(gd["rep_counter"])
+                )
+
+    # ── GRIP transfer lifecycle — start ───────────────────────────────────────
+    if component == "COMMANDHANDLER":
+        start_m = _FILE_START_RE.search(rest)
+        if start_m:
+            msg_id = int(start_m.group(1))
+            open_transfers[(serial, msg_id)] = {
+                "start_ts": ts_out,
+                "start_dt": dt,
+                "radio_serial": serial,
+                "max_rep": 0,
+                "segment_count": None,
+            }
+
+        # Sender-side completion
+        done_m = _FILE_DONE_RE.search(rest)
+        if done_m:
+            msg_id = int(done_m.group(1))
+            key = (serial, msg_id)
+            if key in open_transfers:
+                ot = open_transfers.pop(key)
+                delivery_ms = int((dt - ot["start_dt"]).total_seconds() * 1000)
+                result.grip_transfers.append(GripTransfer(
+                    msg_id=msg_id,
+                    radio_serial=serial,
+                    start_timestamp=ot["start_ts"],
+                    end_timestamp=ts_out,
+                    delivery_ms=delivery_ms,
+                    outcome="delivered",
+                    max_rep_counter=ot.get("max_rep", 0),
+                    segment_count=ot.get("segment_count"),
+                ))
+
+        # Receiver-side completion (full grip file received)
+        recv_m = _GRIP_RECV_DONE_RE.search(rest)
+        if recv_m:
+            msg_id = int(recv_m.group(1))
+            seg_count = int(recv_m.group(2))
+            key = (serial, msg_id)
+            if key in open_transfers:
+                open_transfers[key]["segment_count"] = seg_count
+
+    # ── GRIP_SENDER stop line (delivery duration + earlyCancel) ──────────────
+    if component == "GRIP_SENDER":
+        stop_m = _SENT_STOP_RE.search(rest)
+        if stop_m:
+            msg_id     = int(stop_m.group(1))
+            success    = stop_m.group(2).lower() == "true"
+            duration_ms = int(stop_m.group(3))
+            early_cancel = stop_m.group(4).lower() == "true"
+            key = (serial, msg_id)
+            if key in open_transfers:
+                open_transfers[key]["duration_ms"]   = duration_ms
+                open_transfers[key]["early_cancel"]  = early_cancel
+                open_transfers[key]["sender_success"] = success
+
+    # ── Unicast TX outcomes (GRIP_Receiver) ───────────────────────────────────
+    if component == "GRIP_Receiver":
+        if _GRIP_FINAL_ACK_RE.search(rest):
             result.tx_events.append(TxEvent(
                 timestamp=ts_out,
-                message_id=tx_m.group(1),
-                outcome=outcome,
+                message_id="",   # not in this log line; correlate via grip_transfers
+                outcome="final_ack",
+                radio_serial=serial,
+            ))
+        ka_m = _GRIP_KEEPALIVE_RE.search(rest)
+        if ka_m:
+            result.tx_events.append(TxEvent(
+                timestamp=ts_out,
+                message_id=ka_m.group(1),
+                outcome="keepalive_ack",
                 radio_serial=serial,
             ))
 
-    # Android: NACKs surface as a dedicated "NACK" component tag
+    # ── Android: NACKs surface as a dedicated "NACK" component tag ────────────
     if component == "NACK":
         nack_m = _AND_NACK_MSGID_RE.search(rest) or _AND_NACK_FRAME_RE.search(rest)
         if nack_m:
@@ -229,6 +365,10 @@ def _detect_session_gaps(result: ParseResult, gap_min: int = 30) -> None:
             all_ts.append(dt)
     for t in result.tx_events:
         dt = datetime.strptime(t.timestamp, _TS_FMT_OUT) if t.timestamp else None
+        if dt:
+            all_ts.append(dt)
+    for g in result.grip_transfers:
+        dt = datetime.strptime(g.start_timestamp, _TS_FMT_OUT) if g.start_timestamp else None
         if dt:
             all_ts.append(dt)
 
@@ -284,14 +424,28 @@ def parse_rsdk_log(path: Path) -> ParseResult:
 
     result.device.platform = _infer_platform(text)
 
-    seen_lines: set = set()
+    seen_lines: set  = set()
     pending_samples: dict = {}   # serial -> partial SystemSample data
+    open_transfers: dict  = {}   # (serial, msg_id) -> transfer state
 
     for raw_line in text.splitlines():
         try:
-            _process_line(raw_line, seen_lines, result, pending_samples)
+            _process_line(raw_line, seen_lines, result, pending_samples, open_transfers)
         except Exception as e:
             result.parse_errors.append(f"Line parse error: {e} — {raw_line[:80]}")
+
+    # Any transfers still open at EOF had no completion log — mark as incomplete
+    for (serial, msg_id), ot in open_transfers.items():
+        result.grip_transfers.append(GripTransfer(
+            msg_id=msg_id,
+            radio_serial=serial,
+            start_timestamp=ot.get("start_ts", ""),
+            end_timestamp="",
+            delivery_ms=None,
+            outcome="incomplete",
+            max_rep_counter=ot.get("max_rep", 0),
+            segment_count=ot.get("segment_count"),
+        ))
 
     _detect_session_gaps(result)
     return result

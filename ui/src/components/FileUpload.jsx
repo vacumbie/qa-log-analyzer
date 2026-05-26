@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useDropzone } from 'react-dropzone'
 
 // ── Parsing overlay — shown app-wide while API is processing ──────────────────
@@ -320,7 +321,7 @@ function UploadModal({ onFiles, loading, onClose }) {
     disabled: loading || step === 'range',
   })
 
-  return (
+  return createPortal(
     <>
       {/* Backdrop */}
       <div
@@ -349,7 +350,7 @@ function UploadModal({ onFiles, loading, onClose }) {
             </div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--muted)', marginTop: 2 }}>
               {step === 'drop'
-                ? 'Accepts .txt · .log · diagnostic, RSDK, and ATAK formats'
+                ? 'Accepts .txt · .log · diagnostic, RSDK, ATAK, and Relay Manager formats'
                 : `${pending.length} file${pending.length > 1 ? 's' : ''} · drag handles to narrow the analysis window · all times UTC`}
             </div>
           </div>
@@ -451,7 +452,8 @@ function UploadModal({ onFiles, loading, onClose }) {
           </>
         )}
       </div>
-    </>
+    </>,
+    document.body
   )
 }
 

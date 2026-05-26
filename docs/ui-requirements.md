@@ -82,7 +82,7 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
 | Devices Logged | `--accent` | Count | "hover for details" | callsign · FORMAT · firmware per log |
 | Network Nodes | `--green` | Count | "Unique GIDs / peers observed" | — |
 | Peak Temp | threshold | °F | Device that hit peak | — |
-| Avg Hop Count | `--accent2` | hops | "diagnostic + ATAK only" | — |
+| Avg Hop Count | `--accent2` | hops | "diagnostic + ATAK · RSDK via GRIP" | — |
 | App Version | green/red | version (build) | "N devices" or "⚠ version mismatch" | callsign · vX.X.X (build) · PLATFORM per log |
 | Radio Firmware | green/red | version(s) | "all match" or "⚠ version mismatch" | — |
 | PLI Changers | `--purple` | n/total | "N nodes changed rate" | — |
@@ -137,6 +137,12 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
 - **Per-Device TX Delivery — Cross-Log Verification** — messages sent, confirmed in ≥1 other log, unverifiable gap; table per device
 - **Private (1to1) Messages — Full Detail** — every private message to/from a logging device; table with hop count
 
+**GRIP Transfer Analysis (RSDK logs only — shown when grip_transfer_count > 0):**
+- **Delivery Time Distribution** — histogram of `delivery_ms` per completed transfer; x-axis in ms; color-coded by outcome (delivered = green, cancelled = red, incomplete = amber). Sub-label shows average delivery time.
+- **Transfer Outcomes** — stacked bar per device: delivered / cancelled / incomplete counts
+- **Retransmission Rate** — bar chart of `grip_retransmit_count` (segments requiring >1 attempt) vs clean segments per device. Note: `max_rep_counter = 2` means firmware was one failure from cancelling that transfer.
+- **Broadcast vs Private Split** — bar chart of outgoing broadcast (`msg_type=2`) vs private (`msg_type=0`) message counts per device
+
 ### 4. Sessions & Radio Stats (`sessions`)
 - **App Version** — from Device & Application Info block; table per device
 - **App Crash Detection** — explanatory section; note: diagnostic log format v1 has no explicit crash markers, ANR events, or exception traces
@@ -153,12 +159,18 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
 - **Minimum Battery Recorded** — bar chart; lowest % reached per device
 
 ### 7. Hop Count (`hops`)
-- **Hop Count Distribution per Device** — bar/histogram per logging device; note: diagnostic logs contain genuine RF hop data (unlike RSDK logs where hop count is unreliable)
-- **Hop Count Distribution — All Messages Combined** — network-wide histogram; max observed = 6
+- **Hop Count Distribution per Device** — bar/histogram per logging device; diagnostic and ATAK use `received_messages.hop_count`; RSDK uses `grip_messages` where `direction = "incoming"` and `hops` is not null — these are genuine RF hop counts from `GRIP_Receiver` structured fields lines
+- **Hop Count Distribution — All Messages Combined** — network-wide histogram across all formats
+- **Data source badge** per device: `DIAGNOSTIC` · `ATAK` · `GRIP (RSDK)` so the user knows which data source populated each chart
+
+> ⚠️ **RSDK hop count source changed.** Previously excluded entirely as unreliable (SDK sequence counter). Now included when sourced from `GRIP_Receiver` incoming message fields — these are genuine RF mesh hop counts. The old `SendMessageResponse` hop count is still excluded.
 
 ### 8. RSSI (`rssi`)
-- **RSSI Distribution by Hop Count** — box/bar chart grouped by hop count; display as real dBm (value − 256); note: stored as unsigned byte (137–237)
-- **RSSI Distribution per Logging Device** — bar chart per device showing average RSSI
+- **RSSI Distribution by Hop Count** — box/bar chart grouped by hop count; diagnostic format: convert unsigned byte (value − 256); ATAK and RSDK GRIP: already signed dBm, no conversion needed
+- **RSSI Distribution per Logging Device** — bar chart per device showing average RSSI; RSDK uses `grip_messages` incoming `rssi` field where available
+- **Data source badge** per device: `DIAGNOSTIC` · `ATAK` · `GRIP (RSDK)`
+
+> ⚠️ **RSDK RSSI source.** `grip_messages` incoming `rssi` values are real dBm from `GRIP_Receiver` structured fields — genuine RF signal strength. No conversion needed (already signed). Previously RSSI was unavailable for RSDK logs.
 
 ### 9. Chat Activity (`chat`)
 - **Chat Messages Received by Device** — bar chart of non-PLI (text type) messages per logging device
@@ -170,15 +182,34 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
 
 ---
 
+### 11. Relay Health (`relay-health`)
+Displays data from goTenna Relay Manager logs (networkPolling and scheduledHealthRequest sub-types). Logs are auto-detected and routed here from the main upload — no separate upload required.
+
+- **Session Info** — relay device serial, BLE MAC address, app PID, detected sub-type, environment (stage / unknown), log time span
+- **Health Request Timeline** — timestamps of all confirmed `relayHealthRequestCall` events; computed average poll interval
+- **Firmware Notification Breakdown** — bar chart of notification type counts with labels (BLE poll heartbeat, health response ready, device alert, battery change)
+- **Event Log** — chronological list of named relay manager events (`health_response_ready`, `device_alert`, `battery_state_changed`, `empty_sender_uuid`) with timestamps
+- **Data Limitations Banner** — always visible; surfaces the BLE payload decoding gap and any other active limitations from `parse_errors`
+
+**Sub-type badge:** `networkPolling` or `scheduledHealthRequest` shown on the session card.
+
+**Environment badge:** `STAGE` (cyan) or `UNKNOWN` (amber). Prod badge to be defined when prod logs are analyzed.
+
+> ⚠️ Relay health attribute values (SNR, battery %, temperature °F, uptime, firmware version) are not yet available — they are encoded in BLE payload bytes not yet decoded. Surface this limitation prominently rather than silently omitting the fields.
+
+---
+
 ## Known Limitations & Open Questions
 
 - **Temperature** must always be converted from Celsius (source) to Fahrenheit (display) — never show raw °C values
 - **RSSI** is stored as unsigned byte in diagnostic logs; real dBm = value − 256; display as dBm
-- **Hop count in RSDK logs** is not genuine RF routing data — flag this in any RSDK-sourced hop count display
+- **Hop count in RSDK logs** — `GRIP_Receiver` incoming `hops` field is genuine RF routing data and should be included in hop count analysis. Legacy `SendMessageResponse` hop count (SDK sequence counter) is still excluded. Display a `GRIP (RSDK)` source badge to distinguish from diagnostic/ATAK data.
 - **Unknown device** had no Message Count Details blocks — some KPIs will be unavailable for this device
 - **App crash detection** is not possible from diagnostic log format v1 — no crash markers present; surface this limitation honestly in the Sessions tab
 - **Health Score dimensions** not yet fully defined — placeholder radar chart in reference implementation
-- **Topology tab** — Alpha/Beta feature; see Tab 11. Accuracy is inherently limited by what the logs can surface — the hardest data point in the dashboard to get right; must be clearly labeled as experimental in the UI
+- **Relay Health tab — BLE payload decoding pending:** Relay health attribute values (SNR, battery %, temperature °F, uptime, firmware version) cannot be displayed until BLE protocol decoding is implemented. The tab must surface this limitation via a Data Limitations Banner rather than showing empty fields silently.
+- **Relay Health tab — prod environment:** Prod log behavior and environment badge are undefined until prod samples are analyzed.
+- **Topology tab** — Alpha/Beta feature; see Tab 12. Accuracy is inherently limited by what the logs can surface — the hardest data point in the dashboard to get right; must be clearly labeled as experimental in the UI
 - **Multi-log upload** — supported; drag-and-drop or file picker; multiple files processed simultaneously
 - **Duplicate log detection** — files with matching `radio_serial + session_start + session_end` are deduplicated automatically; only first occurrence used. Handles named files (`RSO_HagenM.txt`) loaded alongside auto-exported equivalents (`diagnostic_2026*.txt`).
 - **Time window filtering** — client-side; filters all time-series arrays (`received_messages`, `system_samples`, `ble_fail_events`, `tx_events`, `atak_messages`, `atak_health_samples`). Computable summary fields recomputed from filtered arrays; static fields retain parse-time values.
@@ -186,11 +217,11 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
 
 ---
 
-_Last updated: 2026-05-22_
+_Last updated: 2026-05-26_
 
 ---
 
-### 11. Network Topology (`topology`) — ⚠️ ALPHA/BETA
+### 12. Network Topology (`topology`) — ⚠️ ALPHA/BETA
 
 > This is the most difficult data point in the dashboard to get accurate. Topology is inferred entirely from what the parsed logs can surface — it is not ground truth. The UI must clearly label this tab as experimental/Alpha.
 
@@ -228,7 +259,7 @@ _Last updated: 2026-05-22_
 
 ---
 
-_Last updated: 2026-05-22_
+_Last updated: 2026-05-26_
 
 ---
 

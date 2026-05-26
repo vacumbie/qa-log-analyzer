@@ -1,6 +1,7 @@
 """
 parser/models.py
-Shared dataclasses used by the diagnostic, RSDK, and ATAK parsers.
+Shared dataclasses used by the diagnostic, RSDK, ATAK, and Relay Manager parsers.
+Includes GRIP transfer primitives (GripMessage, GripTransfer) for RSDK logs.
 Every parser returns a ParseResult; the API and UI only need to know this shape.
 """
 
@@ -275,16 +276,139 @@ class AtakAppInfo:
     android_api_version: Optional[int] = None
 
 
+# ── Relay Manager-specific primitives ─────────────────────────────────────────
+
+@dataclass
+class RelayHealthRequest:
+    """
+    One confirmed relay health request fired by the Relay Manager app.
+
+    Recorded whenever "Command relayHealthRequestCall" appears in a
+    Services Plugin log line from the relay manager process.
+
+    ble_payload holds the raw hex bytes of the BLE write immediately
+    following the command — the actual relay health attribute values
+    (SNR, battery, temperature, uptime, firmware version) are encoded
+    here but NOT yet decoded.  See DATA LIMITATION notice in parse_errors.
+    """
+    timestamp: str                        # Android logcat wall-clock (local TZ)
+    internal_timestamp: Optional[str] = None  # UTC timestamp from System.out
+    ble_payload: Optional[str] = None         # raw hex; None until decoded
+
+
+@dataclass
+class RelayNotificationEvent:
+    """
+    One firmware notification received from a relay node over BLE.
+
+    Notification type codes observed in stage logs:
+      8   BLE keepalive            (scheduledHealthRequest logs)
+      9   BLE secondary event      (scheduledHealthRequest logs)
+      72  BLE poll heartbeat       (networkPolling logs)
+      73  Health response ready — perform get/delete on firmware
+      74  Device alert — pull required
+      75  Device alert variant
+      104 Battery/charging state changed
+
+    NOTE: The parser tracks notification counts in
+    relay_manager_notification_counts (dict[int, int]) rather than
+    emitting one object per notification, because types 72/8 fire
+    thousands of times per log file. This class is reserved for
+    future use if per-event detail is needed.
+    """
+    timestamp: str
+    notification_type: int
+    hex_value: str
+
+
+@dataclass
+class RelayManagerEvent:
+    """
+    A named relay manager application event (excluding BLE write noise).
+
+    event_type values:
+      health_response_ready   — relay responded; app should get/delete from firmware
+      device_alert            — relay sent an unsolicited alert; pull required
+      battery_state_changed   — relay battery or charging state changed
+      empty_sender_uuid       — ContactManager skipped update (empty UUID); benign
+    """
+    timestamp: str
+    internal_timestamp: Optional[str]
+    event_type: str
+    raw_message: str = ""
+
+
+# ── GRIP transfer primitives ──────────────────────────────────────────────────
+
+@dataclass
+class GripMessage:
+    """
+    One structured GRIP message fields log line from GRIP_SENDER or GRIP_Receiver.
+
+    GRIP_SENDER emits these for outgoing messages (no hops/rssi).
+    GRIP_Receiver emits these for incoming messages (hops and rssi present —
+    genuine RF routing data).
+
+    MsgType values: 0 = private/unicast · 2 = broadcast
+    SRC/DST are hashed GID values (signed 32-bit integers).
+    rep_counter > 0 indicates a retransmission; firmware cancels after 3 attempts.
+    """
+    timestamp: str
+    direction: str                    # "outgoing" | "incoming"
+    msg_type: int                     # 0 = private, 2 = broadcast
+    msg_type_label: str               # "private" | "broadcast" | "unknown(N)"
+    msg_id: int
+    src_gid: int                      # hashed GID — signed 32-bit
+    dst_gid: int                      # 0 for broadcast
+    app_id: int
+    seq_no: int
+    is_first_packet: bool
+    is_ack: bool
+    requires_ack: bool
+    is_periodic: bool
+    rep_counter: int                  # retransmission count; max 3 before cancel
+    segment_size: int
+    hops: Optional[int] = None        # incoming only; genuine RF hop count
+    rssi: Optional[int] = None        # incoming only; real dBm (signed)
+    radio_serial: str = ""
+
+
+@dataclass
+class GripTransfer:
+    """
+    One complete GRIP file transfer lifecycle (sender perspective).
+
+    Aggregated from COMMANDHANDLER File transmission started/delivered lines
+    and GRIP_SENDER sent file stopped line.
+
+    delivery_ms is the time from 'File transmission started' to
+    'File has been successfully delivered' on the sender side.
+    outcome is 'delivered', 'cancelled' (earlyCancel=true), or 'incomplete'
+    (transfer was still open at end of log file).
+    max_rep_counter is the highest retransmission count seen across all
+    segments of this transfer — 0 = clean delivery, 2 = near-cancel.
+    """
+    msg_id: int
+    radio_serial: str
+    start_timestamp: str
+    end_timestamp: str
+    delivery_ms: Optional[int]        # None if transfer did not complete
+    outcome: str                      # "delivered" | "cancelled" | "incomplete"
+    max_rep_counter: int              # 0–2; firmware cancels at 3
+    segment_count: Optional[int]      # from receiver-side "Full grip file received"
+
+
+
 # ── Top-level parse result ────────────────────────────────────────────────────
 
 @dataclass
 class ParseResult:
     """
     The complete output of parsing one log file.
-    diagnostic.py, rsdk.py, and atak.py all return this shape.
+    diagnostic.py, rsdk.py, atak.py, and relay_manager.py all return this shape.
     """
     # Metadata
-    log_format: str = ""        # "diagnostic" | "rsdk" | "atak"
+    log_format: str = ""        # "diagnostic" | "rsdk" | "atak" | "relay_manager"
     source_filename: str = ""
     parse_errors: list[str] = field(default_factory=list)
 
@@ -321,6 +445,19 @@ class ParseResult:
     atak_health_samples: list[AtakDeviceHealth] = field(default_factory=list)
     atak_events: list[AtakEvent] = field(default_factory=list)
     atak_app_launches: list[AtakAppInfo] = field(default_factory=list)
+
+    # RSDK only — GRIP transfer data
+    grip_messages: list[GripMessage] = field(default_factory=list)
+    grip_transfers: list[GripTransfer] = field(default_factory=list)
+
+    # Relay Manager only
+    relay_health_requests: list[RelayHealthRequest] = field(default_factory=list)
+    relay_manager_events: list[RelayManagerEvent] = field(default_factory=list)
+    relay_manager_notification_counts: dict[int, int] = field(default_factory=dict)
+    relay_manager_subtype: str = ""       # "networkPolling" | "scheduledHealthRequest" | "unknown"
+    relay_manager_environment: str = ""   # "stage" | "unknown" (prod TBD)
+    relay_manager_app_pid: str = ""       # Android process ID of com.gotenna.relaymanager
+    relay_manager_ble_address: str = ""   # BLE MAC of the connected relay node
 
     # ── Convenience properties ────────────────────────────────────────────────
 
