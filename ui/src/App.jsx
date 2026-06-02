@@ -861,7 +861,7 @@ function RssiTab({ results }) {
     (r.grip_messages || []).some(g => g.direction === 'incoming' && g.rssi != null)
   )
 
-  // Per-device GRIP RSSI summary
+  // Per-device GRIP RSSI summary cards (avg/min/max)
   const gripRssiSummary = React.useMemo(() => {
     return results
       .filter(r => r.log_format === 'rsdk')
@@ -872,10 +872,12 @@ function RssiTab({ results }) {
         const avg  = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length)
         const min  = Math.min(...vals)
         const max  = Math.max(...vals)
+        const retransmitMsgs = (r.grip_messages || []).filter(g => g.direction === 'incoming' && g.rep_counter > 0).length
         return {
           serial: r.device?.radio_serial || r.source_filename,
           avg, min, max,
           count: incoming.length,
+          retransmitMsgs,
         }
       })
       .filter(Boolean)
@@ -899,38 +901,61 @@ function RssiTab({ results }) {
         Sent-message RSSI (always 0) is excluded.
       </Note>
 
-      {hasGripRssi && gripRssiSummary.length > 0 && (
+      {hasGripRssi && (
         <>
-          <SectionHeader icon="📡" title="GRIP RSSI Detail" sub="From RSDK GRIP_Receiver incoming message fields — genuine RF signal strength" />
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-            {gripRssiSummary.map((s, i) => (
-              <div key={i} style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '14px 16px' }}>
-                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 14, fontWeight: 700, color: PALETTE[i % PALETTE.length], marginBottom: 10 }}>
-                  {s.serial}
-                </div>
-                <div style={{ display: 'flex', gap: 14, marginBottom: 6 }}>
-                  <div>
-                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 28, fontWeight: 700, color: rssiColor(s.avg), lineHeight: 1 }}>
-                      {s.avg} dBm
+          <SectionHeader
+            icon="📈"
+            title="GRIP RSSI Over Time"
+            sub="RSDK · GRIP_Receiver incoming fields · bucketed average · ▲ = retransmit event"
+          />
+
+          {/* Summary cards — compact header above the chart */}
+          {gripRssiSummary.length > 0 && (
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+              {gripRssiSummary.map((s, i) => (
+                <div key={i} style={{ background: 'var(--panel)', border: `1px solid ${PALETTE[i % PALETTE.length]}30`, borderLeft: `3px solid ${PALETTE[i % PALETTE.length]}`, borderRadius: 6, padding: '10px 14px', display: 'flex', gap: 16, alignItems: 'center' }}>
+                  <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 13, fontWeight: 700, color: PALETTE[i % PALETTE.length], minWidth: 90 }}>
+                    {s.serial}
+                  </div>
+                  <div style={{ display: 'flex', gap: 14 }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 20, fontWeight: 700, color: rssiColor(s.avg), lineHeight: 1 }}>{s.avg}</div>
+                      <div style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted }}>avg dBm</div>
                     </div>
-                    <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted }}>avg RSSI</div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 20, fontWeight: 700, color: rssiColor(s.min), lineHeight: 1 }}>{s.min}</div>
+                      <div style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted }}>min dBm</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 20, fontWeight: 700, color: rssiColor(s.max), lineHeight: 1 }}>{s.max}</div>
+                      <div style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted }}>max dBm</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 20, fontWeight: 700, color: '#94a3b8', lineHeight: 1 }}>{s.count}</div>
+                      <div style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted }}>msgs</div>
+                    </div>
+                    {s.retransmitMsgs > 0 && (
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 20, fontWeight: 700, color: C.yellow, lineHeight: 1 }}>{s.retransmitMsgs}</div>
+                        <div style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted }}>retransmits</div>
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 12 }}>
-                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8 }}>
-                    <span style={{ color: C.muted }}>min </span>
-                    <span style={{ color: rssiColor(s.min) }}>{s.min} dBm</span>
-                  </div>
-                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8 }}>
-                    <span style={{ color: C.muted }}>max </span>
-                    <span style={{ color: rssiColor(s.max) }}>{s.max} dBm</span>
-                  </div>
-                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted }}>{s.count} msgs</div>
-                </div>
-                <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#334155', marginTop: 8 }}>Source: GRIP (RSDK)</div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
+
+          {/* Line chart */}
+          <ChartPanel results={results} selectedPoints={['grip_rssi_over_time']} />
+
+          <Note>
+            X-axis shows normalized session progress (0–100%) so sessions of different lengths
+            render fully across the chart. Each point is the average RSSI of all incoming GRIP
+            messages within that time bucket. ▲ markers indicate a bucket containing at least one
+            message with rep_counter &gt; 0 (retransmission). Dashed lines at −70 dBm (good) and
+            −85 dBm (caution).
+          </Note>
         </>
       )}
     </div>

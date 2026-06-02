@@ -288,4 +288,4 @@ Allow a user to save a parsed session so it can be retrieved later and compared 
 
 **Dependencies:** Requires API session store to persist beyond in-memory (currently lost on server restart)
 
-**Priority:** Deferred — capture only
+**Priority:** ✅ Implemented

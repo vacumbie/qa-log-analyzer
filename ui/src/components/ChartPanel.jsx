@@ -504,6 +504,179 @@ function AtakEventsTimeline({ results }) {
   )
 }
 
+
+// ── GRIP RSSI Over Time ───────────────────────────────────────────────────────
+
+/**
+ * Build a normalized time series from grip_messages (incoming, rssi not null).
+ * grip_messages is a flat array with {timestamp, rssi, rep_counter, msg_id, ...}
+ * rather than the {timestamp, value} shape of system_samples, so we can't use
+ * buildRelativeTimeSeries directly.
+ *
+ * Buckets raw messages into maxPoints normalized time slots (0%–100% of each
+ * device's own session span) and averages the rssi values within each bucket.
+ * Downsampling is implicit — dense logs with thousands of messages produce a
+ * smooth averaged line rather than noisy per-message scatter.
+ */
+function buildGripRssiSeries(results, maxPoints = 40) {
+  const toMs = ts => {
+    if (!ts) return NaN
+    const s = ts.includes('T') ? ts : ts.replace(' ', 'T')
+    const ms = new Date(s.endsWith('Z') ? s : s + 'Z').getTime()
+    return isNaN(ms) ? new Date(ts).getTime() : ms
+  }
+
+  const labels = Array.from({ length: maxPoints }, (_, i) =>
+    `${Math.round((i / (maxPoints - 1)) * 100)}%`
+  )
+
+  const datasets = []
+  const retransmitSets = []  // parallel datasets for retransmit overlay points
+
+  results.forEach((r, ri) => {
+    if (r.log_format !== 'rsdk') return
+    const msgs = (r.grip_messages || [])
+      .filter(g => g.direction === 'incoming' && g.rssi != null && g.timestamp)
+      .map(g => ({ ms: toMs(g.timestamp), rssi: g.rssi, rep: g.rep_counter || 0 }))
+      .filter(g => !isNaN(g.ms))
+      .sort((a, b) => a.ms - b.ms)
+
+    if (!msgs.length) return
+
+    const devMin  = msgs[0].ms
+    const devSpan = Math.max(1, msgs[msgs.length - 1].ms - devMin)
+    const bucket  = devSpan / maxPoints
+
+    // For each time bucket, average rssi values; track whether any had rep > 0
+    const buckets = Array.from({ length: maxPoints }, () => ({ vals: [], hasRetransmit: false }))
+    for (const m of msgs) {
+      const idx = Math.min(maxPoints - 1, Math.floor((m.ms - devMin) / bucket))
+      buckets[idx].vals.push(m.rssi)
+      if (m.rep > 0) buckets[idx].hasRetransmit = true
+    }
+
+    const avgData     = buckets.map(b => b.vals.length ? Math.round(b.vals.reduce((a, v) => a + v, 0) / b.vals.length) : null)
+    const retransmits = buckets.map((b, i) => b.hasRetransmit ? avgData[i] : null)  // point at same y as avg line
+
+    const color = PALETTE[ri % PALETTE.length]
+    const serial = r.device?.radio_serial || shortLabel(r)
+
+    datasets.push({
+      label: serial,
+      data: avgData,
+      borderColor: color,
+      backgroundColor: 'transparent',
+      borderWidth: 2,
+      pointRadius: 2,
+      pointBackgroundColor: color,
+      tension: 0.4,
+      spanGaps: true,
+    })
+
+    // Retransmit overlay — same color but larger filled points, no line
+    retransmitSets.push({
+      label: `${serial} retransmit`,
+      data: retransmits,
+      borderColor: 'transparent',
+      backgroundColor: '#ff4757cc',
+      pointRadius: 6,
+      pointStyle: 'triangle',
+      showLine: false,
+      spanGaps: false,
+    })
+  })
+
+  return { labels, datasets: [...datasets, ...retransmitSets] }
+}
+
+function GripRssiOverTime({ results }) {
+  const hasData = results.some(r =>
+    r.log_format === 'rsdk' &&
+    (r.grip_messages || []).some(g => g.direction === 'incoming' && g.rssi != null)
+  )
+
+  if (!hasData) return (
+    <NoData message="No GRIP_Receiver incoming RSSI data in loaded files — upload an RSDK log with GRIP_Receiver lines to see RSSI over time" />
+  )
+
+  const { labels, datasets } = buildGripRssiSeries(results, 40)
+
+  // Dynamic y-axis range — pad 5 dBm above max and below min
+  const allVals = datasets.flatMap(d => d.data || []).filter(v => v != null)
+  const yMin = allVals.length ? Math.min(...allVals) - 5 : -120
+  const yMax = allVals.length ? Math.max(...allVals) + 5 : -40
+
+  // Annotation lines for signal quality thresholds
+  // Chart.js annotation plugin not in stack — draw as extra datasets instead
+  const thresholdGood = {
+    label: '−70 dBm (good)',
+    data: labels.map(() => -70),
+    borderColor: '#00e5a040',
+    borderWidth: 1,
+    borderDash: [4, 4],
+    pointRadius: 0,
+    tension: 0,
+    spanGaps: true,
+  }
+  const thresholdPoor = {
+    label: '−85 dBm (caution)',
+    data: labels.map(() => -85),
+    borderColor: '#ff470740',
+    borderWidth: 1,
+    borderDash: [4, 4],
+    pointRadius: 0,
+    tension: 0,
+    spanGaps: true,
+  }
+
+  const chartData = {
+    labels,
+    datasets: [...datasets, thresholdGood, thresholdPoor],
+  }
+
+  const options = {
+    ...LINE_OPTS(),
+    scales: {
+      x: { grid: { color: GRID }, ticks: { ...TICK, maxTicksLimit: 10 } },
+      y: {
+        min: yMin, max: yMax,
+        grid: { color: GRID },
+        ticks: { ...TICK, callback: v => `${v} dBm` },
+        title: { display: true, text: 'dBm', color: '#2a3a52', font: { size: 9 } },
+      },
+    },
+    plugins: {
+      tooltip: {
+        ...TT_CFG,
+        callbacks: {
+          label: ctx => {
+            if (ctx.dataset.label?.includes('retransmit')) return `${ctx.dataset.label.replace(' retransmit', '')} retransmit at ${ctx.parsed.y} dBm`
+            if (ctx.dataset.label === '−70 dBm (good)' || ctx.dataset.label === '−85 dBm (caution)') return ctx.dataset.label
+            return `${ctx.dataset.label}: ${ctx.parsed.y} dBm`
+          }
+        }
+      },
+      legend: {
+        labels: {
+          color: '#4a6080',
+          boxWidth: 10,
+          filter: item => !item.text?.includes('retransmit') && !item.text?.startsWith('−'),
+        }
+      },
+    },
+  }
+
+  return (
+    <ChartCard
+      title="GRIP RSSI Over Time (dBm)"
+      subtitle="Averaged per time bucket across session · ▲ = segment with retransmit (rep_counter > 0) · dashed lines = −70 / −85 dBm thresholds"
+      height={320}
+    >
+      <Line data={chartData} options={options} />
+    </ChartCard>
+  )
+}
+
 // ── Registry ──────────────────────────────────────────────────────────────────
 
 const CHART_MAP = {
@@ -517,6 +690,7 @@ const CHART_MAP = {
   hop_avg:               HopAvg,
   rssi_by_hop:           RssiByHop,
   rssi_avg_device:       RssiAvgDevice,
+  grip_rssi_over_time:   GripRssiOverTime,
   chat_sent_recv:        ChatSentReceived,
   ble_fails_total:       BleFailsTotal,
   tx_outcomes:           TxOutcomes,
