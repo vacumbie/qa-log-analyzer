@@ -91,7 +91,7 @@ One block per RF message received over the mesh. This is the core data source fo
 | `originator timestamp` | string | `message.originator_timestamp` | When the originator sent the message |
 | `receiver callsign` | string | `message.receiver_callsign` | Callsign of the logging device (this device) |
 | `receiver gid` | string | `message.receiver_gid` | GID of the logging device — used for device identity |
-| `receiver location` | string | `message.receiver_location` | Lat/lon of receiver at time of receipt. † Parsed into the model but **not currently serialized** by `_result_to_dict()` — not yet exposed to the UI. |
+| `receiver location` | string | `message.receiver_location` | Lat/lon of receiver at time of receipt |
 | `receiver pli interval` | string | `message.receiver_pli_interval` | PLI broadcast rate of the logging device |
 | `receiver timestamp` | string | `message.timestamp` | **Primary timestamp for this message** — when this device received it |
 
@@ -101,7 +101,7 @@ One block per RF message received over the mesh. This is the core data source fo
 >
 > ⚠️ **This block records received messages only.** There is no equivalent block for sent messages. Sent chat/map counts come from `Message Count Details` (cumulative counter), not individual records.
 >
-> † **Serialization gap.** `ReceivedMessage` also carries `receiver_location` and a separate `receiver_timestamp` field that the diagnostic parser populates, but `_result_to_dict()` in `api/routes/parse.py` does **not** emit either of them, so they never reach the UI. The `receiver timestamp` row above maps to `message.timestamp` (the primary timestamp), which **is** serialized — do not confuse it with the unused `receiver_timestamp` model field. Add these to the `received_messages` block in `_result_to_dict()` before relying on them in the UI.
+> ℹ️ **Two timestamps.** The `receiver timestamp` row above maps to `message.timestamp` (the primary timestamp). `ReceivedMessage` also carries a separate `receiver_timestamp` field and `receiver_location`; both are populated by the diagnostic parser and serialized by `_result_to_dict()`. The UI prefers `receiver_timestamp` for PLI-interval timing and falls back to `originator_timestamp` then `timestamp`.
 
 ---
 

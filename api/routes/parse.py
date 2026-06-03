@@ -146,7 +146,9 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
                 "originator_timestamp":    m.originator_timestamp,
                 "receiver_callsign":       m.receiver_callsign,
                 "receiver_gid":            m.receiver_gid,
+                "receiver_location":       m.receiver_location,
                 "receiver_pli_interval":   m.receiver_pli_interval,
+                "receiver_timestamp":      m.receiver_timestamp,
             }
             for m in r.received_messages
         ],

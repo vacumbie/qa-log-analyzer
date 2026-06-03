@@ -21,7 +21,7 @@
 - **Framework:** React / Vite
 - **API:** FastAPI
 - **Charting:** Chart.js 4.4.1
-- **Fonts:** Barlow Condensed (headings/display), Share Tech Mono (monospace/data, via `var(--mono)`). These are referenced by name in `index.css` and inline styles; `index.css` also lists `Rajdhani` as the first body-font fallback. ⚠️ **None of these fonts are currently loaded** (no Google Fonts `<link>`, `@import`, or `@font-face` exists), so the browser falls back to system fonts. Load them before relying on the intended typography.
+- **Fonts:** Rajdhani (body), Barlow Condensed (headings/display), Share Tech Mono (monospace/data, via `var(--mono)`). All three are loaded via a Google Fonts `<link>` in `index.html` and referenced by name in `index.css` and inline styles.
 
 ---
 
