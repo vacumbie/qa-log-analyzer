@@ -141,6 +141,17 @@ qa-log-analyzer/
 │   ├── ui-requirements.md
 │   ├── parsing-requirements.md
 │   └── log-field-definitions.md
+├── .claude/
+│   └── agents/               # Claude Code sub-agents (quality gate + workflow)
+│       ├── peer-reviewer.md
+│       ├── claude-md-compliance-checker.md
+│       ├── jenny.md
+│       ├── code-quality-pragmatist.md
+│       ├── karen.md
+│       ├── task-completion-validator.md
+│       ├── parser-agent.md
+│       ├── docs-agent.md
+│       └── log-analyst.md
 └── .github/workflows/
     └── ci.yml                # CI — runs pytest + UI lint on every push/PR
 ```
