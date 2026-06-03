@@ -57,6 +57,57 @@ cd C:\Users\Valerie.Cumbie\Documents\qa-log-analyzer
 
 ---
 
+## Claude Code Agents
+
+The project includes nine Claude Code sub-agents in `.claude/agents/`. They
+are invoked from a Claude Code terminal session (`claude` from the repo root)
+and share the context defined in `CLAUDE.md`.
+
+### Quality gate — run before merging
+
+These six agents form a pre-merge review pipeline. Run them in order for
+significant changes; run just `peer-reviewer` + `task-completion-validator`
+for routine fixes.
+
+| Agent | Role | Invoke when |
+|-------|------|-------------|
+| `peer-reviewer` | Reviews code for correctness, cited findings only | Any branch before merge |
+| `claude-md-compliance-checker` | Verifies changes follow `CLAUDE.md` rules | After any significant change |
+| `jenny` | Audits implementation against `docs/` specs | Claiming a feature is complete |
+| `code-quality-pragmatist` | Flags unnecessary complexity | After implementing a feature |
+| `karen` | Reality-checks claimed completions end-to-end | Something feels off despite green tests |
+| `task-completion-validator` | Binary APPROVED / REJECTED gate | Final check before merge |
+
+**Full gate** (new format, new tab, significant refactor):
+```
+peer-reviewer → claude-md-compliance-checker → jenny → code-quality-pragmatist → karen → task-completion-validator
+```
+
+**Lightweight gate** (routine fixes):
+```
+peer-reviewer → task-completion-validator
+```
+
+### Workflow agents — day-to-day development
+
+| Agent | Role | Invoke when |
+|-------|------|-------------|
+| `log-analyst` | Reads a raw log file and identifies fields, record types, and unknowns | A new log file arrives before any parser is written |
+| `parser-agent` | Adds or updates parsers, walks the full `models.py` → parser → `_result_to_dict()` → UI chain | Adding a log format or ParseResult field |
+| `docs-agent` | Keeps `parsing-requirements.md`, `log-field-definitions.md`, `ui-requirements.md`, and `CLAUDE.md` in sync | After any code change |
+
+### Example usage
+
+```bash
+# From the repo root with Claude Code running
+run peer-reviewer on the current branch
+use log-analyst to analyze networkPolling.txt
+use parser-agent to add firmware version to the relay_manager parser
+run docs-agent and verify the four docs reflect the current codebase
+run task-completion-validator on the relay_manager parser
+```
+
+
 ## Project Structure
 
 ```
