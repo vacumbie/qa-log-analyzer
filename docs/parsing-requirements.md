@@ -23,9 +23,10 @@ The log parsing tool accepts logs from the following goTenna applications:
 
 | # | Application | Platform | Log Types | Parser File |
 |---|-------------|----------|-----------|-------------|
-| 1 | Android ATAK Plug-in | Android only | 2 (regular, enhanced — same format) | `parser/atak.py` *(TBD)* |
-| 2 | Pro+ Application | iOS, Android | 1 per platform (confirmed) | `parser/rsdk.py` |
-| 3 | Relay Health Manager | Android *(iOS TBD)* | ADB system log only — no app log format yet | ⛔ Blocked |
+| 1 | Android ATAK Plug-in | Android only | 2 (regular, enhanced — same format) | `parser/atak.py` ✅ |
+| 2 | Pro+ Application (RSDK) | iOS, Android | 1 per platform (confirmed) | `parser/rsdk.py` ✅ |
+| 3 | Relay Health Manager | Android *(iOS TBD)* | Android logcat (`com.gotenna.relaymanager`) | `parser/relay_manager.py` ✅ |
+| 4 | goTenna Pro+ diagnostic export | iOS, Android | Block-format diagnostic export | `parser/diagnostic.py` ✅ *(detection fallback)* |
 
 ---
 
@@ -172,14 +173,15 @@ A goTenna application built on the Flutter/Dart framework.
 | iOS | 1 (confirmed) | ✅ Example log analyzed: rsdk_log_JonathaniOS.txt |
 
 ### Parsing Rules
-> _To be defined once log type count is verified and example logs are provided_
+> Both platforms are now implemented in `parser/rsdk.py`. The detailed,
+> per-platform parsing rules and field tables live in the sections below:
+> [Pro+ Application — iOS RSDK Log](#pro-application--ios-rsdk-log) and
+> [Pro+ Application — Android RSDK Log](#pro-application--android-rsdk-log).
+> This section is kept as the high-level overview only.
 
 ### Fields to Parse
-> _To be defined once example logs are provided_
-
-| Field | Description | Platform | Notes |
-|-------|-------------|----------|-------|
-| | | | |
+> See the per-platform **Fields to Parse** tables in the iOS RSDK and Android
+> RSDK sections below — they are the source of truth for what `rsdk.py` extracts.
 
 ---
 
@@ -304,7 +306,7 @@ All parseable data comes from lines tagged `I flutter` (Flutter app output):
 
 ---
 
-_Last updated: 2026-05-26_
+_Last updated: 2026-06-03_
 
 ---
 

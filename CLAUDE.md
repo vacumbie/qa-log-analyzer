@@ -69,7 +69,7 @@ asking anyone?* If not, simplify.
 | UI | React 18 + Vite | `cd ui && npm run dev` → `http://localhost:5173` |
 | Charts | Chart.js 4.4 + react-chartjs-2 | Line and Bar only; annotation plugin not installed |
 | Tests | Pytest | `pytest tests/` from repo root with venv active |
-| Fonts | Barlow Condensed, Share Tech Mono | Via Google Fonts in `index.html` |
+| Fonts | Barlow Condensed, Share Tech Mono | Referenced by name in `index.css`/inline styles. ⚠️ Not actually loaded yet — no Google Fonts `<link>`, `@import`, or `@font-face` exists, so they fall back to system fonts |
 
 **Windows:** `.\venv\Scripts\activate` at repo root before any Python work.
 **Mac/Linux:** `source venv/bin/activate` at repo root before any Python work.

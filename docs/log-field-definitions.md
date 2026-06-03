@@ -4,7 +4,7 @@
 > Each entry defines what the field means in the raw log, how it is parsed, what it becomes
 > in the data model, and any known accuracy limitations or caveats.
 >
-> Last updated: 2026-05-20
+> Last updated: 2026-06-03
 
 ---
 
@@ -91,7 +91,7 @@ One block per RF message received over the mesh. This is the core data source fo
 | `originator timestamp` | string | `message.originator_timestamp` | When the originator sent the message |
 | `receiver callsign` | string | `message.receiver_callsign` | Callsign of the logging device (this device) |
 | `receiver gid` | string | `message.receiver_gid` | GID of the logging device — used for device identity |
-| `receiver location` | string | `message.receiver_location` | Lat/lon of receiver at time of receipt |
+| `receiver location` | string | `message.receiver_location` | Lat/lon of receiver at time of receipt. † Parsed into the model but **not currently serialized** by `_result_to_dict()` — not yet exposed to the UI. |
 | `receiver pli interval` | string | `message.receiver_pli_interval` | PLI broadcast rate of the logging device |
 | `receiver timestamp` | string | `message.timestamp` | **Primary timestamp for this message** — when this device received it |
 
@@ -100,6 +100,8 @@ One block per RF message received over the mesh. This is the core data source fo
 > ⚠️ **PLI sent = 0 in message counts.** Outbound PLI is not counted in the `pli messages sent` counter. The device's own PLI rate is confirmed via the `receiver pli interval` field on inbound messages, not from a sent counter.
 >
 > ⚠️ **This block records received messages only.** There is no equivalent block for sent messages. Sent chat/map counts come from `Message Count Details` (cumulative counter), not individual records.
+>
+> † **Serialization gap.** `ReceivedMessage` also carries `receiver_location` and a separate `receiver_timestamp` field that the diagnostic parser populates, but `_result_to_dict()` in `api/routes/parse.py` does **not** emit either of them, so they never reach the UI. The `receiver timestamp` row above maps to `message.timestamp` (the primary timestamp), which **is** serialized — do not confuse it with the unused `receiver_timestamp` model field. Add these to the `received_messages` block in `_result_to_dict()` before relying on them in the UI.
 
 ---
 
@@ -549,7 +551,7 @@ These fields are computed by the parser or API layer — they do not appear dire
 | **Temperature display** | °F (convert) | °F (convert) | °F (convert) |
 | **RSSI storage** | Unsigned byte (137–237) | Real dBm (signed) | Real dBm (signed) |
 | **RSSI conversion needed** | Yes: `value − 256` | No | No |
-| **Hop count reliability** | ✅ Genuine RF routing data | ❌ Not genuine — exclude from topology/hop analysis | ✅ Genuine RF routing data |
+| **Hop count reliability** | ✅ Genuine RF routing data | ✅ Genuine when from `GRIP_Receiver` incoming fields (`grip_messages.hops`); ❌ legacy `SendMessageResponse` counter still excluded | ✅ Genuine RF routing data |
 | **Callsign availability** | ✅ Present in received messages | ✅ Via ContactManager lines (not yet parsed) | ❌ Always empty — filename only |
 | **Sent message records** | ❌ Not recorded | Partial (TX outcomes only) | ✅ `isSender = true` records |
 | **PLI sent counter** | ❌ Always 0 | N/A | ✅ `SENT` delivery status |
@@ -558,4 +560,4 @@ These fields are computed by the parser or API layer — they do not appear dire
 
 ---
 
-_Last updated: 2026-05-26_
+_Last updated: 2026-06-03_

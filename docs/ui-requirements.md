@@ -21,7 +21,7 @@
 - **Framework:** React / Vite
 - **API:** FastAPI
 - **Charting:** Chart.js 4.4.1
-- **Fonts:** Rajdhani (body), Barlow Condensed (headings), Share Tech Mono (monospace/data)
+- **Fonts:** Barlow Condensed (headings/display), Share Tech Mono (monospace/data, via `var(--mono)`). These are referenced by name in `index.css` and inline styles; `index.css` also lists `Rajdhani` as the first body-font fallback. ⚠️ **None of these fonts are currently loaded** (no Google Fonts `<link>`, `@import`, or `@font-face` exists), so the browser falls back to system fonts. Load them before relying on the intended typography.
 
 ---
 
@@ -131,24 +131,25 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
 **Below the cards:** Stacked horizontal bar chart — "Estimated Time per PLI Interval". Each row is one node; each colored segment is an interval. Duration computed from consecutive message gaps capped at 3× the interval. N/A gaps bridged when same interval appears on both sides.
 
 ### 3. TX / RX Analysis (`txrx`)
-- **Chat Message TX/RX — What the Logs Can Tell Us** — explanatory section on data limitations
-- **Sent vs Received Counters** — app-reported cumulative totals (broadcast + private); bar chart; note: Unknown device had no Message Count Details blocks
-- **Received Messages by Type** — broadcast vs private (1to1) breakdown; bar chart
-- **Per-Device TX Delivery — Cross-Log Verification** — messages sent, confirmed in ≥1 other log, unverifiable gap; table per device
-- **Private (1to1) Messages — Full Detail** — every private message to/from a logging device; table with hop count
+- **Sent vs Received** — app-reported cumulative totals; renders `chat_sent_recv` (diagnostic) and `atak_sent_vs_received` charts
+- **Message Types Breakdown** — `atak_message_types` chart (ATAK only)
+- **TX Outcomes (RSDK only)** — unicast ACK / NACK / Timeout; `tx_outcomes` chart
+- **Partially Received (ATAK only)** — `atak_partial_received` chart
 
-**GRIP Transfer Analysis (RSDK logs only — shown when grip_transfer_count > 0):**
-- **Delivery Time Distribution** — histogram of `delivery_ms` per completed transfer; x-axis in ms; color-coded by outcome (delivered = green, cancelled = red, incomplete = amber). Sub-label shows average delivery time.
-- **Transfer Outcomes** — stacked bar per device: delivered / cancelled / incomplete counts
-- **Retransmission Rate** — bar chart of `grip_retransmit_count` (segments requiring >1 attempt) vs clean segments per device. Note: `max_rep_counter = 2` means firmware was one failure from cancelling that transfer.
-- **Broadcast vs Private Split** — bar chart of outgoing broadcast (`msg_type=2`) vs private (`msg_type=0`) message counts per device
+**GRIP Transfer Analysis (RSDK logs only — shown when any `grip_transfers` exist):**
+- Explanatory note on the GRIP data source (structured `Outgoing/Incoming message fields` log lines; delivery time = sender-side "File transmission started" → "delivered"; repCounter caps at 3 before firmware cancels)
+- **Transfer Outcomes** — `GripOutcomeBar`: delivered / cancelled / incomplete counts
+- **Delivery Time Distribution** — `GripDeliveryChart`: `delivery_ms` per completed transfer
+- **Transfers with retransmissions** — detail table (not a chart), shown only when any transfer has `max_rep_counter > 0`; lists start time, msg id, max rep counter (n/2), segment count, and delivery time/outcome per transfer
+
+> **Backlog (not yet implemented):** per-device TX cross-log verification table, private (1to1) full-detail table, a broadcast-vs-private outgoing split chart, and a standalone retransmission-rate bar chart. These were in the reference design but are not in the current `TxRxTab`.
 
 ### 4. Sessions & Radio Stats (`sessions`)
-- **App Version** — from Device & Application Info block; table per device
-- **App Crash Detection** — explanatory section; note: diagnostic log format v1 has no explicit crash markers, ANR events, or exception traces
-- **Crash / Interruption Evidence** — result summary (0 confirmed crashes); gaps between exercise days are expected, not crashes
-- **Active Session Lengths** — bar chart; session = contiguous activity block; gaps >30 min = session break
-- **Radio Lifetime Uptime** — all-time cumulative firmware counter (not session duration); bar chart; captured at each stat snapshot
+- **App Version** — device card per log from the Device & Application Info block (or ATAK app launch record); shows format, app/build, platform, model, radio FW, serial
+- **App Crash Detection** — explanatory note, shown only when a diagnostic log is loaded; diagnostic log format v1 has no explicit crash markers, ANR events, or exception traces — lists crash-proxy indicators (>30 min gaps, single app-info block, polling gaps)
+- **Active Session Lengths** — `session_lengths` chart; session = contiguous activity block; gaps >30 min = session break
+
+> **Backlog (not yet implemented):** Radio Lifetime Uptime bar chart (all-time cumulative firmware counter). The `radio_stat_snapshots` data is serialized but no chart renders it yet.
 
 ### 5. Thermal (`thermal`)
 - **PA Temperature Over Time** — line chart per device; °F; thresholds: yellow = 113°F caution, red = 131°F peak. X-axis uses **normalized session progress (0–100%)** per device so sessions of different lengths all render fully across the chart width.
@@ -166,19 +167,21 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
 > ⚠️ **RSDK hop count source changed.** Previously excluded entirely as unreliable (SDK sequence counter). Now included when sourced from `GRIP_Receiver` incoming message fields — these are genuine RF mesh hop counts. The old `SendMessageResponse` hop count is still excluded.
 
 ### 8. RSSI (`rssi`)
-- **RSSI Distribution by Hop Count** — box/bar chart grouped by hop count; diagnostic format: convert unsigned byte (value − 256); ATAK and RSDK GRIP: already signed dBm, no conversion needed
-- **RSSI Distribution per Logging Device** — bar chart per device showing average RSSI; RSDK uses `grip_messages` incoming `rssi` field where available
-- **Data source badge** per device: `DIAGNOSTIC` · `ATAK` · `GRIP (RSDK)`
+- **RSSI Distribution by Hop Count** — `rssi_by_hop` chart grouped by hop count; diagnostic format: convert unsigned byte (value − 256); ATAK and RSDK GRIP: already signed dBm, no conversion needed
+- **RSSI Distribution per Logging Device** — `rssi_avg_device` chart showing average RSSI per device; RSDK uses `grip_messages` incoming `rssi` field where available
+- **GRIP RSSI Over Time** — shown only when RSDK GRIP RSSI data exists. Per-device summary cards (avg / min / max dBm, message count, and retransmit count when > 0) above the `grip_rssi_over_time` line chart. X-axis is normalized session progress (0–100%); each point is the bucketed average RSSI of incoming GRIP messages; ▲ markers flag buckets containing a retransmission (`rep_counter > 0`); dashed reference lines at −70 dBm (good) and −85 dBm (caution).
 
 > ⚠️ **RSDK RSSI source.** `grip_messages` incoming `rssi` values are real dBm from `GRIP_Receiver` structured fields — genuine RF signal strength. No conversion needed (already signed). Previously RSSI was unavailable for RSDK logs.
 
 ### 9. Chat Activity (`chat`)
-- **Chat Messages Received by Device** — bar chart of non-PLI (text type) messages per logging device
-- **Top Chat Senders** — bar chart of senders visible to logged devices
+- **Chat / Map Message Split** — `pli_vs_chat` chart (PLI vs chat/map breakdown; same chart reused from Overview)
+- **TX Outcomes** — `tx_outcomes` chart (RSDK logs only)
+
+> **Backlog (not yet implemented):** dedicated "Chat Messages Received by Device" and "Top Chat Senders" charts from the reference design. The current `ChatTab` reuses the PLI-vs-chat split and TX-outcomes charts.
 
 ### 10. Health Score (`health`)
-- **Per-Device Health Score** — composite radar chart per device; 4 dimensions (to be defined); higher = better
-- Render one radar chart card per device
+- **Per-Device Health Score** — one card per device showing a composite score out of 4 (not a radar chart). The four pass/fail dimensions are **Thermal** (peak < 113°F), **Battery** (min > 30%), **BLE** (no BLE fail events), and **Hops** (avg < 4). Score color: green ≥ 3 · yellow ≥ 2 · red below.
+- Labeled Alpha — a `Note` states the dimensions are still placeholder/not fully defined.
 
 ---
 
@@ -196,6 +199,20 @@ Displays data from goTenna Relay Manager logs (networkPolling and scheduledHealt
 **Environment badge:** `STAGE` (cyan) or `UNKNOWN` (amber). Prod badge to be defined when prod logs are analyzed.
 
 > ⚠️ Relay health attribute values (SNR, battery %, temperature °F, uptime, firmware version) are not yet available — they are encoded in BLE payload bytes not yet decoded. Surface this limitation prominently rather than silently omitting the fields.
+
+---
+
+### 12. ATAK (`atak`)
+ATAK-only tab (`atakOnly`) — appears in the tab bar only when an ATAK plug-in log is loaded; marked with an `α` badge. Renders only ATAK-format results.
+
+- **Message Delivery Status** — `atak_delivery_status` chart; breakdown across all ATAK messages
+- **Message Types** — `atak_message_types` chart; PLI · Chat · Map Objects · File Transfers
+- **Connection State Over Time** — `atak_connection_state` chart; CONNECTED vs CONNECTING health samples
+- **Device Events Timeline** — `atak_events_timeline` chart; connect / disconnect / power / PLI / frequency changes
+- **Partially Received Messages** — `atak_partial_received` chart; shown only when `summary.partially_received > 0`
+- **App Launches** — device cards; shown only when a log has more than one app launch (regular ATAK logs accumulate across launches)
+
+> Negative delivery times (clock skew) are surfaced honestly via `summary.negative_delivery_time_count`.
 
 ---
 
@@ -217,12 +234,14 @@ Displays data from goTenna Relay Manager logs (networkPolling and scheduledHealt
 
 ---
 
-_Last updated: 2026-05-26_
+_Last updated: 2026-06-03_
 
 ---
 
-### 12. Network Topology (`topology`) — ⚠️ ALPHA/BETA
+### 13. Network Topology (`topology`) — ⚠️ ALPHA/BETA · NOT YET IMPLEMENTED
 
+> **Not implemented.** There is no `topology` entry in the `TABS` array in `App.jsx` and no topology tab renders today. This section is a forward-looking design spec / backlog item, retained for when the feature is built.
+>
 > This is the most difficult data point in the dashboard to get accurate. Topology is inferred entirely from what the parsed logs can surface — it is not ground truth. The UI must clearly label this tab as experimental/Alpha.
 
 **Purpose:** Visualize the mesh network as a node graph — which devices were communicating, through how many hops, and how messages flowed between them.
@@ -259,7 +278,7 @@ _Last updated: 2026-05-26_
 
 ---
 
-_Last updated: 2026-05-26_
+_Last updated: 2026-06-03_
 
 ---
 
@@ -267,6 +286,9 @@ _Last updated: 2026-05-26_
 
 ### Time Window Filtering — ✅ Implemented
 Two-step upload flow: drop files → app scans timestamps client-side → dual-handle range slider with hour-level snapping. Start handle snaps down to hour, end snaps up (2:30–5:30 → 2:00–6:00). Adaptive tick marks: every 1hr if ≤24hr span, every 6hr for multi-day. Selected window displayed as header badge with ✕ to clear. Filtering recomputes summaries client-side.
+
+### GRIP RSSI Line Graph Over Time — ✅ Implemented
+Per-device GRIP RSSI line chart in the RSSI tab (`grip_rssi_over_time`), with summary cards and retransmit (▲) markers on a normalized 0–100% session-progress axis. See RSSI tab spec (section 8).
 
 ### Session Persistence
 Allow a user to save a parsed session so it can be retrieved later and compared alongside other test data.
@@ -288,4 +310,4 @@ Allow a user to save a parsed session so it can be retrieved later and compared 
 
 **Dependencies:** Requires API session store to persist beyond in-memory (currently lost on server restart)
 
-**Priority:** ✅ Implemented
+**Status:** ⏸ Deferred — not implemented. No persistence exists in `api/routes/export.py`, `App.jsx`, or `useLogData.js`.
