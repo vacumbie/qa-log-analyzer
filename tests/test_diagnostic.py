@@ -1,9 +1,6 @@
 """tests/test_diagnostic.py"""
 
-import sys
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from parser.diagnostic import parse_diagnostic_log
 
