@@ -9,7 +9,7 @@ description: >
   passing unit tests?", "we added GRIP parsing — does it actually show up in
   the UI?", "several things are marked done but the dashboard looks wrong —
   what's the real status?"
-tools: Read, Grep, Glob, Bash, Task
+tools: Read, Grep, Glob, Bash
 model: opus
 color: yellow
 ---
