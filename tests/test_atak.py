@@ -208,6 +208,10 @@ def test_device_gid_captured():
 
 
 # ── Filename parsing ──────────────────────────────────────────────────────────
+# NAMED_FIXTURE is intentionally not committed — it holds real captured field
+# data. These two tests skip when it's absent (the normal case in a clean
+# checkout); they only run if someone drops a real ATAK log with that name into
+# tests/fixtures/ locally. Do not create a fixture just to make them run.
 
 def test_callsign_from_filename():
     """Callsign should be extracted from standard ATAK log filename."""
