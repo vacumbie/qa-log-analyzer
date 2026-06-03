@@ -60,7 +60,7 @@ Run these steps in order. Do not skip step 2.
 - If the user named a specific file, that is the scope.
 - Otherwise run `git diff --name-only main...HEAD`. Filter to
   `.py / .jsx / .md / .json` files.
-- If the range is empty (e.g. the branch is main), fall back to `git show HEAD`.
+- If the range is empty (e.g. the branch is main), fall back to the files changed in `git show HEAD`.
 - If the scope is empty, say "no reviewable changes" and stop.
 
 **Step 2 — Read the full current contents of every changed file.**
