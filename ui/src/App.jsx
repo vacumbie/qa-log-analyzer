@@ -1003,7 +1003,8 @@ function SdkLogSummaryCard({ summary }) {
   const [expanded, setExpanded] = React.useState(false)
   if (!summary || !summary.total_count) return null
 
-  const tagEntries = Object.entries(summary.tag_counts || {}).sort((a, b) => b[1] - a[1])
+  const tagEntries = Object.entries(summary.counts_by_tag || {}).sort((a, b) => b[1] - a[1])
+  const infoEntries = Object.entries(summary.counts_by_info || {}).sort((a, b) => b[1] - a[1])
   const total = summary.total_count
   const maxCount = tagEntries.length ? tagEntries[0][1] : 1
 
@@ -1081,18 +1082,19 @@ function SdkLogSummaryCard({ summary }) {
               </div>
             </div>
 
-            {/* Unique messages */}
+            {/* Unique messages — additionalInfo with occurrence counts */}
             <div>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
-                Unique Messages {summary.unique_messages?.length >= 20 ? '(capped at 20)' : ''}
+                Unique Messages
               </div>
               <div style={{ maxHeight: 200, overflowY: 'auto' }}>
-                {(summary.unique_messages || []).map((msg, i) => (
-                  <div key={i} style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#64748b', padding: '3px 0', borderBottom: '1px solid var(--bg2)' }}>
-                    • {msg}
+                {infoEntries.map(([msg, count], i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontFamily: 'var(--mono)', fontSize: 8, color: '#64748b', padding: '3px 0', borderBottom: '1px solid var(--bg2)' }}>
+                    <span>• {msg}</span>
+                    <span style={{ color: C.muted, flexShrink: 0 }}>{count.toLocaleString()}</span>
                   </div>
                 ))}
-                {(!summary.unique_messages || summary.unique_messages.length === 0) && (
+                {infoEntries.length === 0 && (
                   <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#334155' }}>No additionalInfo messages found.</div>
                 )}
               </div>
@@ -1153,19 +1155,19 @@ function AtakTab({ results }) {
       )}
 
       {/* SDK Logging 2.0 — one card per ATAK result that has sdk_log data */}
-      {atakResults.some(r => r.atak_sdk_log_summary?.total_count > 0) && (
+      {atakResults.some(r => r.atak_sdk_error_summary?.total_count > 0) && (
         <>
           <SectionHeader
             icon="🔧"
             title="SDK Logging 2.0"
             sub="Structured SDK log events — aggregated counts and unique messages only"
           />
-          {atakResults.map((r, i) => r.atak_sdk_log_summary?.total_count > 0 && (
+          {atakResults.map((r, i) => r.atak_sdk_error_summary?.total_count > 0 && (
             <div key={i} style={{ marginBottom: 8 }}>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginBottom: 4 }}>
                 {r.source_filename}
               </div>
-              <SdkLogSummaryCard summary={r.atak_sdk_log_summary} />
+              <SdkLogSummaryCard summary={r.atak_sdk_error_summary} />
             </div>
           ))}
         </>

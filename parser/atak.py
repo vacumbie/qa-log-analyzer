@@ -24,7 +24,7 @@ from typing import Optional
 from .models import (
     ParseResult, DeviceInfo, SystemSample, SessionGap,
     AtakMessage, AtakDeviceHealth, AtakEvent, AtakAppInfo,
-    AtakSdkLogSummary,
+    AtakSdkErrorSummary, AtakSdkErrorSample,
 )
 
 _TS_FMT_OUT = "%Y-%m-%d %H:%M:%S.%f"
@@ -60,10 +60,12 @@ def _record_type(record: dict) -> str:
         return "device_health"
     if "logId" in record:
         return "message"
-    if "event" in record:
-        return "event"
+    # sdkError must precede the event check: an sdkError record nests an 'event'
+    # inside its 'message', and we must not misclassify it as a lifecycle event.
     if "id" in record and "tags" in record and "timestamp" in record:
         return "sdk_log"
+    if "event" in record:
+        return "event"
     return "unknown"
 
 
@@ -159,6 +161,12 @@ def _handle_message(record: dict, result: ParseResult) -> None:
     # delivery_time_ms can legitimately be negative (clock skew between devices)
     delivery_ms = record.get("deliveryTimeInMillis")
 
+    # numberOfOpenSegments = -99 is a sentinel: the transfer was cancelled before
+    # the count was known. Store as None, never the literal -99. Genuine counts
+    # (including 0 and any positive value) are preserved.
+    raw_open = record.get("numberOfOpenSegments")
+    open_segments = None if raw_open == -99 else raw_open
+
     atak_msg = AtakMessage(
         timestamp=_ms_to_str(ts),
         log_id=record.get("logId"),
@@ -167,7 +175,7 @@ def _handle_message(record: dict, result: ParseResult) -> None:
         sender_gid=record.get("senderGid"),
         delivery_status=record.get("deliveryStatus", ""),
         segment_count=record.get("segmentCount", 1),
-        open_segments=record.get("numberOfOpenSegments", 0),
+        open_segments=open_segments,
         retry_count=record.get("retryCount", 0),
         delivery_time_ms=delivery_ms,
         message_protocol=record.get("messageProtocol", ""),
@@ -178,6 +186,10 @@ def _handle_message(record: dict, result: ParseResult) -> None:
         receiver_gid=record.get("receiverGid"),
         hop_count=record.get("hopCount"),
         rssi=record.get("rssi"),
+        logging_user_location=record.get("loggingUserLocation"),
+        transmitted_location=record.get("transmittedLocation"),
+        originator_uuid=record.get("originatorUUID", ""),
+        originator_callsign=record.get("originatorCallsign", ""),
     )
     result.atak_messages.append(atak_msg)
 
@@ -204,6 +216,11 @@ def _handle_event(record: dict, result: ParseResult) -> None:
 
     elif event_type == "deviceDisconnected":
         atak_event.connection_type = event.get("connectionType", "")
+        atak_event.location = event.get("location")
+
+    elif event_type == "firmwareUpdate":
+        atak_event.update_status = event.get("updateStatus", "")
+        atak_event.update_time_ms = event.get("updateTimeInMillis")
 
     elif event_type == "powerLevelUpdated":
         atak_event.power_watts = event.get("power")
@@ -224,36 +241,71 @@ def _handle_event(record: dict, result: ParseResult) -> None:
 
 def _handle_sdk_log(record: dict, result: ParseResult) -> None:
     """
-    Handle SDK Logging 2.0 records — aggregate counts and unique messages only.
+    Handle SDK Logging 2.0 (sdkError) records — aggregate only, never per-record.
 
-    These records are high-volume (thousands per session) and are not stored
-    individually. Instead we accumulate a summary: counts by tag combination
-    and a capped list of unique additionalInfo messages.
+    These records are the dominant record type in enhanced field logs (thousands
+    per session) and are not stored individually. Instead we accumulate counts by
+    tag combination and by additionalInfo, distinct deviceState attributes, and
+    retain one representative sample for per-field detail.
 
-    Tag combination examples: 'ERROR/BLE', 'ERROR/RADIO'
+    Tag combination examples: 'ERROR|BLE', 'ERROR|RADIO'
     additionalInfo examples: 'Gatt write back off reached skipping write'
 
-    The summary is attached to result.atak_sdk_log_summary once all records
+    The summary is attached to result.atak_sdk_error_summary once all records
     are processed (see parse_atak_log — we accumulate into _sdk_log_state and
     build the summary at the end).
     """
     tags = record.get("tags", [])
-    tag_key = "/".join(sorted(tags)) if tags else "UNKNOWN"
+    tag_key = "|".join(tags) if tags else "UNKNOWN"
 
     msg = record.get("message", {})
+    device_state = msg.get("deviceState", {}) if isinstance(msg, dict) else {}
     event = msg.get("event", {}) if isinstance(msg, dict) else {}
     info = event.get("additionalInfo", "") if isinstance(event, dict) else ""
 
     # Accumulate into the mutable state dict on result (cleaned up after loop)
     if not hasattr(result, "_sdk_log_state"):
-        result._sdk_log_state = {"tag_counts": {}, "unique_messages": [], "total": 0, "first_ts": None, "last_ts": None}
+        result._sdk_log_state = {
+            "counts_by_tag": {}, "counts_by_info": {}, "total": 0,
+            "radio_types": set(), "serial_numbers": set(), "connection_states": set(),
+            "first_ts": None, "last_ts": None, "sample": None,
+        }
 
     state = result._sdk_log_state
-    state["tag_counts"][tag_key] = state["tag_counts"].get(tag_key, 0) + 1
+    state["counts_by_tag"][tag_key] = state["counts_by_tag"].get(tag_key, 0) + 1
     state["total"] += 1
 
-    if info and info not in state["unique_messages"] and len(state["unique_messages"]) < 20:
-        state["unique_messages"].append(info)
+    if info:
+        state["counts_by_info"][info] = state["counts_by_info"].get(info, 0) + 1
+
+    # Distinct deviceState attributes — radioType is surfaced nowhere else
+    if isinstance(device_state, dict):
+        for key, bucket in (("radioType", "radio_types"),
+                            ("serialNumber", "serial_numbers"),
+                            ("connectionState", "connection_states")):
+            value = device_state.get(key)
+            if value:
+                state[bucket].add(value)
+
+    # Retain the first record as a representative sample
+    if state["sample"] is None:
+        state["sample"] = AtakSdkErrorSample(
+            id=record.get("id", ""),
+            timestamp=record.get("timestamp", ""),
+            tags=list(tags),
+            platform_type=device_state.get("platformType", "") if isinstance(device_state, dict) else "",
+            connection_type=device_state.get("connectionType", "") if isinstance(device_state, dict) else "",
+            serial_number=device_state.get("serialNumber", "") if isinstance(device_state, dict) else "",
+            address=device_state.get("address", "") if isinstance(device_state, dict) else "",
+            connection_state=device_state.get("connectionState", "") if isinstance(device_state, dict) else "",
+            personal_gid=device_state.get("personalGid") if isinstance(device_state, dict) else None,
+            battery_level=device_state.get("batteryLevel") if isinstance(device_state, dict) else None,
+            firmware_version=device_state.get("firmwareVersion", "") if isinstance(device_state, dict) else "",
+            radio_type=device_state.get("radioType", "") if isinstance(device_state, dict) else "",
+            mcuuuid=device_state.get("mcuuuid", "") if isinstance(device_state, dict) else "",
+            endorsements=device_state.get("endorsements", "") if isinstance(device_state, dict) else "",
+            additional_info=info,
+        )
 
     # Track timestamp range using ISO 8601 string directly
     ts_str = record.get("timestamp", "")
@@ -390,17 +442,28 @@ def parse_atak_log(path: Path) -> ParseResult:
                 f"{record.get('timestampInMillis', '?')}: {e}"
             )
 
-    # Build AtakSdkLogSummary from accumulated state if any sdk_log records seen
+    # Build AtakSdkErrorSummary from accumulated state if any sdk_log records seen
     if hasattr(result, "_sdk_log_state"):
         state = result._sdk_log_state
-        result.atak_sdk_log_summary = AtakSdkLogSummary(
-            tag_counts=state["tag_counts"],
-            unique_messages=state["unique_messages"],
+        result.atak_sdk_error_summary = AtakSdkErrorSummary(
             total_count=state["total"],
+            counts_by_tag=state["counts_by_tag"],
+            counts_by_info=state["counts_by_info"],
+            radio_types=sorted(state["radio_types"]),
+            serial_numbers=sorted(state["serial_numbers"]),
+            connection_states=sorted(state["connection_states"]),
             first_timestamp=state["first_ts"] or "",
             last_timestamp=state["last_ts"] or "",
+            sample=state["sample"],
         )
         del result._sdk_log_state  # clean up temp state
+
+        # Volume baseline for a healthy session is unknown — the count is
+        # informational, not a pass/fail signal. Surface this honestly.
+        result.parse_errors.append(
+            "DATA LIMITATION: sdkError (SDK Logging 2.0) volume baseline unknown "
+            "— counts are aggregated and informational, not a pass/fail signal."
+        )
 
     _detect_session_gaps(result)
     return result

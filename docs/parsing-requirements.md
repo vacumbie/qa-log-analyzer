@@ -502,7 +502,7 @@ are general structured log events, not error-only records.
    - Has `appVersion` → App Info record
    - Has `connectionState` → Device Health record
    - Has `logId` → Message record
-   - Has `message.deviceState` (and no `logId`) → SDK Error record — **must precede the `event` check** (an sdkError record's `message` also nests an `event`)
+   - Has `id` **and** `tags` **and** `timestamp` (top-level) → SDK Error record — **must precede the `event` check** (an sdkError record's `message` also nests an `event`)
    - Has `event` → Event record
 3. **Timestamps:** All are Unix epoch milliseconds — divide by 1000 for seconds, then convert to datetime
 4. **Temperature:** `powerAmpTemperature` and `systemTemperature` are Celsius — convert to Fahrenheit for display

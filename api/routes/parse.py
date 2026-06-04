@@ -302,6 +302,10 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
                 "hop_count":           m.hop_count,
                 "rssi":                m.rssi,
                 "rssi_is_valid":       m.rssi_is_valid,
+                "logging_user_location": m.logging_user_location,
+                "transmitted_location":  m.transmitted_location,
+                "originator_uuid":     m.originator_uuid,
+                "originator_callsign": m.originator_callsign,
             }
             for m in r.atak_messages
         ]
@@ -317,22 +321,45 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
                 "pli_auto_send":    e.pli_auto_send,
                 "bandwidth_khz":    e.bandwidth_khz,
                 "channels":         e.channels,
+                "location":         e.location,
+                "update_status":    e.update_status,
+                "update_time_ms":   e.update_time_ms,
             }
             for e in r.atak_events
         ]
 
-        # SDK Logging 2.0 summary — None if no sdk_log records were present
-        if r.atak_sdk_log_summary:
-            s = r.atak_sdk_log_summary
-            base["atak_sdk_log_summary"] = {
-                "total_count":      s.total_count,
-                "tag_counts":       s.tag_counts,
-                "unique_messages":  s.unique_messages,
-                "first_timestamp":  s.first_timestamp,
-                "last_timestamp":   s.last_timestamp,
+        # SDK Logging 2.0 summary — None if no sdkError records were present
+        if r.atak_sdk_error_summary:
+            s = r.atak_sdk_error_summary
+            base["atak_sdk_error_summary"] = {
+                "total_count":       s.total_count,
+                "counts_by_tag":     s.counts_by_tag,
+                "counts_by_info":    s.counts_by_info,
+                "radio_types":       s.radio_types,
+                "serial_numbers":    s.serial_numbers,
+                "connection_states": s.connection_states,
+                "first_timestamp":   s.first_timestamp,
+                "last_timestamp":    s.last_timestamp,
+                "sample": {
+                    "id":               s.sample.id,
+                    "timestamp":        s.sample.timestamp,
+                    "tags":             s.sample.tags,
+                    "platform_type":    s.sample.platform_type,
+                    "connection_type":  s.sample.connection_type,
+                    "serial_number":    s.sample.serial_number,
+                    "address":          s.sample.address,
+                    "connection_state": s.sample.connection_state,
+                    "personal_gid":     s.sample.personal_gid,
+                    "battery_level":    s.sample.battery_level,
+                    "firmware_version": s.sample.firmware_version,
+                    "radio_type":       s.sample.radio_type,
+                    "mcuuuid":          s.sample.mcuuuid,
+                    "endorsements":     s.sample.endorsements,
+                    "additional_info":  s.sample.additional_info,
+                } if s.sample else None,
             }
         else:
-            base["atak_sdk_log_summary"] = None
+            base["atak_sdk_error_summary"] = None
 
     # ── Relay Manager-specific fields ─────────────────────────────────────────
     if r.log_format == "relay_manager":
@@ -388,8 +415,8 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             "partially_received": sum(1 for m in r.atak_messages if m.delivery_status == "PARTIALLY_RECEIVED"),
             "negative_delivery_time_count": sum(1 for m in r.atak_messages if m.delivery_time_ms is not None and m.delivery_time_ms < 0),
             # SDK Logging 2.0
-            "sdk_log_total":        r.atak_sdk_log_summary.total_count if r.atak_sdk_log_summary else 0,
-            "sdk_log_tag_counts":   r.atak_sdk_log_summary.tag_counts if r.atak_sdk_log_summary else {},
+            "sdk_error_count":      r.atak_sdk_error_summary.total_count if r.atak_sdk_error_summary else 0,
+            "radio_types":          r.atak_sdk_error_summary.radio_types if r.atak_sdk_error_summary else [],
         }
 
     elif r.log_format == "relay_manager":

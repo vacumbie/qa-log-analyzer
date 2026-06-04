@@ -169,7 +169,8 @@ class AtakMessage:
     delivery_status: str = ""              # FULLY_RECEIVED | SENT | DELIVERED |
                                            # PARTIALLY_RECEIVED
     segment_count: int = 1
-    open_segments: int = 0                 # > 0 means partially received
+    open_segments: Optional[int] = None    # > 0 means partially received;
+                                           # -99 sentinel → None (count unknown)
     retry_count: int = 0
     delivery_time_ms: Optional[int] = None # Can be negative (clock skew)
     message_protocol: str = ""             # BROADCAST | UNICAST
@@ -181,6 +182,13 @@ class AtakMessage:
     receiver_gid: Optional[int] = None
     hop_count: Optional[int] = None        # 0 when is_sender=True
     rssi: Optional[int] = None             # Real dBm (signed); 0 when is_sender=True
+
+    # Enhanced (SDK Logging 2.0) location + originator fields
+    logging_user_location: Optional[dict] = None  # {lat, long, alt} — logger's own GPS
+    transmitted_location: Optional[dict] = None    # {lat, long, alt} in payload;
+                                                   # None on textChat
+    originator_uuid: str = ""              # ANDROID-* UUID; "" when missing
+    originator_callsign: str = ""          # always empty in observed samples
 
     @property
     def is_pli(self) -> bool:
@@ -261,6 +269,13 @@ class AtakEvent:
     channels: list = field(default_factory=list)  # list of {"frequency": float,
                                                    #          "isControlChannel": bool}
 
+    # deviceDisconnected — device location at disconnect (enhanced log)
+    location: Optional[dict] = None        # {lat, long, alt}
+
+    # firmwareUpdate (enhanced log)
+    update_status: str = ""                # e.g. "STARTED"
+    update_time_ms: Optional[int] = None
+
 
 @dataclass
 class AtakAppInfo:
@@ -274,6 +289,69 @@ class AtakAppInfo:
     atak_version: str = ""
     device_model: str = ""
     android_api_version: Optional[int] = None
+
+
+@dataclass
+class AtakSdkErrorSample:
+    """
+    One retained sdkError record — a representative sample of the aggregated
+    SDK Logging 2.0 records, which are never stored individually due to volume.
+
+    radioType is surfaced nowhere else in the ATAK format, so the sample is the
+    only place per-record deviceState detail survives.
+    """
+    id: str = ""
+    timestamp: str = ""                    # ISO 8601 UTC, microsecond precision
+    tags: list = field(default_factory=list)
+    platform_type: str = ""
+    connection_type: str = ""
+    serial_number: str = ""
+    address: str = ""                      # BLE MAC
+    connection_state: str = ""
+    personal_gid: Optional[int] = None
+    battery_level: Optional[int] = None
+    firmware_version: str = ""
+    radio_type: str = ""                   # e.g. "PRO_X_2"
+    mcuuuid: str = ""
+    endorsements: str = ""                 # e.g. "PREMIUM"
+    additional_info: str = ""              # human-readable event description
+
+
+@dataclass
+class AtakSdkErrorSummary:
+    """
+    Aggregated summary of SDK Logging 2.0 (sdkError) records from an ATAK
+    enhanced log.
+
+    These records (identified by 'id', 'timestamp', 'tags' fields) are the
+    dominant record type in enhanced field logs — thousands per session. They
+    are NOT stored individually. Despite the 'ERROR' tag value, they are general
+    structured SDK log events, not error-only records.
+
+    Captured aggregates:
+      - total_count:       total records of this type in the log
+      - counts_by_tag:     count per tag combination (e.g. {'ERROR|BLE': 412})
+      - counts_by_info:    count per additionalInfo string
+      - radio_types:       sorted distinct radioType values (e.g. ['PRO_X_2'])
+      - serial_numbers:    sorted distinct serialNumber values
+      - connection_states: sorted distinct connectionState values
+      - first/last_timestamp: ISO 8601 UTC timestamps bounding the records
+      - sample:            one retained record for per-field detail
+
+    The volume baseline for a healthy session is unknown — the count is
+    informational, not a pass/fail signal (see DATA LIMITATION in parse_errors).
+    Whether this record type appears in regular (non-enhanced) logs from the
+    same firmware version is currently unknown — see parsing-requirements.md.
+    """
+    total_count: int = 0
+    counts_by_tag: dict = field(default_factory=dict)       # {'ERROR|BLE': 412}
+    counts_by_info: dict = field(default_factory=dict)      # {additionalInfo: count}
+    radio_types: list = field(default_factory=list)         # sorted distinct
+    serial_numbers: list = field(default_factory=list)      # sorted distinct
+    connection_states: list = field(default_factory=list)   # sorted distinct
+    first_timestamp: str = ""    # ISO 8601 UTC
+    last_timestamp: str = ""     # ISO 8601 UTC
+    sample: Optional[AtakSdkErrorSample] = None
 
 
 # ── Relay Manager-specific primitives ─────────────────────────────────────────
@@ -398,30 +476,6 @@ class GripTransfer:
     segment_count: Optional[int]      # from receiver-side "Full grip file received"
 
 
-
-
-@dataclass
-class AtakSdkLogSummary:
-    """
-    Aggregated summary of SDK Logging 2.0 records from an ATAK enhanced log.
-
-    SDK Logging 2.0 records (identified by 'id', 'timestamp', 'tags' fields)
-    are high-volume — thousands per session. They are not stored individually.
-    Instead this summary captures:
-      - tag_counts: count of records per tag combination (e.g. 'ERROR/BLE': 412)
-      - unique_messages: up to 20 unique additionalInfo strings
-      - total_count: total records of this type in the log
-      - first/last_timestamp: ISO 8601 UTC timestamps bounding the records
-
-    Whether this record type appears in regular (non-enhanced) logs from the
-    same firmware version is currently unknown — see parsing-requirements.md.
-    """
-    tag_counts: dict       # {tag_combination: count}  e.g. {'ERROR/BLE': 412}
-    unique_messages: list  # up to 20 unique additionalInfo strings
-    total_count: int
-    first_timestamp: str   # ISO 8601 UTC
-    last_timestamp: str    # ISO 8601 UTC
-
 # ── Top-level parse result ────────────────────────────────────────────────────
 
 @dataclass
@@ -468,7 +522,7 @@ class ParseResult:
     atak_health_samples: list[AtakDeviceHealth] = field(default_factory=list)
     atak_events: list[AtakEvent] = field(default_factory=list)
     atak_app_launches: list[AtakAppInfo] = field(default_factory=list)
-    atak_sdk_log_summary: Optional[AtakSdkLogSummary] = None  # None if no SDK 2.0 records present
+    atak_sdk_error_summary: Optional[AtakSdkErrorSummary] = None  # None if no SDK 2.0 records present
 
     # RSDK only — GRIP transfer data
     grip_messages: list[GripMessage] = field(default_factory=list)
