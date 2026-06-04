@@ -296,6 +296,7 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 |------|--------|
 | Time Window Filtering | ✅ Done |
 | GRIP RSSI Line Graph Over Time | ✅ Done |
+| ATAK Enhanced Log (SDK Logging 2.0) | ✅ Done |
 | Session Persistence | Deferred |
 | Relay Manager prod log support | Blocked — waiting on prod samples |
 | BLE payload decoding (relay health attributes) | Blocked — waiting on protocol spec |
