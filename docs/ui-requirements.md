@@ -236,7 +236,7 @@ ATAK-only tab (`atakOnly`) — appears in the tab bar only when an ATAK plug-in 
 
 ---
 
-_Last updated: 2026-06-03_
+_Last updated: 2026-06-04_
 
 ---
 
@@ -280,7 +280,7 @@ _Last updated: 2026-06-03_
 
 ---
 
-_Last updated: 2026-06-03_
+_Last updated: 2026-06-04_
 
 ---
 
@@ -291,6 +291,9 @@ Two-step upload flow: drop files → app scans timestamps client-side → dual-h
 
 ### GRIP RSSI Line Graph Over Time — ✅ Implemented
 Per-device GRIP RSSI line chart in the RSSI tab (`grip_rssi_over_time`), with summary cards and retransmit (▲) markers on a normalized 0–100% session-progress axis. See RSSI tab spec (section 8).
+
+### ATAK Enhanced Log (SDK Logging 2.0) — ✅ Implemented
+Full support for the enhanced ATAK log format. The `SdkLogSummaryCard` renders the aggregated `atak_sdk_error_summary` (counts by tag and by `additionalInfo`, distinct radio types, and a retained sample) — high-volume `sdkError` records are aggregated, never rendered per-record, with the volume-baseline `DATA LIMITATION` surfaced in the banner. Also covers the enhanced message/event fields: `loggingUserLocation` / `transmittedLocation`, `originatorUUID`, the `-99` open-segments sentinel shown as `unknown`, `firmwareUpdate` events, and `deviceDisconnected` location. See ATAK tab spec (section 12).
 
 ### Session Persistence
 Allow a user to save a parsed session so it can be retrieved later and compared alongside other test data.
