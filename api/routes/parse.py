@@ -321,6 +321,19 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             for e in r.atak_events
         ]
 
+        # SDK Logging 2.0 summary — None if no sdk_log records were present
+        if r.atak_sdk_log_summary:
+            s = r.atak_sdk_log_summary
+            base["atak_sdk_log_summary"] = {
+                "total_count":      s.total_count,
+                "tag_counts":       s.tag_counts,
+                "unique_messages":  s.unique_messages,
+                "first_timestamp":  s.first_timestamp,
+                "last_timestamp":   s.last_timestamp,
+            }
+        else:
+            base["atak_sdk_log_summary"] = None
+
     # ── Relay Manager-specific fields ─────────────────────────────────────────
     if r.log_format == "relay_manager":
         base["relay_manager"] = {
@@ -374,6 +387,9 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             "session_count":      len(r.atak_app_launches),
             "partially_received": sum(1 for m in r.atak_messages if m.delivery_status == "PARTIALLY_RECEIVED"),
             "negative_delivery_time_count": sum(1 for m in r.atak_messages if m.delivery_time_ms is not None and m.delivery_time_ms < 0),
+            # SDK Logging 2.0
+            "sdk_log_total":        r.atak_sdk_log_summary.total_count if r.atak_sdk_log_summary else 0,
+            "sdk_log_tag_counts":   r.atak_sdk_log_summary.tag_counts if r.atak_sdk_log_summary else {},
         }
 
     elif r.log_format == "relay_manager":

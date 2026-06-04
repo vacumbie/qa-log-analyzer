@@ -997,6 +997,120 @@ function HealthTab({ results }) {
   )
 }
 
+// ── SDK Logging 2.0 Summary Card ─────────────────────────────────────────────
+
+function SdkLogSummaryCard({ summary }) {
+  const [expanded, setExpanded] = React.useState(false)
+  if (!summary || !summary.total_count) return null
+
+  const tagEntries = Object.entries(summary.tag_counts || {}).sort((a, b) => b[1] - a[1])
+  const total = summary.total_count
+  const maxCount = tagEntries.length ? tagEntries[0][1] : 1
+
+  const tagColor = (tag) => {
+    if (tag.includes('BLE'))   return '#3b82f6'
+    if (tag.includes('RADIO')) return '#f59e0b'
+    return '#64748b'
+  }
+
+  return (
+    <div style={{ background: 'var(--panel)', border: '1px solid #1e3a4a', borderRadius: 8, marginBottom: 16, overflow: 'hidden' }}>
+      {/* Header — always visible */}
+      <div
+        onClick={() => setExpanded(e => !e)}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', cursor: 'pointer', userSelect: 'none' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 14 }}>🔧</span>
+          <div>
+            <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 14, fontWeight: 700, color: '#94a3b8', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+              SDK Logging 2.0
+            </span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted, marginLeft: 10 }}>
+              {total.toLocaleString()} records · {tagEntries.length} tag type{tagEntries.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {tagEntries.slice(0, 3).map(([tag, count]) => (
+              <span key={tag} style={{
+                fontFamily: 'var(--mono)', fontSize: 8,
+                color: tagColor(tag),
+                background: `${tagColor(tag)}15`,
+                border: `1px solid ${tagColor(tag)}40`,
+                borderRadius: 3, padding: '1px 7px'
+              }}>
+                {tag}: {count.toLocaleString()}
+              </span>
+            ))}
+          </div>
+        </div>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted }}>
+          {expanded ? '▲ collapse' : '▼ expand'}
+        </span>
+      </div>
+
+      {/* Expanded detail */}
+      {expanded && (
+        <div style={{ padding: '0 16px 16px', borderTop: '1px solid var(--border)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginTop: 14 }}>
+
+            {/* Tag breakdown bar chart */}
+            <div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+                Tag Breakdown
+              </div>
+              {tagEntries.map(([tag, count]) => {
+                const pct = Math.max(2, Math.round((count / maxCount) * 100))
+                const color = tagColor(tag)
+                return (
+                  <div key={tag} style={{ marginBottom: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color }}>{tag}</span>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted }}>
+                        {count.toLocaleString()} ({Math.round(count / total * 100)}%)
+                      </span>
+                    </div>
+                    <div style={{ height: 4, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden' }}>
+                      <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 2 }} />
+                    </div>
+                  </div>
+                )
+              })}
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#334155', marginTop: 8 }}>
+                {summary.first_timestamp?.slice(0, 19)} → {summary.last_timestamp?.slice(0, 19)}
+              </div>
+            </div>
+
+            {/* Unique messages */}
+            <div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+                Unique Messages {summary.unique_messages?.length >= 20 ? '(capped at 20)' : ''}
+              </div>
+              <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                {(summary.unique_messages || []).map((msg, i) => (
+                  <div key={i} style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#64748b', padding: '3px 0', borderBottom: '1px solid var(--bg2)' }}>
+                    • {msg}
+                  </div>
+                ))}
+                {(!summary.unique_messages || summary.unique_messages.length === 0) && (
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#334155' }}>No additionalInfo messages found.</div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#334155', marginTop: 12, padding: '8px 10px', background: 'var(--bg)', borderRadius: 4 }}>
+            ℹ SDK Logging 2.0 records are high-volume structured log events from the ATAK plugin.
+            They are not stored individually — this is an aggregated summary only.
+            Whether these records appear in regular (non-enhanced) logs from firmware 3.2.10/3.2.11 is currently unknown.
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 function AtakTab({ results }) {
   const atakResults = results.filter(r => r.log_format === 'atak')
   if (atakResults.length === 0) return <Note>No ATAK logs loaded. Upload an ATAK plug-in .log file to see this tab.</Note>
@@ -1035,6 +1149,25 @@ function AtakTab({ results }) {
               </div>
             )))}
           </div>
+        </>
+      )}
+
+      {/* SDK Logging 2.0 — one card per ATAK result that has sdk_log data */}
+      {atakResults.some(r => r.atak_sdk_log_summary?.total_count > 0) && (
+        <>
+          <SectionHeader
+            icon="🔧"
+            title="SDK Logging 2.0"
+            sub="Structured SDK log events — aggregated counts and unique messages only"
+          />
+          {atakResults.map((r, i) => r.atak_sdk_log_summary?.total_count > 0 && (
+            <div key={i} style={{ marginBottom: 8 }}>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginBottom: 4 }}>
+                {r.source_filename}
+              </div>
+              <SdkLogSummaryCard summary={r.atak_sdk_log_summary} />
+            </div>
+          ))}
         </>
       )}
 

@@ -24,6 +24,7 @@ from typing import Optional
 from .models import (
     ParseResult, DeviceInfo, SystemSample, SessionGap,
     AtakMessage, AtakDeviceHealth, AtakEvent, AtakAppInfo,
+    AtakSdkLogSummary,
 )
 
 _TS_FMT_OUT = "%Y-%m-%d %H:%M:%S.%f"
@@ -46,7 +47,13 @@ def _ms_to_str(ms: int) -> str:
 # ── Record type detection ─────────────────────────────────────────────────────
 
 def _record_type(record: dict) -> str:
-    """Identify which of the 4 ATAK record types this record is."""
+    """Identify which of the 5 ATAK record types this record is.
+    
+    SDK Logging 2.0 records are identified by the presence of 'id', 'timestamp',
+    and 'tags' fields — they have neither 'logId' nor 'serialNumber'. They are
+    NOT error-only records despite the 'ERROR' tag value; the tag describes the
+    category/severity of the structured SDK log event.
+    """
     if "appVersion" in record:
         return "app_info"
     if "connectionState" in record:
@@ -55,6 +62,8 @@ def _record_type(record: dict) -> str:
         return "message"
     if "event" in record:
         return "event"
+    if "id" in record and "tags" in record and "timestamp" in record:
+        return "sdk_log"
     return "unknown"
 
 
@@ -212,6 +221,49 @@ def _handle_event(record: dict, result: ParseResult) -> None:
     result.atak_events.append(atak_event)
 
 
+
+def _handle_sdk_log(record: dict, result: ParseResult) -> None:
+    """
+    Handle SDK Logging 2.0 records — aggregate counts and unique messages only.
+
+    These records are high-volume (thousands per session) and are not stored
+    individually. Instead we accumulate a summary: counts by tag combination
+    and a capped list of unique additionalInfo messages.
+
+    Tag combination examples: 'ERROR/BLE', 'ERROR/RADIO'
+    additionalInfo examples: 'Gatt write back off reached skipping write'
+
+    The summary is attached to result.atak_sdk_log_summary once all records
+    are processed (see parse_atak_log — we accumulate into _sdk_log_state and
+    build the summary at the end).
+    """
+    tags = record.get("tags", [])
+    tag_key = "/".join(sorted(tags)) if tags else "UNKNOWN"
+
+    msg = record.get("message", {})
+    event = msg.get("event", {}) if isinstance(msg, dict) else {}
+    info = event.get("additionalInfo", "") if isinstance(event, dict) else ""
+
+    # Accumulate into the mutable state dict on result (cleaned up after loop)
+    if not hasattr(result, "_sdk_log_state"):
+        result._sdk_log_state = {"tag_counts": {}, "unique_messages": [], "total": 0, "first_ts": None, "last_ts": None}
+
+    state = result._sdk_log_state
+    state["tag_counts"][tag_key] = state["tag_counts"].get(tag_key, 0) + 1
+    state["total"] += 1
+
+    if info and info not in state["unique_messages"] and len(state["unique_messages"]) < 20:
+        state["unique_messages"].append(info)
+
+    # Track timestamp range using ISO 8601 string directly
+    ts_str = record.get("timestamp", "")
+    if ts_str:
+        if state["first_ts"] is None or ts_str < state["first_ts"]:
+            state["first_ts"] = ts_str
+        if state["last_ts"] is None or ts_str > state["last_ts"]:
+            state["last_ts"] = ts_str
+
+
 # ── Filename parsing ──────────────────────────────────────────────────────────
 
 def _parse_filename(filename: str, result: ParseResult) -> None:
@@ -329,12 +381,26 @@ def parse_atak_log(path: Path) -> ParseResult:
                 _handle_message(record, result)
             elif rtype == "event":
                 _handle_event(record, result)
+            elif rtype == "sdk_log":
+                _handle_sdk_log(record, result)
             # "unknown" records are silently skipped
         except Exception as e:
             result.parse_errors.append(
                 f"Error processing {rtype} record at ts="
                 f"{record.get('timestampInMillis', '?')}: {e}"
             )
+
+    # Build AtakSdkLogSummary from accumulated state if any sdk_log records seen
+    if hasattr(result, "_sdk_log_state"):
+        state = result._sdk_log_state
+        result.atak_sdk_log_summary = AtakSdkLogSummary(
+            tag_counts=state["tag_counts"],
+            unique_messages=state["unique_messages"],
+            total_count=state["total"],
+            first_timestamp=state["first_ts"] or "",
+            last_timestamp=state["last_ts"] or "",
+        )
+        del result._sdk_log_state  # clean up temp state
 
     _detect_session_gaps(result)
     return result

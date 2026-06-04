@@ -399,6 +399,29 @@ class GripTransfer:
 
 
 
+
+@dataclass
+class AtakSdkLogSummary:
+    """
+    Aggregated summary of SDK Logging 2.0 records from an ATAK enhanced log.
+
+    SDK Logging 2.0 records (identified by 'id', 'timestamp', 'tags' fields)
+    are high-volume — thousands per session. They are not stored individually.
+    Instead this summary captures:
+      - tag_counts: count of records per tag combination (e.g. 'ERROR/BLE': 412)
+      - unique_messages: up to 20 unique additionalInfo strings
+      - total_count: total records of this type in the log
+      - first/last_timestamp: ISO 8601 UTC timestamps bounding the records
+
+    Whether this record type appears in regular (non-enhanced) logs from the
+    same firmware version is currently unknown — see parsing-requirements.md.
+    """
+    tag_counts: dict       # {tag_combination: count}  e.g. {'ERROR/BLE': 412}
+    unique_messages: list  # up to 20 unique additionalInfo strings
+    total_count: int
+    first_timestamp: str   # ISO 8601 UTC
+    last_timestamp: str    # ISO 8601 UTC
+
 # ── Top-level parse result ────────────────────────────────────────────────────
 
 @dataclass
@@ -445,6 +468,7 @@ class ParseResult:
     atak_health_samples: list[AtakDeviceHealth] = field(default_factory=list)
     atak_events: list[AtakEvent] = field(default_factory=list)
     atak_app_launches: list[AtakAppInfo] = field(default_factory=list)
+    atak_sdk_log_summary: Optional[AtakSdkLogSummary] = None  # None if no SDK 2.0 records present
 
     # RSDK only — GRIP transfer data
     grip_messages: list[GripMessage] = field(default_factory=list)
