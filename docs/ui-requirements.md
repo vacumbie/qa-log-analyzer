@@ -205,14 +205,16 @@ Displays data from goTenna Relay Manager logs (networkPolling and scheduledHealt
 ### 12. ATAK (`atak`)
 ATAK-only tab (`atakOnly`) — appears in the tab bar only when an ATAK plug-in log is loaded; marked with an `α` badge. Renders only ATAK-format results.
 
-- **Message Delivery Status** — `atak_delivery_status` chart; breakdown across all ATAK messages
+- **Data Limitations Banner** — shown at the top when any ATAK `parse_errors` entry begins with `DATA LIMITATION` (e.g. the sdkError volume baseline notice)
+- **Message Delivery Status** — `atak_delivery_status` chart; includes `SUCCESS` (sender-side ACK), `FULLY_RECEIVED`, `SENT`, `DELIVERED`, `PARTIALLY_RECEIVED`
 - **Message Types** — `atak_message_types` chart; PLI · Chat · Map Objects · File Transfers
 - **Connection State Over Time** — `atak_connection_state` chart; CONNECTED vs CONNECTING health samples
-- **Device Events Timeline** — `atak_events_timeline` chart; connect / disconnect / power / PLI / frequency changes
-- **Partially Received Messages** — `atak_partial_received` chart; shown only when `summary.partially_received > 0`
+- **Device Events Timeline** — `atak_events_timeline` chart; connect / disconnect (with location) / power / PLI / frequency / firmwareUpdate changes
+- **Partially Received Messages** — `atak_partial_received` chart; shown only when `summary.partially_received > 0`. The Missing column shows `unknown` when `open_segments` is null (the -99 sentinel)
+- **SDK Logging 2.0 — sdkError Events** — shown only when `summary.sdk_error_count > 0`; KPI cards for total event count and radio types (e.g. `PRO_X_2`), plus tables of events by tag and top `additionalInfo`. Aggregated, never rendered per-record
 - **App Launches** — device cards; shown only when a log has more than one app launch (regular ATAK logs accumulate across launches)
 
-> Negative delivery times (clock skew) are surfaced honestly via `summary.negative_delivery_time_count`.
+> Negative delivery times (clock skew) are surfaced honestly via `summary.negative_delivery_time_count`. The sdkError volume baseline is unknown and surfaced as informational, not an error.
 
 ---
 

@@ -63,7 +63,7 @@ Both log types share the **same JSON format and record structure**. The differen
 | Feature | Regular | Enhanced |
 |---------|---------|----------|
 | Format | Newline-delimited JSON | Newline-delimited JSON |
-| Record types | Same 4 types | Same 4 types |
+| Record types | Same 5 types | Same 5 types |
 | Callsign/UUID fields | Always empty strings | Always empty strings |
 | `frequencyUpdated` event | ✅ Present (full channel list) | ❌ Not observed |
 | `powerLevelUpdated` event | ❌ Not observed | ✅ Present |
@@ -299,14 +299,14 @@ All parseable data comes from lines tagged `I flutter` (Flutter app output):
 - **Relay Health Manager — no dedicated app log format:** The Relay Health Manager currently only produces ADB (Android Debug Bridge) system logs — there is no dedicated app-level log export. Relay health data (battery, firmware, signal strength) is not surfaced in a parseable format at this time. A proper user-facing log format may be implemented in a future app version. Parser development is blocked until that format exists.
 - **Relay Health Manager — no year in timestamp:** Android logcat timestamps omit the year. Year must be inferred from file metadata or context; flag if ambiguous.
 - **Relay Health Manager — full logcat format:** The log is a complete Android system log, not an isolated app log. Parser must filter aggressively to avoid processing system/Appium noise.
-- **Android ATAK Plug-in:** Both log types confirmed as newline-delimited JSON. Regular log example analyzed. Parser not yet built — tracked as `parser/atak.py`.
+- **Android ATAK Plug-in:** Both log types confirmed as newline-delimited JSON. Parser built (`parser/atak.py`), including SDK Logging 2.0 `sdkError` aggregation.
 - **Pro+ Application:** 1 log type per platform confirmed. iOS: rsdk_log_JonathaniOS.txt analyzed. Android: rsdk_log_wendell_and.txt analyzed.
 - **Relay Health Manager — iOS:** Not yet confirmed whether an iOS version exists.
 - All temperatures stored internally in Celsius and must be converted to Fahrenheit for display.
 
 ---
 
-_Last updated: 2026-06-03_
+_Last updated: 2026-06-04_
 
 ---
 
@@ -344,7 +344,7 @@ All timestamps are **Unix epoch milliseconds** — must be converted to human-re
 
 ### Record Types
 
-There are 4 distinct record types, identified by their field set:
+There are 5 distinct record types, identified by their field set:
 
 #### 1. App Info Record (1 per file)
 Captured at app launch. Contains app and device identity.
@@ -432,7 +432,8 @@ One record per RF message sent or received.
 
 | Status | Count | Meaning |
 |--------|-------|---------|
-| `FULLY_RECEIVED` | 3467 | All segments received |
+| `SUCCESS` | — | Sender-side confirmed delivery (final ACK). Only on `isSender=true` `fileTransfer`. Distinct from `FULLY_RECEIVED`. |
+| `FULLY_RECEIVED` | 3467 | Receiver assembled all segments |
 | `SENT` | 387 | Sent by this device |
 | `DELIVERED` | 9 | Unicast confirmed delivery |
 | `PARTIALLY_RECEIVED` | 7 | Some segments missing |
@@ -450,23 +451,58 @@ Lifecycle and configuration change events.
 | `event.isDistance` | bool | `false` | Present on `pliSettingUpdated` |
 | `event.interval` | int | `60` | Seconds — present on `pliSettingUpdated` |
 | `event.isAutoSend` | bool | `true` | Present on `pliSettingUpdated` |
+| `event.location` | object | `{lat, long, alt}` | Present on `deviceDisconnected` only |
+| `event.updateStatus` | string | `"STARTED"` | Present on `firmwareUpdate` only |
+| `event.updateTimeInMillis` | int | `1780500003000` | Present on `firmwareUpdate` only |
 
 **Event types observed:**
 
 | `event.type` | Count | Meaning |
 |-------------|-------|---------|
 | `deviceConnected` | 3 | Radio connected via BLE |
-| `deviceDisconnected` | 3 | Radio disconnected |
+| `deviceDisconnected` | 3 | Radio disconnected (now carries `location`) |
 | `powerLevelUpdated` | 1 | TX power changed |
 | `pliSettingUpdated` | 1 | PLI interval/mode changed |
+| `firmwareUpdate` | — | Firmware update lifecycle (`updateStatus`, `updateTimeInMillis`) — significant QA event |
+
+#### 5. SDK Error Record (SDK Logging 2.0) — NEW
+
+Structured SDK log events following the SDK Logging 2.0 schema. The **dominant
+record type** in enhanced field logs (56,179 across 7 logs in the 2026-06-03
+session — outnumbering message records 3:1). Despite the `sdkError` name these
+are general structured log events, not error-only records.
+
+| Field | Type | Example | Notes |
+|-------|------|---------|-------|
+| `id` | string | UUID | Record ID |
+| `timestamp` | string | `2026-06-03T22:15:22.082133Z` | ISO 8601 UTC, microsecond precision |
+| `tags` | string[] | `["ERROR","BLE"]` | `["ERROR","RADIO"]` also observed |
+| `message.deviceState.platformType` | string | `"ANDROID"` | |
+| `message.deviceState.connectionType` | string | `"BLE"` | |
+| `message.deviceState.serialNumber` | string | `"PNE234200715"` | |
+| `message.deviceState.address` | string | `"FB:6C:DB:3B:3A:9A"` | BLE MAC |
+| `message.deviceState.connectionState` | string | `"CONNECTING"` | `"DISCONNECTED"` also observed |
+| `message.deviceState.personalGid` | int | `90495447405391` | |
+| `message.deviceState.batteryLevel` | int | `68` | |
+| `message.deviceState.firmwareVersion` | string | `"3.2.11"` | |
+| `message.deviceState.radioType` | string | `"PRO_X_2"` | **Surfaced nowhere else** — device classification |
+| `message.deviceState.mcuuuid` | string | `"0028..."` | |
+| `message.deviceState.endorsements` | string | `"PREMIUM"` | |
+| `message.event.additionalInfo` | string | `"Gatt write back off..."` | Human-readable description |
+
+> ⚠️ **Aggregate only — never store per-record.** Because of the volume, the parser
+> emits a single `AtakSdkErrorSummary` (counts by tag, counts by additionalInfo,
+> radio types, serials, connection states, plus one retained sample) and adds a
+> `DATA LIMITATION` to `parse_errors`. Baseline volume for a healthy session is unknown.
 
 ### Parsing Rules
 
 1. **Format:** Newline-delimited JSON — parse each line individually; skip malformed lines
-2. **Record type detection:** Identify by presence of key fields:
+2. **Record type detection:** Identify by presence of key fields, in this order:
    - Has `appVersion` → App Info record
    - Has `connectionState` → Device Health record
    - Has `logId` → Message record
+   - Has `message.deviceState` (and no `logId`) → SDK Error record — **must precede the `event` check** (an sdkError record's `message` also nests an `event`)
    - Has `event` → Event record
 3. **Timestamps:** All are Unix epoch milliseconds — divide by 1000 for seconds, then convert to datetime
 4. **Temperature:** `powerAmpTemperature` and `systemTemperature` are Celsius — convert to Fahrenheit for display
@@ -475,14 +511,25 @@ Lifecycle and configuration change events.
 7. **`transmitPowerDifferential` = 255:** Seen during `CONNECTING` state — indicates value not yet valid; treat as null
 8. **`systemTemperature` = 0 during CONNECTING:** Placeholder, not a real reading — treat as null
 9. **Filename parsing:** Extract callsign, GID, and export timestamp from filename
+10. **`numberOfOpenSegments` = -99:** Sentinel meaning the transfer was cancelled/timed out before the open-segment count was known — store as `null`, never the literal -99. Positive values (e.g. 183) are genuine and preserved.
+11. **`deliveryStatus` = SUCCESS:** Sender-side final-ACK confirmation; distinct from `FULLY_RECEIVED` (receiver assembled all segments). Only `deliveryTimeInMillis` on `SUCCESS`/`isSender` records is meaningful; receiver-side `0` is a placeholder.
+12. **`message.fileName`:** Real filename on completed `fileTransfer` records; `"UNKNOWN"` when incomplete.
+13. **`loggingUserLocation` / `transmittedLocation`:** Two distinct `{lat, long, alt}` objects — the logger's own GPS vs the location in the message payload. `transmittedLocation` is absent on `textChat` (store `null`).
+14. **`originatorUUID`:** `ANDROID-*` UUID; store `""` when missing. `originatorCallsign` is empty in observed samples.
+15. **`sdkError` records:** Aggregate into `AtakSdkErrorSummary`; never store per-record; surface a `DATA LIMITATION` for the unknown volume baseline.
 
 ### Known Limitations — ATAK Enhanced Log
 
-- **Callsign and UUID fields are always empty** in the enhanced log format — identity can only be determined from GID
+- **Callsign and UUID fields are always empty** in the enhanced log format — identity can only be determined from GID (`originatorUUID` does carry an `ANDROID-*` UUID, but `senderUUID`/`receiverUUID`/all callsigns are empty)
 - **Negative `deliveryTimeInMillis`** (767 records, 18%) indicates clock skew between originator and receiver devices; most common at hop counts 3–4
 - **`transmitPowerDifferential`** meaning is not fully documented — observed values 1–3 during normal operation and 255 during connecting state
 - **Regular user log format** not yet confirmed — need example to compare against enhanced format
 - **`PARTIALLY_RECEIVED` records** all appear to be `fileTransfer` type — may indicate file transfers are unreliable over mesh; needs further investigation
+- **`numberOfOpenSegments = -99` is a sentinel** meaning the transfer was cancelled before the segment count was known — treated as `null`/unknown in the UI, never displayed as -99
+- **Receiver-side `deliveryTimeInMillis = 0` on `fileTransfer`** is a placeholder, not a real delivery time — only meaningful when `isSender=true` and `deliveryStatus=SUCCESS`
+- **`serialNumber = "Unknown"` in Device Health records** is expected behavior during BLE reconnection (the health poll fires before the serial resolves) — not a parser error
+- **SDK Logging 2.0 / `sdkError` record volume** (56,179 across 7 logs) is very high; the baseline for healthy sessions is unknown — flagged as informational in `parse_errors` until a baseline is established
+- **`sdkError` regular vs enhanced scope is unconfirmed** — it is not yet known whether regular (non-enhanced) user logs from the same firmware also emit `sdkError` records or whether this record type is exclusive to enhanced/debug sessions. The `Differences: Regular vs Enhanced` table is intentionally left without an `sdkError` row until a regular log from the same firmware version is available to compare
 
 ### Sample File Observations (day1 session)
 

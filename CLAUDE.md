@@ -260,6 +260,10 @@ project's lifecycle, not a sign something is broken.
 | `rsdk` | GRIP hop count and RSSI only available when `GRIP_Receiver` incoming fields lines are present |
 | `diagnostic` | Firmware 3.1.11 omits callsign and GID from Received Message blocks |
 | `atak` | Callsign always empty in this format — identity is GID-only |
+| `atak` | `sdkError` (SDK Logging 2.0) volume baseline unknown — counts are aggregated and informational, not a pass/fail signal |
+| `atak` | `numberOfOpenSegments = -99` is a sentinel (transfer cancelled before count known) — stored as null, never -99 |
+| `atak` | Receiver-side `deliveryTimeInMillis = 0` on fileTransfer is a placeholder — only meaningful when `isSender=true` and status `SUCCESS` |
+| `atak` | Device Health `serialNumber = "Unknown"` is expected during BLE reconnection, not a parser error |
 
 ---
 

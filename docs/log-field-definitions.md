@@ -374,7 +374,10 @@ Record type is identified by the presence of specific keys:
 | `appVersion` | App Info |
 | `connectionState` | Device Health |
 | `logId` | Message |
+| `message.deviceState` present (no `logId`) | SDK Error (SDK Logging 2.0) |
 | `event` | Event |
+
+> ⚠️ **Detection order:** the `sdkError` check (`message.deviceState` present) must come **before** the `event` check, because an `sdkError` record's `message` object also nests an `event` object.
 
 ---
 
@@ -439,30 +442,36 @@ One record per RF message sent or received. The majority of records in a typical
 | `senderGid` | integer | `message.sender_gid` | GID of the sender |
 | `deliveryStatus` | string | `message.delivery_status` | See delivery statuses below |
 | `segmentCount` | integer | `message.segment_count` | Total RF segments for this message |
-| `numberOfOpenSegments` | integer | `message.open_segments` | Segments not yet received. `> 0` = partially received. |
+| `numberOfOpenSegments` | integer | `message.open_segments` | Segments not yet received. `> 0` = partially received. **`-99` is a sentinel** (transfer cancelled before count was known) → stored as `null`. |
 | `retryCount` | integer | `message.retry_count` | Number of TX retries |
 | `deliveryTimeInMillis` | integer | `message.delivery_time_ms` | ms from send to receive. **Can be negative** — see note. |
 | `messageProtocol` | string | `message.message_protocol` | `BROADCAST` or `UNICAST` |
 | `message.type` | string | `message.message_type` | `pli`, `textChat`, `mapObject`, `fileTransfer` |
 | `message.objectType` | string | `message.message_object_type` | `PIN`, `SHAPE`, `CIRCLE`, `ROUTE`, `VEHICLE`, `CASEVAC`, etc. Only present on `mapObject` type. |
 | `message.interval` | string | `message.pli_interval` | PLI interval in seconds. Only present on `pli` type. |
-| `message.fileName` | string | `message.file_name` | Only present on `fileTransfer` type. |
+| `message.fileName` | string | `message.file_name` | Only present on `fileTransfer` type. Real filename on completed transfers (e.g. `goTenna_ATAK_<ts>.jpg`); `"UNKNOWN"` when the transfer was incomplete. |
 | `receiverGid` | integer | `message.receiver_gid` | `0` when `isSender = true` |
 | `hopCount` | integer | `message.hop_count` | RF hops. `0` when `isSender = true`. **Genuine RF routing data.** |
 | `rssi` | integer | `message.rssi` | Real dBm (already signed). `0` when `isSender = true` — placeholder, not a real reading. |
-| `senderCallsign` | string | *(not used)* | **Always empty string** in this log format. Identity is GID-only. |
+| `originatorCallsign` | string | `message.originator_callsign` | **Always empty string** in observed samples. Identity is GID-only. |
+| `originatorUUID` | string | `message.originator_uuid` | `ANDROID-*` UUID of the originator. `""` when missing. |
+| `loggingUserLocation` | object | `message.logging_user_location` | `{lat, long, alt}` — the logging device's own GPS at log time. Present on every message record. |
+| `transmittedLocation` | object | `message.transmitted_location` | `{lat, long, alt}` — location embedded in the message payload. Present on `pli`/`fileTransfer`/`mapObject`; **absent on `textChat`** (stored as `null`). |
+| `senderCallsign` | string | *(not used)* | **Always empty string** in this log format. |
 | `senderUUID` | string | *(not used)* | **Always empty string** in this log format. |
-| `originatorCallsign` | string | *(not used)* | **Always empty string** in this log format. |
 | `receiverCallsign` | string | *(not used)* | **Always empty string** in this log format. |
 
 **Delivery statuses:**
 
 | Status | Meaning |
 |--------|---------|
-| `FULLY_RECEIVED` | All segments received |
+| `SUCCESS` | **Sender-side** confirmed delivery — sender received the final ACK (GRIP confirmed). Only on `isSender=true` `fileTransfer` records. Distinct from `FULLY_RECEIVED`. |
+| `FULLY_RECEIVED` | Receiver assembled all segments |
 | `SENT` | Sent by this device |
 | `DELIVERED` | Unicast confirmed delivery |
 | `PARTIALLY_RECEIVED` | Some segments missing — typically file transfers |
+
+> ⚠️ **`deliveryTimeInMillis` is only meaningful on the sender side** (`isSender=true` + `SUCCESS`). Receiver-side `fileTransfer` records report `0`, a placeholder — not a real delivery time.
 
 > ⚠️ **Negative `delivery_time_ms`** occurs when the receiver's clock is behind the sender's. Observed in 18% of records in sample data, most common at hop counts 3–4. These records are preserved — not discarded.
 >
@@ -490,6 +499,9 @@ Lifecycle and configuration events.
 | `event.isAutoSend` | bool | `event.pli_auto_send` | Present on `pliSettingUpdated` |
 | `event.bandwidth` | float | `event.bandwidth_khz` | kHz. Present on `frequencyUpdated` (regular log only) |
 | `event.channels` | list | `event.channels` | List of `{frequency: float, isControlChannel: bool}`. Present on `frequencyUpdated`. |
+| `event.location` | object | `event.location` | `{lat, long, alt}` at disconnect time. Present on `deviceDisconnected` only. |
+| `event.updateStatus` | string | `event.update_status` | e.g. `"STARTED"`. Present on `firmwareUpdate` only. |
+| `event.updateTimeInMillis` | int | `event.update_time_ms` | Present on `firmwareUpdate` only. |
 
 **Event types:**
 
@@ -500,6 +512,42 @@ Lifecycle and configuration events.
 | `powerLevelUpdated` | TX power changed |
 | `pliSettingUpdated` | PLI interval or mode changed |
 | `frequencyUpdated` | Frequency set changed (regular log only — not observed in enhanced log) |
+| `firmwareUpdate` | Radio firmware update lifecycle (e.g. `updateStatus="STARTED"`). A significant QA event — an update mid-session can explain degraded behavior. |
+
+---
+
+### Record Type: SDK Error (SDK Logging 2.0)
+
+New structured-log record type (the dominant record type in enhanced field logs —
+56,179 across 7 logs in the 2026-06-03 session, outnumbering message records 3:1).
+Despite the `sdkError` name, these are **general structured SDK log events**, not
+error-only records; the name reflects the `"ERROR"` entry in `tags`.
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `id` | string | `sdk_error.id` | Record UUID (sample only) |
+| `timestamp` | string | `sdk_error.timestamp` | ISO 8601 UTC, microsecond precision (more precise than `timestampInMillis`) |
+| `tags` | string array | `sdk_error.tags` / `counts_by_tag` | e.g. `["ERROR","BLE"]`, `["ERROR","RADIO"]` |
+| `message.deviceState.platformType` | string | `sdk_error.platform_type` | `"ANDROID"` |
+| `message.deviceState.connectionType` | string | `sdk_error.connection_type` | `"BLE"` |
+| `message.deviceState.serialNumber` | string | `sdk_error.serial_number` / `serial_numbers` | |
+| `message.deviceState.address` | string | `sdk_error.address` | BLE MAC |
+| `message.deviceState.connectionState` | string | `sdk_error.connection_state` / `connection_states` | `"CONNECTING"`, `"DISCONNECTED"` observed |
+| `message.deviceState.personalGid` | integer | `sdk_error.personal_gid` | |
+| `message.deviceState.batteryLevel` | integer | `sdk_error.battery_level` | |
+| `message.deviceState.firmwareVersion` | string | `sdk_error.firmware_version` | |
+| `message.deviceState.radioType` | string | `sdk_error.radio_type` / `radio_types` | e.g. `"PRO_X_2"` — **surfaced nowhere else in the format**; used for device classification |
+| `message.deviceState.mcuuuid` | string | `sdk_error.mcuuuid` | MCU UUID |
+| `message.deviceState.endorsements` | string | `sdk_error.endorsements` | e.g. `"PREMIUM"` |
+| `message.event.additionalInfo` | string | `sdk_error.additional_info` / `counts_by_info` | Human-readable event description |
+
+> ⚠️ **DATA LIMITATION — aggregated, never stored per-record.** Because of the
+> extreme volume, the parser does **not** keep one object per `sdkError` record.
+> It emits a single `AtakSdkErrorSummary` (`result.atak_sdk_error_summary`) holding
+> `total_count`, `counts_by_tag`, `counts_by_info`, `radio_types`, `serial_numbers`,
+> `connection_states`, and one retained `sample`. A `DATA LIMITATION` entry is added
+> to `parse_errors` noting that the baseline volume for a healthy session is unknown
+> — the count is informational, not a pass/fail signal.
 
 ---
 
@@ -540,6 +588,11 @@ These fields are computed by the parser or API layer — they do not appear dire
 | `summary.avg_rssi` (ATAK) | `rssi` on received messages where `rssi_is_valid` | Mean dBm, sent-message RSSI excluded | |
 | `summary.unique_sender_gids` (ATAK) | `sender_gid` on all messages | Count of distinct GIDs | |
 | `summary.negative_delivery_time_count` (ATAK) | `delivery_time_ms` | Count of records where value < 0 | Clock skew indicator |
+| `summary.success_count` (ATAK) | `delivery_status == "SUCCESS"` | Count of sender-confirmed deliveries | Sender-side ACK; distinct from FULLY_RECEIVED |
+| `summary.file_transfer_count` (ATAK) | `message_type == "fileTransfer"` | Count of fileTransfer records | |
+| `summary.file_transfer_named_count` (ATAK) | `file_name` not empty/`"UNKNOWN"` | Count of completed (named) transfers | |
+| `summary.sdk_error_count` (ATAK) | `atak_sdk_error_summary.total_count` | Total sdkError records | Informational — baseline unknown |
+| `summary.radio_types` (ATAK) | `atak_sdk_error_summary.radio_types` | Sorted distinct radioType values | e.g. `["PRO_X_2"]` |
 
 ---
 

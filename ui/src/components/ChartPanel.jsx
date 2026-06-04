@@ -379,8 +379,8 @@ function AtakDeliveryStatus({ results }) {
   const atak = results.filter(r => r.log_format === 'atak')
   if (!atak.length) return <NoData message="No ATAK logs loaded" />
   const labels   = atak.map(r => shortLabel(r))
-  const statuses = ['FULLY_RECEIVED','SENT','DELIVERED','PARTIALLY_RECEIVED']
-  const colors   = { FULLY_RECEIVED:'#00e5a0cc', SENT:'#00d4ffcc', DELIVERED:'#4a90e2cc', PARTIALLY_RECEIVED:'#ff4757cc' }
+  const statuses = ['SUCCESS','FULLY_RECEIVED','SENT','DELIVERED','PARTIALLY_RECEIVED']
+  const colors   = { SUCCESS:'#00e5a0cc', FULLY_RECEIVED:'#22d3eecc', SENT:'#00d4ffcc', DELIVERED:'#4a90e2cc', PARTIALLY_RECEIVED:'#ff4757cc' }
   const datasets = statuses.map(s => ({
     label: s.replace(/_/g,' '),
     data: atak.map(r => (r.atak_messages||[]).filter(m=>m.delivery_status===s).length),
@@ -447,7 +447,7 @@ function AtakPartialReceived({ results }) {
             <td style={{ padding:'4px 8px', color:'var(--muted)' }}>{row.timestamp}</td>
             <td style={{ padding:'4px 8px', color:'var(--text)' }}>{row.type}</td>
             <td style={{ padding:'4px 8px', color:'var(--text)' }}>{row.segments}</td>
-            <td style={{ padding:'4px 8px', color:'#ff4757' }}>{row.open}</td>
+            <td style={{ padding:'4px 8px', color:'#ff4757' }}>{row.open == null ? 'unknown' : row.open}</td>
           </tr>)}</tbody>
         </table>
       </div>
@@ -474,16 +474,20 @@ function AtakConnectionState({ results }) {
 
 function AtakEventsTimeline({ results }) {
   const atak = results.filter(r => r.log_format === 'atak')
-  const eventColors = { deviceConnected:'#00e5a0', deviceDisconnected:'#ff4757', powerLevelUpdated:'#ffd166', pliSettingUpdated:'#00d4ff', frequencyUpdated:'#c77dff' }
+  const eventColors = { deviceConnected:'#00e5a0', deviceDisconnected:'#ff4757', powerLevelUpdated:'#ffd166', pliSettingUpdated:'#00d4ff', frequencyUpdated:'#c77dff', firmwareUpdate:'#ff6b35' }
   const allEvents = atak.flatMap(r => (r.atak_events||[]).map(e => ({ ...e, device: shortLabel(r) }))).sort((a,b)=>a.timestamp?.localeCompare(b.timestamp))
   if (!allEvents.length) return <ChartCard title="Device Events Timeline" height={60}><NoData message="No events recorded" /></ChartCard>
 
   const getDetail = e => {
     if (e.event_type==='deviceConnected')    return `Serial: ${e.serial_number} via ${e.connection_type}`
-    if (e.event_type==='deviceDisconnected') return `via ${e.connection_type}`
+    if (e.event_type==='deviceDisconnected') {
+      const loc = e.location ? ` @ ${e.location.lat?.toFixed?.(4)}, ${e.location.long?.toFixed?.(4)}` : ''
+      return `via ${e.connection_type}${loc}`
+    }
     if (e.event_type==='powerLevelUpdated')  return `${e.power_watts}W`
     if (e.event_type==='pliSettingUpdated')  return `${e.pli_interval_sec}s · auto=${e.pli_auto_send}`
     if (e.event_type==='frequencyUpdated')   return `${e.power_watts}W · ${e.bandwidth_khz}kHz · ${e.channels?.length||0} ch`
+    if (e.event_type==='firmwareUpdate')     return `${e.update_status}${e.update_time_ms != null ? ` · ${e.update_time_ms}ms` : ''}`
     return ''
   }
 

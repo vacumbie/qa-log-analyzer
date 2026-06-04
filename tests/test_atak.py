@@ -11,6 +11,11 @@ from parser.atak import parse_atak_log
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 FIXTURE = FIXTURE_DIR / "atak_sample.log"
 
+# Synthetic enhanced (SDK Logging 2.0) fixture — covers sdkError aggregation,
+# fileName, SUCCESS status, the -99 open-segments sentinel, location fields,
+# firmwareUpdate events, deviceDisconnected.location, and originatorUUID.
+ENHANCED = FIXTURE_DIR / "atak_enhanced_sample.log"
+
 # Named ATAK log fixture for filename parsing tests
 NAMED_FIXTURE = FIXTURE_DIR / "diagnostic_ATAK_HOTEL_90215634664458_2026-03-04_16_42_04_775.log"
 
@@ -240,3 +245,176 @@ def test_missing_file_returns_error():
     result = parse_atak_log(Path("nonexistent_file.log"))
     assert len(result.parse_errors) > 0
     assert result.log_format == "atak"
+
+
+# ── Enhanced log (SDK Logging 2.0) — sdkError aggregation ─────────────────────
+
+def test_enhanced_fixture_exists():
+    assert ENHANCED.exists(), f"Fixture missing: {ENHANCED}"
+
+
+def test_sdk_error_summary_present():
+    result = parse_atak_log(ENHANCED)
+    assert result.atak_sdk_error_summary is not None
+
+
+def test_sdk_error_total_count():
+    """All sdkError records are counted, not stored individually."""
+    result = parse_atak_log(ENHANCED)
+    assert result.atak_sdk_error_summary.total_count == 5
+
+
+def test_sdk_error_not_stored_as_messages():
+    """sdkError records must not leak into atak_messages."""
+    result = parse_atak_log(ENHANCED)
+    # 6 real message records in the fixture; sdkError records excluded
+    assert len(result.atak_messages) == 6
+
+
+def test_sdk_error_counts_by_tag():
+    result = parse_atak_log(ENHANCED)
+    by_tag = result.atak_sdk_error_summary.counts_by_tag
+    assert by_tag == {"ERROR|BLE": 3, "ERROR|RADIO": 2}
+
+
+def test_sdk_error_counts_by_info():
+    result = parse_atak_log(ENHANCED)
+    by_info = result.atak_sdk_error_summary.counts_by_info
+    assert by_info["Gatt write back off reached skipping write"] == 3
+    assert by_info["Radio command timeout"] == 2
+
+
+def test_sdk_error_radio_type_captured():
+    """radioType (e.g. PRO_X_2) is surfaced only by sdkError deviceState."""
+    result = parse_atak_log(ENHANCED)
+    assert "PRO_X_2" in result.atak_sdk_error_summary.radio_types
+
+
+def test_sdk_error_sample_retained():
+    result = parse_atak_log(ENHANCED)
+    sample = result.atak_sdk_error_summary.sample
+    assert sample is not None
+    assert sample.platform_type == "ANDROID"
+    assert sample.endorsements == "PREMIUM"
+    assert sample.additional_info != ""
+
+
+def test_sdk_error_data_limitation_surfaced():
+    """Volume is informational; a DATA LIMITATION must be in parse_errors."""
+    result = parse_atak_log(ENHANCED)
+    limits = [e for e in result.parse_errors if e.startswith("DATA LIMITATION")]
+    assert any("sdkError" in e for e in limits)
+
+
+# ── Enhanced log — fileTransfer fields ────────────────────────────────────────
+
+def test_file_name_on_completed_transfer():
+    result = parse_atak_log(ENHANCED)
+    completed = [m for m in result.atak_messages if m.is_file_transfer and m.delivery_status == "SUCCESS"]
+    assert len(completed) == 1
+    assert completed[0].file_name == "goTenna_ATAK_1780506877104.jpg"
+
+
+def test_file_name_unknown_on_incomplete_transfer():
+    result = parse_atak_log(ENHANCED)
+    incomplete = [m for m in result.atak_messages if m.is_file_transfer and m.delivery_status == "PARTIALLY_RECEIVED"]
+    assert len(incomplete) >= 1
+    for m in incomplete:
+        assert m.file_name == "UNKNOWN"
+
+
+def test_success_delivery_status():
+    """SUCCESS is sender-side confirmed delivery, distinct from FULLY_RECEIVED."""
+    result = parse_atak_log(ENHANCED)
+    success = [m for m in result.atak_messages if m.delivery_status == "SUCCESS"]
+    assert len(success) == 1
+    assert success[0].is_sender is True
+
+
+def test_open_segments_sentinel_becomes_none():
+    """numberOfOpenSegments = -99 is a sentinel → stored as None, never -99."""
+    result = parse_atak_log(ENHANCED)
+    for m in result.atak_messages:
+        assert m.open_segments != -99
+    # The cancelled-before-count transfer has open_segments None
+    none_open = [m for m in result.atak_messages
+                 if m.is_file_transfer and m.open_segments is None]
+    assert len(none_open) == 1
+
+
+def test_positive_open_segments_preserved():
+    """A genuine positive open-segment count must be preserved, not nulled."""
+    result = parse_atak_log(ENHANCED)
+    positive = [m for m in result.atak_messages if m.open_segments == 5]
+    assert len(positive) == 1
+
+
+# ── Enhanced log — location fields ────────────────────────────────────────────
+
+def test_logging_user_location_parsed():
+    result = parse_atak_log(ENHANCED)
+    pli = [m for m in result.atak_messages if m.is_pli][0]
+    assert pli.logging_user_location == {"lat": 40.71, "long": -74.0, "alt": 10.0}
+
+
+def test_transmitted_location_on_pli():
+    result = parse_atak_log(ENHANCED)
+    pli = [m for m in result.atak_messages if m.is_pli][0]
+    assert pli.transmitted_location is not None
+    assert pli.transmitted_location["lat"] == 40.72
+
+
+def test_transmitted_location_absent_on_text_chat():
+    """textChat carries loggingUserLocation but no transmittedLocation."""
+    result = parse_atak_log(ENHANCED)
+    chat = [m for m in result.atak_messages if m.is_chat][0]
+    assert chat.transmitted_location is None
+    assert chat.logging_user_location is not None
+
+
+# ── Enhanced log — originator fields ──────────────────────────────────────────
+
+def test_originator_uuid_populated_when_present():
+    result = parse_atak_log(ENHANCED)
+    with_uuid = [m for m in result.atak_messages if m.originator_uuid]
+    assert any(m.originator_uuid.startswith("ANDROID-") for m in with_uuid)
+
+
+def test_originator_uuid_empty_when_missing():
+    """originatorUUID missing in the record → empty string, not an error."""
+    result = parse_atak_log(ENHANCED)
+    chat = [m for m in result.atak_messages if m.is_chat][0]
+    assert chat.originator_uuid == ""
+
+
+def test_originator_callsign_always_empty():
+    """originatorCallsign is empty in observed samples — confirm parser keeps it."""
+    result = parse_atak_log(ENHANCED)
+    for m in result.atak_messages:
+        assert m.originator_callsign == ""
+
+
+# ── Enhanced log — events ─────────────────────────────────────────────────────
+
+def test_firmware_update_event_parsed():
+    result = parse_atak_log(ENHANCED)
+    fw = [e for e in result.atak_events if e.event_type == "firmwareUpdate"]
+    assert len(fw) == 1
+    assert fw[0].update_status == "STARTED"
+    assert fw[0].update_time_ms == 1780500003000
+
+
+def test_device_disconnected_location_parsed():
+    result = parse_atak_log(ENHANCED)
+    dd = [e for e in result.atak_events if e.event_type == "deviceDisconnected"]
+    assert len(dd) == 1
+    assert dd[0].location == {"lat": 40.7128, "long": -74.006, "alt": 12.5}
+
+
+# ── Enhanced log — mapObject objectType ───────────────────────────────────────
+
+def test_object_type_on_map_object():
+    result = parse_atak_log(ENHANCED)
+    pins = [m for m in result.atak_messages if m.message_object_type == "PIN"]
+    assert len(pins) == 1
+    assert pins[0].is_map_object
