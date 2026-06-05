@@ -28,15 +28,15 @@ router = APIRouter(prefix="/parse", tags=["parse"])
 def _detect_format(filename: str, content: str) -> str:
     """
     Heuristically detect log format from filename and content.
-    Returns 'atak', 'relay_manager', 'diagnostic', or 'rsdk'.
+    Returns 'fw_log', 'atak', 'relay_manager', 'rsdk', or 'diagnostic'.
 
     Detection order:
       1. FW Log        — bracket pattern [digits-digits, MODULE, LEVEL] with TRX/RELAY/TPORT
       2. ATAK          — filename starts with 'diagnostic_ATAK_' or content is JSON
                          with ATAK-specific fields (logId, connectionState, appVersion)
-      2. Relay Manager — filename or content signals the goTenna Relay Manager app
-      3. RSDK          — filename contains 'rsdk' or content has RSDK line markers
-      4. Diagnostic    — fallback (goTenna Pro+ block format)
+      3. Relay Manager — filename or content signals the goTenna Relay Manager app
+      4. RSDK          — filename contains 'rsdk' or content has RSDK line markers
+      5. Diagnostic    — fallback (goTenna Pro+ block format)
     """
     name = filename.lower()
     snippet = content[:2000]   # wider window for relay manager detection

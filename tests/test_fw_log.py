@@ -119,8 +119,8 @@ def test_bucket_most_recent_correct():
     assert b11.hrs_end == 6
 
 
-def test_bucket_field_session_window():
-    """bucket[09] = 12-18 hours ago — low traffic confirms partial coverage."""
+def test_bucket_index_9_parsed():
+    """bucket[09] = 12-18 hours ago — verify a mid-history window parses correctly."""
     result = parse_fw_log(FIXTURE)
     b09 = next(b for b in result.fw_log_result.buckets if b.bucket_index == 9)
     assert b09.rx == 21

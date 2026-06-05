@@ -1502,19 +1502,15 @@ function FwLogTab({ results }) {
                   {buckets.map(b => {
                     const maxRx = Math.max(...buckets.map(x => x.rx), 1)
                     const pct = Math.max(2, Math.round((b.rx / maxRx) * 100))
-                    // Highlight the field session window (bucket 09 = 12-18hrs ago)
-                    const isFieldSession = b.bucket_index === 9 && b.rx < 100
-                    const rowColor = isFieldSession ? C.yellow : '#c8ddf4'
                     return (
                       <div key={b.bucket_index} style={{ display: 'grid', gridTemplateColumns: '120px 1fr 80px 80px 60px', gap: 8, marginBottom: 5, alignItems: 'center' }}>
-                        <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: rowColor }}>
+                        <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#c8ddf4' }}>
                           {b.hrs_start}–{b.hrs_end} hrs ago
-                          {isFieldSession && <span style={{ color: C.yellow, marginLeft: 4 }}>◀ low</span>}
                         </div>
                         <div style={{ height: 8, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden' }}>
-                          <div style={{ width: `${pct}%`, height: '100%', background: isFieldSession ? C.yellow : C.accent, borderRadius: 2, opacity: 0.7 }} />
+                          <div style={{ width: `${pct}%`, height: '100%', background: C.accent, borderRadius: 2, opacity: 0.7 }} />
                         </div>
-                        <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: rowColor }}>{b.rx.toLocaleString()}</div>
+                        <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#c8ddf4' }}>{b.rx.toLocaleString()}</div>
                         <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted }}>{b.relayed.toLocaleString()}</div>
                         <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted }}>{b.tx}</div>
                       </div>

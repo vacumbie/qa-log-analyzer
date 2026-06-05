@@ -19,10 +19,11 @@ Key characteristics:
 from __future__ import annotations
 import re
 from pathlib import Path
-from dataclasses import dataclass, field
-from typing import Optional
 
-from .models import ParseResult, DeviceInfo, SystemSample
+from .models import (
+    ParseResult, DeviceInfo,
+    FwBucket, FwRssiSample, FwRoutingDecision, FwRfConfig, FwLogResult,
+)
 
 # ── Regex patterns ────────────────────────────────────────────────────────────
 
@@ -50,99 +51,8 @@ _RHC_ORIGIN_RE = re.compile(r'rhc_build_resp: using origin hash (0x[0-9a-f]+)')
 _ORIGIN_SHORT_RE = re.compile(r'prevSdr=([0-9a-f]+)')
 
 
-# ── Dataclasses ───────────────────────────────────────────────────────────────
-
-@dataclass
-class FwBucket:
-    """One 6-hour message count window from the RHC bucket history."""
-    bucket_index: int        # 0=oldest, 11=most recent 6hrs
-    hrs_start:    int        # e.g. 0
-    hrs_end:      int        # e.g. 6
-    rx:           int        # messages received
-    relayed:      int        # messages relayed onward
-    tx:           int        # messages originated/transmitted
-
-
-@dataclass
-class FwRssiSample:
-    """One RSSI[] detailed sample from TRX INFO."""
-    channel:  int
-    avg_dbm:  int
-    last_dbm: int
-    min_dbm:  int
-    max_dbm:  int
-    num:      int
-
-
-@dataclass
-class FwRoutingDecision:
-    """Aggregated routing decision counts."""
-    transmit:  int = 0   # transmitMsg=1
-    echo:      int = 0   # echo=1
-    vine:      int = 0   # vine=1
-    flood:     int = 0   # flooding=1
-    skip_rx:   int = 0   # "msg already Rx"
-    skip_tx:   int = 0   # "msg already TX"
-
-
-@dataclass
-class FwRfConfig:
-    """RF radio configuration extracted from TRX INFO config block."""
-    device_type:      str = ""          # e.g. "goTenna Pro"
-    region:           int = 0
-    tx_power:         int = 0
-    bit_rate:         int = 0           # bps
-    frequencies_hz:   list = field(default_factory=list)
-    control_channels: list = field(default_factory=list)
-    data_channels:    list = field(default_factory=list)
-    bandwidth:        str = ""          # e.g. "25K"
-
-
-@dataclass
-class FwLogResult:
-    """
-    All structured data extracted from a firmware log.
-    Attached to ParseResult.fw_log_result.
-    """
-    # Device identity
-    origin_hash:      str = ""   # relay short address (e.g. "0f07")
-    fw_format_version: str = ""  # RHC response version (e.g. "0x10")
-
-    # RF configuration
-    rf_config:        Optional[FwRfConfig] = None
-
-    # Session
-    first_ts_ms:      int = 0    # first log timestamp (relative ms from boot)
-    last_ts_ms:       int = 0    # last log timestamp
-    duration_ms:      int = 0    # last - first
-
-    # Bucket history — last snapshot only (most current RHC response)
-    buckets:          list = field(default_factory=list)   # list[FwBucket]
-
-    # RSSI
-    rssi_samples:     list = field(default_factory=list)   # list[FwRssiSample]
-    energy_samples:   list = field(default_factory=list)   # list[int] — last_rssi values
-
-    # Routing
-    routing:          Optional[FwRoutingDecision] = None
-
-    # Neighbors
-    neighbor_hashes:  list = field(default_factory=list)   # unique hashes seen
-
-    # Errors and warnings
-    battery_error_count:  int = 0      # known firmware quirk
-    error_counts:         dict = field(default_factory=dict)   # module -> count
-    error_messages:       list = field(default_factory=list)   # unique ERROR messages (max 20)
-    warn_counts:          dict = field(default_factory=dict)   # module -> count
-    warn_messages:        list = field(default_factory=list)   # unique WARN messages (max 20)
-
-    # RHC health polls
-    rhc_poll_count:   int = 0
-
-    # Line counts
-    total_lines:      int = 0
-    parsed_lines:     int = 0
-    skipped_debug:    int = 0
+# Fw* dataclasses live in parser/models.py (single source of truth) and are
+# imported above. Field-level docs for each live there.
 
 
 # ── Detection ─────────────────────────────────────────────────────────────────
@@ -191,7 +101,6 @@ def parse_fw_log(path: Path) -> ParseResult:
     fw.rf_config = rf
 
     # Bucket tracking — collect all snapshots, keep last per bucket index
-    bucket_snapshots: dict[tuple, FwBucket] = {}  # (bucket_idx, rx) -> FwBucket
     bucket_last_rx: dict[int, FwBucket] = {}       # bucket_idx -> latest FwBucket
 
     neighbors_seen: set = set()
@@ -233,7 +142,6 @@ def parse_fw_log(path: Path) -> ParseResult:
 
         ts_abs_str, ts_delta, module, level, msg = m.groups()
         msg = msg.strip()
-        fw.total_lines  # already counted above
 
         # Skip DEBUG
         if level == "DEBUG":
