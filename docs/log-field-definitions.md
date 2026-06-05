@@ -4,7 +4,7 @@
 > Each entry defines what the field means in the raw log, how it is parsed, what it becomes
 > in the data model, and any known accuracy limitations or caveats.
 >
-> Last updated: 2026-06-03
+> Last updated: 2026-06-05
 
 ---
 
@@ -15,6 +15,7 @@
   - [GRIP Message Fields](#grip-message-fields-grip_sender--grip_receiver)
   - [GRIP Transfer Lifecycle](#grip-transfer-lifecycle)
 - [Format 3: Android ATAK Plug-in Log](#format-3-android-atak-plug-in-log)
+- [Format 4: Relay Firmware (UART/USB Debug) Log](#format-4-relay-firmware-uartusb-debug-log)
 - [Derived / Computed Fields](#derived--computed-fields)
 - [Cross-Format Notes](#cross-format-notes)
 
@@ -577,6 +578,73 @@ Gaps are detected from `atak_messages` and `atak_health_samples` timestamps comb
 
 ---
 
+## Format 4: Relay Firmware (UART/USB Debug) Log
+
+**File type:** `.log` / `.txt` (serial console capture)
+**Platform:** Relay radio (direct UART/USB, not an app)
+**Structure:** `[<ts_abs>-<delta_ms>, <MODULE>, <LEVEL>] <message>`, plus raw
+`bucket[...]` lines outside the bracket pattern.
+
+> Timestamps are **relative milliseconds from boot**, not wall clock. `delta_ms`
+> (gap since previous line) is matched but unused. Only `INFO`/`ERROR`/`WARN`
+> lines are parsed; `DEBUG` is skipped and counted.
+
+Parsed into `FwLogResult` (attached to `ParseResult.fw_log_result`). All Fw*
+dataclasses live in `parser/models.py`.
+
+### Identity & Session
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `rhc_build_resp: using origin hash 0x<hash>` | strip `0x` | `fw_log_result.origin_hash` | Authoritative short address; also `device.callsign` |
+| First `RELAY` `prevSdr=<hash>` | hex string | `fw_log_result.origin_hash` (fallback) | Best-effort only — `prevSdr` is the previous sender, may be a neighbor's hash. Used only when no RHC origin line appears |
+| `rhc_build_resp: version 0x<v>` | string | `fw_log_result.fw_format_version` | RHC response format version (e.g. `0x10`), **not** radio firmware version |
+| `rhc_build_resp: enter` | count | `fw_log_result.rhc_poll_count` | One per health poll |
+| min/max bracket `ts_abs` | int ms | `first_ts_ms` / `last_ts_ms` / `duration_ms` | Relative ms; `session_start`/`session_end` are these as strings |
+
+### RF Configuration (`FwRfConfig`, from `TRX INFO` config block)
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `RF Configuration for <device>` | string | `rf_config.device_type` | Block start, e.g. `goTenna Pro` |
+| `Tx power: <n>` | int | `rf_config.tx_power` | |
+| `bit_rate=<n>` | int | `rf_config.bit_rate` | bps; **ends** the config block |
+| `Region <n>` | int | `rf_config.region` | |
+| `<9-digit>Hz` | int list | `rf_config.frequencies_hz` | De-duplicated in order |
+| `Control channels (n): a b` | int list | `rf_config.control_channels` | |
+| `Data channels (n): a b` | int list | `rf_config.data_channels` | |
+
+### Buckets (`FwBucket`)
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `bucket[N] HH - HH hours ago: X messages rx'd Y messages relayed Z messages tx'd` | ints | `buckets[]` (`bucket_index`, `hrs_start`, `hrs_end`, `rx`, `relayed`, `tx`) | RHC history repeats per poll; highest-rx snapshot per index kept, sorted newest-first |
+
+### Signal, Routing, Neighbors
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `Energy on chn=N: last_rssi=-XdBm > avg_rssi=-YdBm (cnt=Z)` | int (`last_rssi`) | `energy_samples[]` | RSSI proxy surfaced in the UI |
+| `RSSI[N]: avg=… last=… [min=… max=…] num=…` | `FwRssiSample` | `rssi_samples[]` | **DEBUG-level → always empty.** Matcher wired ahead of a future INFO-level RSSI build |
+| `Msg-N cmd=N: transmitMsg=… flooding=… echo=… vine= …` | counts per `=1` | `routing.transmit` / `.flood` / `.echo` / `.vine` | `FwRoutingDecision` |
+| `msg already Rx` / `msg already TX` | counts | `routing.skip_rx` / `routing.skip_tx` | Duplicate-suppression on rx/tx paths |
+| `neighborAdd[N]: update hash=<h>, …` | unique hashes | `neighbor_hashes[]` | |
+
+### Errors & Warnings
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `ERROR` `Battery stabilization …` | count | `battery_error_count` | Counted **separately** — known firmware quirk, not a real error |
+| Other `ERROR` lines | count by module + unique msgs | `error_counts{}`, `error_messages[]` | Up to 20 unique messages |
+| `WARN` lines | count by module + unique msgs | `warn_counts{}`, `warn_messages[]` | Up to 20 unique messages |
+| `DEBUG` lines | count only | `skipped_debug` | Not parsed |
+
+> **Serialized but not displayed:** `rssi_summary` and `summary.rssi_ch0/ch1_avg_dbm`
+> exist in the `_result_to_dict()` output but are always empty/`None` because
+> `rssi_samples` is (RSSI[] is DEBUG-only). The UI shows channel energy instead.
+
+---
+
 ## Derived / Computed Fields
 
 These fields are computed by the parser or API layer — they do not appear directly in the raw log.
@@ -622,4 +690,4 @@ These fields are computed by the parser or API layer — they do not appear dire
 
 ---
 
-_Last updated: 2026-06-03_
+_Last updated: 2026-06-05_
