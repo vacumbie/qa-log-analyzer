@@ -341,6 +341,8 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | Time Window Filtering | ✅ Done |
 | GRIP RSSI Line Graph Over Time | ✅ Done |
 | ATAK Enhanced Log (SDK Logging 2.0) | ✅ Done |
+| FW Log — relay firmware parser & tab | ✅ Done |
+| FW Log — RHC payload decoding (hash→serial, firmware version) | Blocked — waiting on mapping tables from QA |
 | Session Persistence | Deferred |
 | Relay Manager prod log support | Blocked — waiting on prod samples |
 | BLE payload decoding (relay health attributes) | Blocked — waiting on protocol spec |
