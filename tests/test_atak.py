@@ -7,6 +7,7 @@ import pytest
 from pathlib import Path
 
 from parser.atak import parse_atak_log
+from api.routes.parse import _result_to_dict
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 FIXTURE = FIXTURE_DIR / "atak_sample.json"
@@ -306,6 +307,26 @@ def test_sdk_error_data_limitation_surfaced():
     result = parse_atak_log(ENHANCED)
     limits = [e for e in result.parse_errors if e.startswith("DATA LIMITATION")]
     assert any("sdkError" in e for e in limits)
+
+
+# ── Summary — BLE failure count for the Health Score ──────────────────────────
+# ble_fail_count is computed in _result_to_dict(), not the parser, so these
+# tests assert against the serialized summary the UI Health tab consumes.
+
+def test_ble_fail_count_from_sdk_errors():
+    """Enhanced logs derive BLE failures from ERROR|BLE entries in counts_by_tag,
+    excluding non-BLE error tags like ERROR|RADIO."""
+    summary = _result_to_dict(parse_atak_log(ENHANCED))["summary"]
+    assert summary["ble_fail_count"] == 3
+
+
+def test_ble_fail_count_falls_back_to_disconnects():
+    """Without SDK 2.0 records, BLE failures fall back to deviceDisconnected count."""
+    result = parse_atak_log(FIXTURE)
+    assert result.atak_sdk_error_summary is None
+    disconnects = sum(1 for e in result.atak_events if e.event_type == "deviceDisconnected")
+    summary = _result_to_dict(result)["summary"]
+    assert summary["ble_fail_count"] == disconnects
 
 
 # ── Enhanced log — fileTransfer fields ────────────────────────────────────────

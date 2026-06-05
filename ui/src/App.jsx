@@ -2022,6 +2022,8 @@ export default function App() {
         negative_delivery_time_count: atakMsg.filter(m => m.delivery_time_ms != null && m.delivery_time_ms < 0).length,
         // static — unchanged
         session_count:    r.summary?.session_count,
+        // BLE failures derive from the SDK-error aggregate — not time-windowable, carried over whole
+        ble_fail_count:   r.summary?.ble_fail_count,
       } : {
         total_messages:     msgs.length,
         pli_count:          msgs.filter(m => m.message_type === 'location').length,

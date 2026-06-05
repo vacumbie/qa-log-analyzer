@@ -197,7 +197,7 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
   |-----------|---------------|----------|
   | Thermal | Peak PA temp < 113°F | Hardware limit |
   | Battery | Min battery > 30% | Operational reserve |
-  | BLE | No BLE fail events | Connectivity integrity |
+  | BLE | No BLE fail events | Connectivity integrity. For ATAK logs, `ble_fail_count` comes from SDK Logging 2.0 `ERROR\|BLE` entries in `counts_by_tag`, falling back to the count of `deviceDisconnected` events when no SDK 2.0 records are present. |
   | RSSI | Avg RSSI > −95 dBm | From KOPEK field data (median −86, poor threshold −100) |
   | Queue | Peak storedMessages < 5 | Queue backup indicator — seen peaking at 30 on HOTLIPS |
 

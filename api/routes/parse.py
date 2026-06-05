@@ -398,6 +398,19 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
         atak_received = r.atak_received_messages
         hop_counts = [m.hop_count for m in atak_received if m.hop_count]
         rssi_vals   = [m.rssi for m in atak_received if m.rssi_is_valid]
+
+        # BLE health for ATAK: SDK Logging 2.0 surfaces BLE errors as tag combos
+        # in counts_by_tag (e.g. "ERROR|BLE"). When those records aren't present,
+        # fall back to the count of deviceDisconnected events.
+        ble_fail_count = 0
+        if r.atak_sdk_error_summary:
+            for tag_key, count in r.atak_sdk_error_summary.counts_by_tag.items():
+                tags = tag_key.split("|")
+                if "BLE" in tags and "ERROR" in tags:
+                    ble_fail_count += count
+        if ble_fail_count == 0:
+            ble_fail_count = sum(1 for e in r.atak_events if e.event_type == "deviceDisconnected")
+
         base["summary"] = {
             "total_messages":     len(r.atak_messages),
             "pli_count":          len(r.atak_pli_messages),
@@ -414,6 +427,7 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             "session_count":      len(r.atak_app_launches),
             "partially_received": sum(1 for m in r.atak_messages if m.delivery_status == "PARTIALLY_RECEIVED"),
             "negative_delivery_time_count": sum(1 for m in r.atak_messages if m.delivery_time_ms is not None and m.delivery_time_ms < 0),
+            "ble_fail_count":     ble_fail_count,
             # SDK Logging 2.0
             "sdk_error_count":      r.atak_sdk_error_summary.total_count if r.atak_sdk_error_summary else 0,
             "radio_types":          r.atak_sdk_error_summary.radio_types if r.atak_sdk_error_summary else [],
