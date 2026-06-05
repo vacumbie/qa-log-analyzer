@@ -388,3 +388,29 @@ samples are collected.
 **Status:** ⏳ Pending — blocked on field data. The dimensions are wired and shipped
 (BLE dimension completed in the `fix(health)` commits); only the threshold values
 remain unvalidated, and this is disclosed honestly in the UI and all four docs.
+
+### Time-Window Step — disabled state for unparseable timestamps
+When the client-side scanner cannot parse timestamps from the uploaded logs, the
+upload flow currently skips the time-window step entirely and jumps straight to the
+dashboard. This is silent — the user never learns that time filtering is unavailable
+or why.
+
+**User story:** As a QA engineer uploading a log whose timestamps the tool can't read,
+I want the time-window step to tell me filtering is unavailable for this log and why,
+instead of silently disappearing, so I'm not left wondering whether the slider is
+broken or whether my window was applied.
+
+**Scope / behavior:**
+- When `globalMin`/`globalMax` can't be derived (no parseable timestamps), still show
+  the time-window step with the slider in a **disabled state** and a short explanation
+  (e.g. "Time filtering unavailable — no parseable timestamps found in this log").
+- Keep the **Analyse →** action available so the user can proceed without a window.
+- Honest about gaps, consistent with the project philosophy — surface the limitation
+  rather than hiding the step.
+
+**Observed:** relay_manager logcat timestamps omit the year (`MM-DD HH:MM:SS.mmm`),
+which the client-side scanner in `FileUpload.jsx` does not parse, so the range step is
+skipped. Noticed during browser verification of the Health-tab scoping.
+
+**Status:** ⏳ Pending — not started. Affects `ui/src/components/FileUpload.jsx`
+(the `drop` → `range` step transition and `RangeSlider`).

@@ -318,6 +318,7 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | BLE payload decoding (relay health attributes) | Blocked — waiting on protocol spec |
 | Relay Manager JSON log format (SDK Logging 2.0) | Pending — format in design |
 | Health Score threshold validation (BLE, thermal, battery, queue, RSSI) | Pending — blocked on field data; dimensions wired, thresholds are initial estimates |
+| Time-window step disabled state for unparseable timestamps | Pending — not started; currently skips the step silently |
 
 ---
 
