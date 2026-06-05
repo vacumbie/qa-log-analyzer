@@ -1,6 +1,6 @@
 // Available data points — grouped by category.
 // Each entry defines what to chart and how to extract it from a ParseResult.
-export const DATA_POINTS = [
+const DATA_POINTS = [
   // ── Thermal ──────────────────────────────────────────────────────────────
   { id: 'temp_over_time',        group: 'Thermal',   label: 'PA Temp Over Time (°F)',          formats: ['diagnostic','rsdk','atak'] },
   { id: 'temp_peak',             group: 'Thermal',   label: 'Peak PA Temp per Device',         formats: ['diagnostic','rsdk','atak'] },

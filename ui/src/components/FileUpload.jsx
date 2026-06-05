@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useDropzone } from 'react-dropzone'
 
@@ -83,12 +83,6 @@ function normaliseTs(ts) {
   return new Date(ts.replace(' ', 'T') + (ts.includes('Z') ? '' : 'Z'))
 }
 
-function fmtUtc(ts) {
-  const d = normaliseTs(ts)
-  const pad = n => String(n).padStart(2, '0')
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`
-}
-
 // ── Dual-handle range slider — hour-snapping ─────────────────────────────────
 
 const HOUR_MS = 3_600_000
@@ -146,7 +140,7 @@ function RangeSlider({ globalMin, globalMax, startMs, endMs, onChange }) {
     window.addEventListener('mouseup', up)
     window.addEventListener('touchmove', move)
     window.addEventListener('touchend', up)
-  }, [globalMin, globalMax, startMs, endMs, onChange, span])
+  }, [globalMin, startMs, endMs, onChange, span])
 
   const startPct = pct(startMs)
   const endPct   = pct(endMs)
@@ -279,7 +273,7 @@ function UploadModal({ onFiles, loading, onClose }) {
           if (minMs < absMin) absMin = minMs
           if (maxMs > absMax) absMax = maxMs
         }
-      } catch (_) {}
+      } catch { /* unparseable timestamps in this file — skip it for range scan */ }
     }
 
     setScanning(false)
@@ -459,7 +453,7 @@ function UploadModal({ onFiles, loading, onClose }) {
 
 // ── Trigger button + modal ────────────────────────────────────────────────────
 
-export default function FileUpload({ onFiles, loading, error, variant = 'header', fileCount = 0 }) {
+export default function FileUpload({ onFiles, loading, error, variant = 'header' }) {
   const [open, setOpen] = useState(false)
 
   // Initial full-page upload (no results yet)
