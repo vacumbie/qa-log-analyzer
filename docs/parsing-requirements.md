@@ -516,7 +516,7 @@ are general structured log events, not error-only records.
 12. **`message.fileName`:** Real filename on completed `fileTransfer` records; `"UNKNOWN"` when incomplete.
 13. **`loggingUserLocation` / `transmittedLocation`:** Two distinct `{lat, long, alt}` objects — the logger's own GPS vs the location in the message payload. `transmittedLocation` is absent on `textChat` (store `null`).
 14. **`originatorUUID`:** `ANDROID-*` UUID; store `""` when missing. `originatorCallsign` is empty in observed samples.
-15. **`sdkError` records:** Aggregate into `AtakSdkErrorSummary`; never store per-record; surface a `DATA LIMITATION` for the unknown volume baseline.
+15. **`sdkError` records:** Aggregate into `AtakSdkErrorSummary`; never store per-record; surface a `DATA LIMITATION` for the unknown volume baseline. The total count stays informational, but `_result_to_dict()` sums the `ERROR|BLE` subset of `counts_by_tag` into `summary.ble_fail_count` (falling back to the `deviceDisconnected` event count) to drive the BLE Health Score dimension — its `> 0 = fail` threshold is an initial estimate pending field validation.
 
 ### Known Limitations — ATAK Enhanced Log
 
@@ -528,7 +528,7 @@ are general structured log events, not error-only records.
 - **`numberOfOpenSegments = -99` is a sentinel** meaning the transfer was cancelled before the segment count was known — treated as `null`/unknown in the UI, never displayed as -99
 - **Receiver-side `deliveryTimeInMillis = 0` on `fileTransfer`** is a placeholder, not a real delivery time — only meaningful when `isSender=true` and `deliveryStatus=SUCCESS`
 - **`serialNumber = "Unknown"` in Device Health records** is expected behavior during BLE reconnection (the health poll fires before the serial resolves) — not a parser error
-- **SDK Logging 2.0 / `sdkError` record volume** (56,179 across 7 logs) is very high; the baseline for healthy sessions is unknown — flagged as informational in `parse_errors` until a baseline is established
+- **SDK Logging 2.0 / `sdkError` record volume** (56,179 across 7 logs) is very high; the baseline for healthy sessions is unknown — the total count is flagged as informational in `parse_errors` until a baseline is established. The `ERROR|BLE` subset is the one exception that drives a pass/fail signal (the BLE Health Score dimension via `summary.ble_fail_count`); that threshold is likewise unvalidated and may change once a BLE-error baseline is established
 - **`sdkError` regular vs enhanced scope is unconfirmed** — it is not yet known whether regular (non-enhanced) user logs from the same firmware also emit `sdkError` records or whether this record type is exclusive to enhanced/debug sessions. The `Differences: Regular vs Enhanced` table is intentionally left without an `sdkError` row until a regular log from the same firmware version is available to compare
 
 ### Sample File Observations (day1 session)

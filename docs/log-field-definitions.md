@@ -547,7 +547,14 @@ error-only records; the name reflects the `"ERROR"` entry in `tags`.
 > `total_count`, `counts_by_tag`, `counts_by_info`, `radio_types`, `serial_numbers`,
 > `connection_states`, and one retained `sample`. A `DATA LIMITATION` entry is added
 > to `parse_errors` noting that the baseline volume for a healthy session is unknown
-> — the count is informational, not a pass/fail signal.
+> — the total count (`sdk_error_count`) is informational, not a pass/fail signal.
+>
+> **Exception — BLE health:** the `ERROR|BLE` subset of `counts_by_tag` is the one
+> place this aggregate drives a pass/fail signal. `_result_to_dict()` sums those
+> entries into `summary.ble_fail_count` (falling back to the `deviceDisconnected`
+> event count when no SDK 2.0 records are present) to feed the BLE Health Score
+> dimension. The `> 0 = fail` threshold is an initial estimate pending field
+> validation, consistent with the other Health Score thresholds.
 
 ---
 
@@ -593,6 +600,7 @@ These fields are computed by the parser or API layer — they do not appear dire
 | `summary.file_transfer_named_count` (ATAK) | `file_name` not empty/`"UNKNOWN"` | Count of completed (named) transfers | |
 | `summary.sdk_error_count` (ATAK) | `atak_sdk_error_summary.total_count` | Total sdkError records | Informational — baseline unknown |
 | `summary.radio_types` (ATAK) | `atak_sdk_error_summary.radio_types` | Sorted distinct radioType values | e.g. `["PRO_X_2"]` |
+| `summary.ble_fail_count` (ATAK) | `counts_by_tag` `ERROR\|BLE` entries, else `deviceDisconnected` event count | BLE failures for the Health Score | Feeds BLE dimension; `> 0 = fail` threshold pending validation |
 
 ---
 
