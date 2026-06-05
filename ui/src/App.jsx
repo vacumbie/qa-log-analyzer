@@ -1314,17 +1314,40 @@ function HealthTab({ results }) {
         Hop count is excluded — it reflects network topology, not device health.
         See <code>docs/ui-requirements.md</code> for full criteria.
       </Note>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
         {results.map((r, i) => {
           const s = r.summary || {}
-          const checks = [(s.peak_temp_f || 0) < 113, (s.min_battery_pct || 100) > 30, !s.ble_fail_count, (s.avg_rssi == null || s.avg_rssi > -95), (s.max_stored_messages || 0) < 5]
-          const score = checks.filter(Boolean).length
+          const dims = [
+            { label: 'Thermal',  pass: (s.peak_temp_f || 0) < 113,              value: s.peak_temp_f != null ? `${s.peak_temp_f}°F peak` : '—',          threshold: '< 113°F' },
+            { label: 'Battery',  pass: (s.min_battery_pct || 100) > 30,         value: s.min_battery_pct != null ? `${s.min_battery_pct}% min` : '—',     threshold: '> 30%' },
+            { label: 'BLE',      pass: !s.ble_fail_count,                       value: s.ble_fail_count ? `${s.ble_fail_count} failures` : 'No failures',  threshold: 'no failures' },
+            { label: 'RSSI',     pass: s.avg_rssi == null || s.avg_rssi > -95,  value: s.avg_rssi != null ? `${s.avg_rssi} dBm avg` : '—',                threshold: '> −95 dBm' },
+            { label: 'Queue',    pass: (s.max_stored_messages || 0) < 5,        value: s.max_stored_messages ? `${s.max_stored_messages} peak` : '0 peak', threshold: '< 5 msgs' },
+          ]
+          const score = dims.filter(d => d.pass).length
           const color = score >= 4 ? C.green : score >= 3 ? C.yellow : C.red
           return (
-            <div key={i} style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: 20, textAlign: 'center' }}>
-              <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 13, color: PALETTE[i % PALETTE.length], marginBottom: 12 }}>{r.device?.callsign || r.source_filename}</div>
-              <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 52, fontWeight: 700, color, lineHeight: 1 }}>{score}<span style={{ fontSize: 20, color: C.muted }}>/5</span></div>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginTop: 8 }}>Thermal · Battery · BLE · RSSI · Queue</div>
+            <div key={i} style={{ background: 'var(--panel)', border: `1px solid var(--border)`, borderRadius: 8, padding: '16px 18px', display: 'flex', gap: 16, alignItems: 'flex-start', minWidth: 0 }}>
+              {/* Score block */}
+              <div style={{ textAlign: 'center', flexShrink: 0, width: 72 }}>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 11, color: PALETTE[i % PALETTE.length], marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 72 }}>
+                  {r.device?.callsign || r.source_filename?.split('_')[1] || r.source_filename}
+                </div>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 44, fontWeight: 700, color, lineHeight: 1 }}>
+                  {score}<span style={{ fontSize: 16, color: C.muted }}>/5</span>
+                </div>
+              </div>
+              {/* Dimension rows */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {dims.map(d => (
+                  <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
+                    <span style={{ fontSize: 9, lineHeight: 1, flexShrink: 0 }}>{d.pass ? '✓' : '✗'}</span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: d.pass ? C.muted : C.red, width: 52, flexShrink: 0 }}>{d.label}</span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: d.pass ? '#c8ddf4' : C.red, fontWeight: d.pass ? 400 : 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.value}</span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: '#2a3a52', marginLeft: 'auto', flexShrink: 0 }}>{d.threshold}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           )
         })}
