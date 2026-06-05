@@ -1304,7 +1304,17 @@ function ChatTab({ results }) {
   )
 }
 
+// The Health Score dimensions (thermal, battery, BLE, RSSI, queue) all come from
+// device logs. relay_manager summaries carry none of them, so a relay_manager card
+// would default-pass every dimension and show a misleading 5/5 — scope the tab to
+// device formats and drop relay_manager.
+const HEALTH_FORMATS = ['atak', 'diagnostic', 'rsdk']
+
 function HealthTab({ results }) {
+  const deviceResults = results.filter(r => HEALTH_FORMATS.includes(r.log_format))
+  if (deviceResults.length === 0) {
+    return <Note>No device logs loaded. The Health Score applies to ATAK, diagnostic, and RSDK logs — upload one to see per-device health.</Note>
+  }
   return (
     <div>
       <SectionHeader icon="💊" title="Per-Device Health Score" sub="Composite score — 5 dimensions · thresholds pending field validation" />
@@ -1315,7 +1325,7 @@ function HealthTab({ results }) {
         See <code>docs/ui-requirements.md</code> for full criteria.
       </Note>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
-        {results.map((r, i) => {
+        {deviceResults.map((r, i) => {
           const s = r.summary || {}
           const dims = [
             { label: 'Thermal',  pass: (s.peak_temp_f || 0) < 113,              value: s.peak_temp_f != null ? `${s.peak_temp_f}°F peak` : '—',          threshold: '< 113°F' },
@@ -1354,7 +1364,7 @@ function HealthTab({ results }) {
       </div>
 
       {/* Stored Messages section */}
-      {results.some(r => (r.summary?.max_stored_messages || 0) > 0) && (
+      {deviceResults.some(r => (r.summary?.max_stored_messages || 0) > 0) && (
         <>
           <SectionHeader
             icon="📥"
@@ -1368,7 +1378,7 @@ function HealthTab({ results }) {
             A value of 30 likely represents the firmware buffer ceiling.
           </Note>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
-            {results.map((r, i) => {
+            {deviceResults.map((r, i) => {
               const peak = r.summary?.max_stored_messages || 0
               if (peak === 0) return null
               const color = peak >= 20 ? C.red : peak >= 5 ? C.yellow : C.muted

@@ -205,7 +205,7 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
 
   **Threshold status:** All thresholds are initial estimates pending field validation against observed failure cases. RSSI threshold (−95 dBm) is grounded in 2026-06-03 KOPEK field session data but has not been validated against device failures.
 
-  **Known limitation — relay_manager logs produce a misleading 5/5:** The Health Score tab renders for all loaded logs, including `relay_manager` format. `relay_manager` logs lack `peak_temp_f`, `min_battery_pct`, `avg_rssi`, `ble_fail_count`, and `max_stored_messages` — so all five dimensions default-pass, producing a misleading 5/5. Fix options: scope the Health tab to device formats only (`atak`, `diagnostic`, `rsdk`), or suppress the score card when the format is `relay_manager`. Deferred to the Health Score Threshold Validation backlog item.
+  **Scoped to device formats:** The Health Score is computed only for device logs — `atak`, `diagnostic`, and `rsdk` (the `HEALTH_FORMATS` allow-list in `App.jsx`). `relay_manager` logs are excluded: their summaries carry none of the five dimension inputs (`peak_temp_f`, `min_battery_pct`, `avg_rssi`, `ble_fail_count`, `max_stored_messages`), so a relay card would default-pass every dimension and show a misleading 5/5. When only `relay_manager` logs are loaded, the tab shows a "no device logs" note instead of empty score cards.
 
 - **Radio Message Queue** — shown below score cards when any device has `max_stored_messages > 0`. Peak count per device, severity-colored (red ≥ 20, yellow ≥ 5, muted < 5). Explains the HOTLIPS PLI burst behavior (2026-06-03, peak=30, likely firmware buffer ceiling).
 - Note updated from "placeholder" to "thresholds pending field validation".
@@ -366,17 +366,16 @@ rather than a rough estimate.
 - **RSSI** (`> −95 dBm`): grounded in 2026-06-03 KOPEK field data but not yet validated
   against device failures.
 
-**Also in scope — relay_manager produces a misleading 5/5:** the Health tab renders
-for all loaded logs, but `relay_manager` summaries carry none of the five dimension
-inputs, so every dimension default-passes. Scope the tab to device formats (`atak`,
-`diagnostic`, `rsdk`) or suppress the score card for `relay_manager`. See the Known
-limitation note under Health Score (section 10). This part is not blocked on field
-data and could be done independently.
+**✅ Done (separate from the threshold work): relay_manager scoped out.** The Health
+tab now computes scores only for device formats (`atak`, `diagnostic`, `rsdk`) via the
+`HEALTH_FORMATS` allow-list in `App.jsx`, so `relay_manager` logs no longer render a
+misleading 5/5. See the "Scoped to device formats" note under Health Score (section 10).
+The remaining threshold-calibration work below is still blocked on field data.
 
 **Completion criteria:**
 - Each threshold backed by a documented baseline in `parsing-requirements.md`,
   replacing "initial estimate" wording.
-- `relay_manager` logs no longer render a misleading 5/5 (scoped out or suppressed).
+- ✅ `relay_manager` logs no longer render a misleading 5/5 (scoped to device formats).
 - The Health tab Note (`App.jsx`) updated from "thresholds pending field validation"
   once a threshold is validated.
 - The `sdkError`-is-informational data limitation in CLAUDE.md / `parsing-requirements.md`
