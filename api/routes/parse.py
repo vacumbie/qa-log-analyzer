@@ -417,6 +417,8 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             # SDK Logging 2.0
             "sdk_error_count":      r.atak_sdk_error_summary.total_count if r.atak_sdk_error_summary else 0,
             "radio_types":          r.atak_sdk_error_summary.radio_types if r.atak_sdk_error_summary else [],
+            # Radio message queue
+            "max_stored_messages":  max((h.stored_messages for h in r.atak_health_samples if h.stored_messages), default=0),
         }
 
     elif r.log_format == "relay_manager":
@@ -473,6 +475,8 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             "final_chat_recv":    r.final_message_counts.chat_received if r.final_message_counts else None,
             "contact_count":      len(r.contacts),
             "contact_names":      sorted(set(r.contacts.values())),
+            # Radio message queue
+            "max_stored_messages": max((s.stored_messages for s in r.system_samples if hasattr(s, "stored_messages") and s.stored_messages), default=0),
             "tx_final_ack":       sum(1 for t in r.tx_events if t.outcome == "final_ack"),
             "tx_nack":            sum(1 for t in r.tx_events if t.outcome == "nack"),
             "tx_timeout":         sum(1 for t in r.tx_events if t.outcome == "timeout"),

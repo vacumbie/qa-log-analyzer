@@ -1312,18 +1312,55 @@ function HealthTab({ results }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
         {results.map((r, i) => {
           const s = r.summary || {}
-          const checks = [(s.peak_temp_f || 0) < 113, (s.min_battery_pct || 100) > 30, !s.ble_fail_count, (s.avg_hop_count || 99) < 4]
+          const checks = [(s.peak_temp_f || 0) < 113, (s.min_battery_pct || 100) > 30, !s.ble_fail_count, (s.avg_hop_count || 99) < 4, (s.max_stored_messages || 0) < 5]
           const score = checks.filter(Boolean).length
-          const color = score >= 3 ? C.green : score >= 2 ? C.yellow : C.red
+          const color = score >= 4 ? C.green : score >= 3 ? C.yellow : C.red
           return (
             <div key={i} style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: 20, textAlign: 'center' }}>
               <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 13, color: PALETTE[i % PALETTE.length], marginBottom: 12 }}>{r.device?.callsign || r.source_filename}</div>
-              <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 52, fontWeight: 700, color, lineHeight: 1 }}>{score}<span style={{ fontSize: 20, color: C.muted }}>/4</span></div>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginTop: 8 }}>Thermal · Battery · BLE · Hops</div>
+              <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 52, fontWeight: 700, color, lineHeight: 1 }}>{score}<span style={{ fontSize: 20, color: C.muted }}>/5</span></div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginTop: 8 }}>Thermal · Battery · BLE · Hops · Queue</div>
             </div>
           )
         })}
       </div>
+
+      {/* Stored Messages section */}
+      {results.some(r => (r.summary?.max_stored_messages || 0) > 0) && (
+        <>
+          <SectionHeader
+            icon="📥"
+            title="Radio Message Queue"
+            sub="storedMessages — messages queued in radio buffer waiting to be pulled by the app"
+          />
+          <Note>
+            ⚠ When <code>storedMessages &gt; 0</code>, the radio has received messages that the app has not yet
+            pulled from the BLE buffer. A large queue can cause a burst of PLI appearing simultaneously
+            after an app restart or BLE reconnect — seen on HOTLIPS (2026-06-03 field session, peak=30).
+            A value of 30 likely represents the firmware buffer ceiling.
+          </Note>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
+            {results.map((r, i) => {
+              const peak = r.summary?.max_stored_messages || 0
+              if (peak === 0) return null
+              const color = peak >= 20 ? C.red : peak >= 5 ? C.yellow : C.muted
+              const label = peak >= 20 ? 'High — possible queue backup' : peak >= 5 ? 'Moderate' : 'Low'
+              return (
+                <div key={i} style={{ background: 'var(--panel)', border: `1px solid ${color}40`, borderLeft: `3px solid ${color}`, borderRadius: 6, padding: '12px 14px' }}>
+                  <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 12, color: PALETTE[i % PALETTE.length], marginBottom: 6 }}>
+                    {r.device?.callsign || r.source_filename}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 36, fontWeight: 700, color, lineHeight: 1 }}>{peak}</span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted }}>peak msgs</span>
+                  </div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color, marginTop: 4 }}>{label}</div>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
     </div>
   )
 }
