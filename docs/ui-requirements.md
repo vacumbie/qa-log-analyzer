@@ -390,6 +390,31 @@ samples are collected.
 (BLE dimension completed in the `fix(health)` commits); only the threshold values
 remain unvalidated, and this is disclosed honestly in the UI and all four docs.
 
+### FW Log — RHC Response Field Mappings ⏳ Pending
+
+The firmware log parser extracts raw values from the RHC response that need
+mapping to human-readable equivalents. QA tester to provide mapping tables
+so the parser can decode them at parse time and the UI can display friendly
+values alongside the raw identifiers.
+
+**Fields requiring mapping tables:**
+
+| Field | Raw example | Needed mapping |
+|-------|-------------|----------------|
+| Origin hash | `0f07` | → device serial number (e.g. PNE241500446) |
+| Firmware version | binary payload | → readable version string (e.g. 3.2.11) |
+| RHC response version | `0x10` | → protocol version meaning |
+| TX power level | `3` | → actual dBm / wattage output |
+
+**Implementation plan (once mappings are provided):**
+- Add a `FW_HASH_TO_SERIAL` lookup dict to `parser/fw_log.py`
+- Populate `result.device.radio_serial` from the hash lookup
+- Populate `result.device.radio_firmware` from the version mapping
+- Display decoded values in `FwLogTab` alongside raw hex values
+- Add a `DATA LIMITATION` note when a hash is not in the lookup table
+
+**Status:** ⏳ Blocked — waiting on mapping tables from QA tester.
+
 ### Time-Window Step — disabled state for unparseable timestamps
 When the client-side scanner cannot parse timestamps from the uploaded logs, the
 upload flow currently skips the time-window step entirely and jumps straight to the
