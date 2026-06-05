@@ -343,6 +343,9 @@ Interactive Leaflet.js map in the Hop Count tab showing receiver GPS position co
 ### ATAK Enhanced Log (SDK Logging 2.0) — ✅ Implemented
 Full support for the enhanced ATAK log format. The `SdkLogSummaryCard` renders the aggregated `atak_sdk_error_summary` (counts by tag and by `additionalInfo`, distinct radio types, and a retained sample) — high-volume `sdkError` records are aggregated, never rendered per-record, with the volume-baseline `DATA LIMITATION` surfaced in the banner. Also covers the enhanced message/event fields: `loggingUserLocation` / `transmittedLocation`, `originatorUUID`, the `-99` open-segments sentinel shown as `unknown`, `firmwareUpdate` events, and `deviceDisconnected` location. See ATAK tab spec (section 12).
 
+### FW Log — Relay Firmware Parser & Tab — ✅ Implemented
+Relay radio firmware (UART/USB debug) logs are auto-detected (detection priority 1) and parsed by `parser/fw_log.py` into `FwLogResult`. The FW Log tab (section 13) renders origin hash, RF configuration, message bucket history, relay routing decisions, channel energy (the RSSI proxy), neighbor table, and errors/warnings, with the three firmware-log `DATA LIMITATION` notes surfaced honestly. See parser spec in `parsing-requirements.md` (Relay Firmware section) and field definitions Format 4. **Note:** decoding the binary RHC payload (hash → serial, firmware version) is tracked separately below as RHC Response Field Mappings, still pending.
+
 ### Session Persistence
 Allow a user to save a parsed session so it can be retrieved later and compared alongside other test data.
 
