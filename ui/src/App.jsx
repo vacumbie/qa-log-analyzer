@@ -1311,7 +1311,7 @@ function ChatTab({ results }) {
 const HEALTH_FORMATS = ['atak', 'diagnostic', 'rsdk']
 
 function HealthTab({ results }) {
-  const deviceResults = results.filter(r => HEALTH_FORMATS.includes(r.log_format))
+  const deviceResults = React.useMemo(() => results.filter(r => HEALTH_FORMATS.includes(r.log_format)), [results])
   if (deviceResults.length === 0) {
     return <Note>No device logs loaded. The Health Score applies to ATAK, diagnostic, and RSDK logs — upload one to see per-device health.</Note>
   }
@@ -2054,6 +2054,9 @@ export default function App() {
         final_chat_recv:    r.summary?.final_chat_recv,
         contact_count:      r.summary?.contact_count,
         contact_names:      r.summary?.contact_names,
+        // always 0 for non-ATAK (SystemSample has no storedMessages); carried
+        // explicitly so it survives the spread if a parser ever populates it
+        max_stored_messages: r.summary?.max_stored_messages ?? 0,
       }
 
       return {
