@@ -197,7 +197,7 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
   |-----------|---------------|----------|
   | Thermal | Peak PA temp < 113°F | Hardware limit |
   | Battery | Min battery > 30% | Operational reserve |
-  | BLE | No BLE fail events | Connectivity integrity. For ATAK logs, `ble_fail_count` comes from SDK Logging 2.0 `ERROR\|BLE` entries in `counts_by_tag`, falling back to the count of `deviceDisconnected` events when no SDK 2.0 records are present. |
+  | BLE | No BLE fail events | Connectivity integrity. For ATAK logs, `ble_fail_count` comes from SDK Logging 2.0 `ERROR\|BLE` entries in `counts_by_tag`, falling back to the `deviceDisconnected` count only when no SDK 2.0 summary is present (a summary with zero `ERROR\|BLE` is a genuine 0). diagnostic/rsdk use the BLE failure-event count; `relay_manager` is excluded (see scoping below). |
   | RSSI | Avg RSSI > −95 dBm | From KOPEK field data (median −86, poor threshold −100) |
   | Queue | Peak storedMessages < 5 | Queue backup indicator — seen peaking at 30 on HOTLIPS |
 
@@ -252,7 +252,7 @@ ATAK-only tab (`atakOnly`) — appears in the tab bar only when an ATAK plug-in 
 - **Hop count in RSDK logs** — `GRIP_Receiver` incoming `hops` field is genuine RF routing data and should be included in hop count analysis. Legacy `SendMessageResponse` hop count (SDK sequence counter) is still excluded. Display a `GRIP (RSDK)` source badge to distinguish from diagnostic/ATAK data.
 - **Unknown device** had no Message Count Details blocks — some KPIs will be unavailable for this device
 - **App crash detection** is not possible from diagnostic log format v1 — no crash markers present; surface this limitation honestly in the Sessions tab
-- **Health Score dimensions** not yet fully defined — placeholder radar chart in reference implementation
+- **Health Score thresholds** are initial estimates pending field validation (see the Health Score Threshold Validation backlog item) — the tab renders a per-device score card with five labeled attribute rows, not the placeholder radar chart from the reference design
 - **Relay Health tab — BLE payload decoding pending:** Relay health attribute values (SNR, battery %, temperature °F, uptime, firmware version) cannot be displayed until BLE protocol decoding is implemented. The tab must surface this limitation via a Data Limitations Banner rather than showing empty fields silently.
 - **Relay Health tab — prod environment:** Prod log behavior and environment badge are undefined until prod samples are analyzed.
 - **Topology tab** — Alpha/Beta feature; see Tab 12. Accuracy is inherently limited by what the logs can surface — the hardest data point in the dashboard to get right; must be clearly labeled as experimental in the UI
@@ -357,8 +357,9 @@ rather than a rough estimate.
 
 **Scope — thresholds to validate against observed device behavior:**
 - **BLE** (`> 0 = fail`): the dimension now derives `ble_fail_count` from the
-  `ERROR|BLE` subset of ATAK `sdkError` records (falling back to `deviceDisconnected`
-  event count when no SDK 2.0 records are present). A single transient BLE reconnect
+  `ERROR|BLE` subset of ATAK `sdkError` records (falling back to the `deviceDisconnected`
+  event count only when no SDK 2.0 summary is present — a present-but-zero summary is a
+  genuine 0). A single transient BLE reconnect
   may not warrant a failure — the `> 0` cutoff needs a real-session baseline before it
   is trustworthy. The `sdkError` BLE-error volume baseline is unknown.
 - **Thermal** (`< 113°F`), **Battery** (`> 30%`), **Queue** (`< 5 msgs`): also initial
