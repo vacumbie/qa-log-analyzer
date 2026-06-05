@@ -19,6 +19,12 @@ FIXTURE = FIXTURE_DIR / "atak_sample.json"
 # (rsdk, diagnostic) use their native extensions under tests/fixtures/.
 ENHANCED = FIXTURE_DIR / "atak_enhanced_sample.json"
 
+# Edge-case fixture: SDK 2.0 summary present but with zero ERROR|BLE entries
+# (only ERROR|RADIO), plus two deviceDisconnected events. Pins the rule that a
+# genuine zero BLE-error count is reported as 0 and does NOT fall back to the
+# disconnect count — the fallback fires only when no SDK 2.0 records exist.
+SDK_NO_BLE = FIXTURE_DIR / "atak_sdk_no_ble_sample.json"
+
 # Named ATAK log fixture for filename parsing tests
 NAMED_FIXTURE = FIXTURE_DIR / "diagnostic_ATAK_HOTEL_90215634664458_2026-03-04_16_42_04_775.log"
 
@@ -327,6 +333,19 @@ def test_ble_fail_count_falls_back_to_disconnects():
     disconnects = sum(1 for e in result.atak_events if e.event_type == "deviceDisconnected")
     summary = _result_to_dict(result)["summary"]
     assert summary["ble_fail_count"] == disconnects
+
+
+def test_ble_fail_count_zero_when_sdk_present_without_ble_errors():
+    """A SDK 2.0 summary with no ERROR|BLE entries reports 0 — it does NOT fall
+    back to the deviceDisconnected count. The fallback fires only when no SDK 2.0
+    records exist at all."""
+    result = parse_atak_log(SDK_NO_BLE)
+    assert result.atak_sdk_error_summary is not None
+    assert "ERROR|BLE" not in result.atak_sdk_error_summary.counts_by_tag
+    disconnects = sum(1 for e in result.atak_events if e.event_type == "deviceDisconnected")
+    assert disconnects == 2  # fixture has two — proves the fallback was not taken
+    summary = _result_to_dict(result)["summary"]
+    assert summary["ble_fail_count"] == 0
 
 
 # ── Enhanced log — fileTransfer fields ────────────────────────────────────────
