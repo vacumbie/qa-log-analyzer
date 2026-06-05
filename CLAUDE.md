@@ -236,6 +236,22 @@ cd <repo-root>/ui
 npm run dev
 ```
 
+### Verifying UI changes in a browser (this machine)
+
+When driving the running UI with Playwright (e.g. to verify a tab renders),
+launch **system Edge**, not bundled Chromium:
+
+```js
+const browser = await chromium.launch({ channel: 'msedge' })
+```
+
+On this machine `npx playwright install chromium` reports success (exit 0,
+100% download) but does not populate `…\ms-playwright\chromium-<rev>\chrome-win\`,
+so `chromium.launch()` fails with "Executable doesn't exist". Edge ships with
+Windows 11 and `channel: 'msedge'` drives it directly with no download. Keep
+Playwright itself out of `ui/` — install it in a temp dir so it doesn't touch
+the lean stack (see "Do not add npm packages").
+
 ---
 
 ## Known data limitations
