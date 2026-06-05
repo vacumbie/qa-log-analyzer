@@ -9,12 +9,14 @@ from pathlib import Path
 from parser.atak import parse_atak_log
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
-FIXTURE = FIXTURE_DIR / "atak_sample.log"
+FIXTURE = FIXTURE_DIR / "atak_sample.json"
 
 # Synthetic enhanced (SDK Logging 2.0) fixture — covers sdkError aggregation,
 # fileName, SUCCESS status, the -99 open-segments sentinel, location fields,
 # firmwareUpdate events, deviceDisconnected.location, and originatorUUID.
-ENHANCED = FIXTURE_DIR / "atak_enhanced_sample.log"
+# .json extension used because ATAK logs are JSON arrays; other formats
+# (rsdk, diagnostic) use their native extensions under tests/fixtures/.
+ENHANCED = FIXTURE_DIR / "atak_enhanced_sample.json"
 
 # Named ATAK log fixture for filename parsing tests
 NAMED_FIXTURE = FIXTURE_DIR / "diagnostic_ATAK_HOTEL_90215634664458_2026-03-04_16_42_04_775.log"
