@@ -490,8 +490,9 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             "final_chat_recv":    r.final_message_counts.chat_received if r.final_message_counts else None,
             "contact_count":      len(r.contacts),
             "contact_names":      sorted(set(r.contacts.values())),
-            # Radio message queue
-            "max_stored_messages": max((s.stored_messages for s in r.system_samples if hasattr(s, "stored_messages") and s.stored_messages), default=0),
+            # Radio message queue — only ATAK device health carries storedMessages;
+            # SystemSample (diagnostic/rsdk/relay_manager) has no such field.
+            "max_stored_messages": 0,
             "tx_final_ack":       sum(1 for t in r.tx_events if t.outcome == "final_ack"),
             "tx_nack":            sum(1 for t in r.tx_events if t.outcome == "nack"),
             "tx_timeout":         sum(1 for t in r.tx_events if t.outcome == "timeout"),

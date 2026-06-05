@@ -817,8 +817,8 @@ function HopCountMap({ results }) {
   const linesRef   = React.useRef([])
 
   // Build device list from ATAK results that have location data
-  const atakResults = results.filter(r => r.log_format === 'atak')
-  
+  const atakResults = React.useMemo(() => results.filter(r => r.log_format === 'atak'), [results])
+
   const deviceOptions = React.useMemo(() => {
     return atakResults.map(r => ({
       label: r.device?.callsign || r.source_filename,
