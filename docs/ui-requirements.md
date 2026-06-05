@@ -344,3 +344,38 @@ Allow a user to save a parsed session so it can be retrieved later and compared 
 **Dependencies:** Requires API session store to persist beyond in-memory (currently lost on server restart)
 
 **Status:** ⏸ Deferred — not implemented. No persistence exists in `api/routes/export.py`, `App.jsx`, or `useLogData.js`.
+
+### Health Score Threshold Validation
+Validate the Health Score pass/fail thresholds against real field data, replacing
+the current initial estimates (see Health Score spec, section 10).
+
+**User story:** As a QA engineer, I want the Health Score dimensions to fail only
+when a device is genuinely unhealthy, so the `/5` score is a signal I can trust
+rather than a rough estimate.
+
+**Scope — thresholds to validate against observed device behavior:**
+- **BLE** (`> 0 = fail`): the dimension now derives `ble_fail_count` from the
+  `ERROR|BLE` subset of ATAK `sdkError` records (falling back to `deviceDisconnected`
+  event count when no SDK 2.0 records are present). A single transient BLE reconnect
+  may not warrant a failure — the `> 0` cutoff needs a real-session baseline before it
+  is trustworthy. The `sdkError` BLE-error volume baseline is unknown.
+- **Thermal** (`< 113°F`), **Battery** (`> 30%`), **Queue** (`< 5 msgs`): also initial
+  estimates, validated only against limited samples.
+- **RSSI** (`> −95 dBm`): grounded in 2026-06-03 KOPEK field data but not yet validated
+  against device failures.
+
+**Completion criteria:**
+- Each threshold backed by a documented baseline in `parsing-requirements.md`,
+  replacing "initial estimate" wording.
+- The Health tab Note (`App.jsx`) updated from "thresholds pending field validation"
+  once a threshold is validated.
+- The `sdkError`-is-informational data limitation in CLAUDE.md / `parsing-requirements.md`
+  updated to reflect any validated `ERROR|BLE` baseline.
+
+**Dependencies:** Requires real ATAK (and diagnostic/rsdk) field logs with known
+healthy vs. unhealthy device outcomes to calibrate against. Not actionable until such
+samples are collected.
+
+**Status:** ⏳ Pending — blocked on field data. The dimensions are wired and shipped
+(BLE dimension completed in the `fix(health)` commits); only the threshold values
+remain unvalidated, and this is disclosed honestly in the UI and all four docs.

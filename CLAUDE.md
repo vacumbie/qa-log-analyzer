@@ -301,6 +301,7 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | Relay Manager prod log support | Blocked — waiting on prod samples |
 | BLE payload decoding (relay health attributes) | Blocked — waiting on protocol spec |
 | Relay Manager JSON log format (SDK Logging 2.0) | Pending — format in design |
+| Health Score threshold validation (BLE, thermal, battery, queue, RSSI) | Pending — blocked on field data; dimensions wired, thresholds are initial estimates |
 
 ---
 
