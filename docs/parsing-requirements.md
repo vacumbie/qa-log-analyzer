@@ -285,6 +285,16 @@ All parseable data comes from lines tagged `I flutter` (Flutter app output):
 - Only one frequency set observed: `Compliant` (id: 26058)
 - No relay health data (battery, firmware, signal) observed in this log sample — ⚠️ see Known Limitations
 
+### Health Score scoping
+
+The `relay_manager` summary carries **none** of the per-device Health Score dimension
+inputs (`peak_temp_f`, `min_battery_pct`, `avg_rssi`, `ble_fail_count`,
+`max_stored_messages`) — those come from device-format logs, and relay health
+attributes remain undecoded (BLE payload limitation above). Consequently the UI Health
+Score tab is scoped to device formats only (`atak`, `diagnostic`, `rsdk`) and excludes
+`relay_manager`; otherwise a relay card would default-pass every dimension and show a
+misleading 5/5. See the Health Score spec in `ui-requirements.md` (section 10).
+
 ---
 
 ## Shared Output Requirements
@@ -516,7 +526,7 @@ are general structured log events, not error-only records.
 12. **`message.fileName`:** Real filename on completed `fileTransfer` records; `"UNKNOWN"` when incomplete.
 13. **`loggingUserLocation` / `transmittedLocation`:** Two distinct `{lat, long, alt}` objects — the logger's own GPS vs the location in the message payload. `transmittedLocation` is absent on `textChat` (store `null`).
 14. **`originatorUUID`:** `ANDROID-*` UUID; store `""` when missing. `originatorCallsign` is empty in observed samples.
-15. **`sdkError` records:** Aggregate into `AtakSdkErrorSummary`; never store per-record; surface a `DATA LIMITATION` for the unknown volume baseline. The total count stays informational, but `_result_to_dict()` sums the `ERROR|BLE` subset of `counts_by_tag` into `summary.ble_fail_count` (falling back to the `deviceDisconnected` event count) to drive the BLE Health Score dimension — its `> 0 = fail` threshold is an initial estimate pending field validation.
+15. **`sdkError` records:** Aggregate into `AtakSdkErrorSummary`; never store per-record; surface a `DATA LIMITATION` for the unknown volume baseline. The total count stays informational, but `_result_to_dict()` sums the `ERROR|BLE` subset of `counts_by_tag` into `summary.ble_fail_count` to drive the BLE Health Score dimension. The fallback to the `deviceDisconnected` event count fires **only when no SDK 2.0 summary is present at all** (`atak_sdk_error_summary is None`) — a summary that exists but has zero `ERROR|BLE` entries is a genuine `0`, not a fallback trigger. The `> 0 = fail` threshold is an initial estimate pending field validation.
 
 ### Known Limitations — ATAK Enhanced Log
 

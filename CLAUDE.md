@@ -182,6 +182,19 @@ Stage logs are identified by `na.relaymanager(<pid>)` in io_stats lines.
 Prod logs have not been analyzed. Do not assume prod behavior matches stage,
 and do not remove the "unknown" environment path.
 
+### Health Score — device-format-scoped, BLE from ERROR|BLE
+The Health tab scores only device-format logs via the `HEALTH_FORMATS`
+allow-list (`atak`, `diagnostic`, `rsdk`) in `App.jsx`. `relay_manager` is
+excluded because its summary carries none of the five dimension inputs — an
+unscoped relay card would default-pass everything and show a misleading 5/5.
+When only relay logs are loaded, the tab shows a "no device logs" note.
+The BLE dimension's `ble_fail_count` is derived in `_result_to_dict()`: for
+ATAK it sums the `ERROR|BLE` subset of `counts_by_tag`, falling back to the
+`deviceDisconnected` count **only when no SDK 2.0 summary exists** (a summary
+with zero `ERROR|BLE` is a real `0`); diagnostic/rsdk use `len(ble_fail_events)`.
+All Health Score thresholds are unvalidated initial estimates — see the
+threshold-validation backlog in `docs/ui-requirements.md`.
+
 ---
 
 ## Common tasks
