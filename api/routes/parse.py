@@ -474,6 +474,13 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
         }
 
     else:
+        # GRIP incoming RSSI is the genuine RF signal for diagnostic/rsdk. It feeds
+        # both the RSSI tab (grip_avg_rssi) and the Health Score RSSI dimension
+        # (avg_rssi). diagnostic logs carry no GRIP messages, so avg_rssi stays None
+        # and the Health tab shows RSSI as N/A (excluded from the score denominator).
+        grip_rssi_vals = [g.rssi for g in r.grip_messages if g.rssi is not None]
+        grip_rssi_avg = round(sum(grip_rssi_vals) / len(grip_rssi_vals), 1) if grip_rssi_vals else None
+
         base["summary"] = {
             "total_messages":     len(r.received_messages),
             "pli_count":          len(r.pli_messages),
@@ -484,6 +491,8 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             "peak_temp_c":        max((s.pa_temp_c for s in r.system_samples if s.pa_temp_c), default=None),
             "peak_temp_f":        round(max((s.pa_temp_c for s in r.system_samples if s.pa_temp_c), default=0) * 9 / 5 + 32) if any(s.pa_temp_c for s in r.system_samples) else None,
             "min_battery_pct":    min((s.battery_pct for s in r.system_samples if s.battery_pct), default=None),
+            # Health Score RSSI dimension input — GRIP incoming RSSI (None for diagnostic)
+            "avg_rssi":           grip_rssi_avg,
             "ble_fail_count":     len(r.ble_fail_events),
             "session_count":      len(r.session_gaps) + 1,
             "final_chat_sent":    r.final_message_counts.chat_sent if r.final_message_counts else None,
@@ -513,10 +522,7 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
                 sum(g.hops for g in r.grip_messages if g.hops is not None) /
                 max(1, sum(1 for g in r.grip_messages if g.hops is not None)), 2
             ) if any(g.hops is not None for g in r.grip_messages) else None,
-            "grip_avg_rssi":  round(
-                sum(g.rssi for g in r.grip_messages if g.rssi is not None) /
-                max(1, sum(1 for g in r.grip_messages if g.rssi is not None)), 1
-            ) if any(g.rssi is not None for g in r.grip_messages) else None,
+            "grip_avg_rssi":  grip_rssi_avg,
         }
 
     return base

@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from parser.rsdk import parse_rsdk_log
+from api.routes.parse import _result_to_dict
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
@@ -43,6 +44,26 @@ def test_session_timestamps():
 def test_no_parse_errors():
     result = parse_rsdk_log(FIXTURE_DIR / "rsdk_sample_ios.txt")
     assert result.parse_errors == [], f"Unexpected errors: {result.parse_errors}"
+
+
+# ── Health Score RSSI dimension input (summary.avg_rssi) ──────────────────────
+# avg_rssi is computed in _result_to_dict() from GRIP incoming RSSI, so these
+# assert against the serialized summary the UI Health tab consumes.
+
+def test_avg_rssi_from_grip_incoming():
+    """rsdk logs with GRIP_Receiver incoming RSSI populate avg_rssi (mean of the
+    incoming rssi values) so the Health Score RSSI dimension is scored, not free-passed."""
+    result = parse_rsdk_log(FIXTURE_DIR / "rsdk_grip_sample.txt")
+    assert [g.rssi for g in result.grip_messages] == [-80, -90]
+    summary = _result_to_dict(result)["summary"]
+    assert summary["avg_rssi"] == -85.0
+
+
+def test_avg_rssi_none_without_grip():
+    """Without GRIP incoming RSSI, avg_rssi is None → the RSSI dimension is N/A
+    (excluded from the score), never a free pass."""
+    summary = _result_to_dict(parse_rsdk_log(FIXTURE_DIR / "rsdk_sample_ios.txt"))["summary"]
+    assert summary["avg_rssi"] is None
 
 
 def test_missing_file_returns_error():

@@ -192,6 +192,10 @@ The BLE dimension's `ble_fail_count` is derived in `_result_to_dict()`: for
 ATAK it sums the `ERROR|BLE` subset of `counts_by_tag`, falling back to the
 `deviceDisconnected` count **only when no SDK 2.0 summary exists** (a summary
 with zero `ERROR|BLE` is a real `0`); diagnostic/rsdk use `len(ble_fail_events)`.
+A dimension with no data for a format is **N/A** — excluded from the score
+denominator, never a free pass (`pass: null` in `App.jsx`). RSSI is the main
+case: `avg_rssi` comes from ATAK received-message RSSI and rsdk GRIP incoming
+RSSI, but is `None` for diagnostic, so diagnostic cards score `/4`.
 All Health Score thresholds are unvalidated initial estimates — see the
 threshold-validation backlog in `docs/ui-requirements.md`.
 

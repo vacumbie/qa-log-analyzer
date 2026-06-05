@@ -593,7 +593,7 @@ These fields are computed by the parser or API layer — they do not appear dire
 | `summary.avg_hop_count` | `hop_count` on received messages | Mean of all non-null hop counts | |
 | `summary.peak_temp_f` | `pa_temp_f` on system samples | Maximum °F across all samples | |
 | `summary.min_battery_pct` | `battery_pct` on system samples | Minimum % across all samples | |
-| `summary.avg_rssi` (ATAK) | `rssi` on received messages where `rssi_is_valid` | Mean dBm, sent-message RSSI excluded | |
+| `summary.avg_rssi` | ATAK: `rssi` on received messages where `rssi_is_valid`; diagnostic/rsdk: mean of GRIP incoming `rssi` (same value as `grip_avg_rssi`) | Mean dBm. Feeds the Health Score RSSI dimension; `None` when no RSSI data (e.g. diagnostic) → dimension shown N/A | |
 | `summary.unique_sender_gids` (ATAK) | `sender_gid` on all messages | Count of distinct GIDs | |
 | `summary.negative_delivery_time_count` (ATAK) | `delivery_time_ms` | Count of records where value < 0 | Clock skew indicator |
 | `summary.success_count` (ATAK) | `delivery_status == "SUCCESS"` | Count of sender-confirmed deliveries | Sender-side ACK; distinct from FULLY_RECEIVED |

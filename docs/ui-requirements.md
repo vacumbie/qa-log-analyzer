@@ -190,7 +190,7 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
 > **Backlog (not yet implemented):** dedicated "Chat Messages Received by Device" and "Top Chat Senders" charts from the reference design. The current `ChatTab` reuses the PLI-vs-chat split and TX-outcomes charts.
 
 ### 10. Health Score (`health`)
-- **Per-Device Health Score** — one card per device showing a composite score out of 5 (not a radar chart). Score color: green ≥ 4 · yellow ≥ 3 · red below.
+- **Per-Device Health Score** — one card per device showing a composite score (not a radar chart). The denominator is the number of dimensions that have data for that format: typically `/5`, but a dimension with no data is shown **N/A** and excluded from both numerator and denominator (e.g. diagnostic logs score `/4` because RSSI is N/A). Score color is by pass ratio: green ≥ 0.8 · yellow ≥ 0.6 · red below.
 
   **Pass/fail dimensions:**
   | Dimension | Pass condition | Rationale |
@@ -198,7 +198,7 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
   | Thermal | Peak PA temp < 113°F | Hardware limit |
   | Battery | Min battery > 30% | Operational reserve |
   | BLE | No BLE fail events | Connectivity integrity. For ATAK logs, `ble_fail_count` comes from SDK Logging 2.0 `ERROR\|BLE` entries in `counts_by_tag`, falling back to the `deviceDisconnected` count only when no SDK 2.0 summary is present (a summary with zero `ERROR\|BLE` is a genuine 0). diagnostic/rsdk use the BLE failure-event count; `relay_manager` is excluded (see scoping below). |
-  | RSSI | Avg RSSI > −95 dBm | From KOPEK field data (median −86, poor threshold −100) |
+  | RSSI | Avg RSSI > −95 dBm | From KOPEK field data (median −86, poor threshold −100). `avg_rssi` source by format — ATAK: received-message RSSI (`rssi_is_valid`); rsdk: GRIP incoming RSSI; diagnostic: **N/A** (no session-level RSSI aggregate — dimension excluded from the denominator, not free-passed). |
   | Queue | Peak storedMessages < 5 | Queue backup indicator — seen peaking at 30 on HOTLIPS |
 
   **Hop count is intentionally excluded** — hop count reflects network topology, not device health. A device at 3 hops in a healthy mesh is operating correctly.

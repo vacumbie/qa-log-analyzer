@@ -1327,15 +1327,19 @@ function HealthTab({ results }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
         {deviceResults.map((r, i) => {
           const s = r.summary || {}
+          // pass: true = passed, false = failed, null = N/A (no data for this format —
+          // excluded from the score denominator rather than counted as a free pass).
           const dims = [
             { label: 'Thermal',  pass: (s.peak_temp_f || 0) < 113,              value: s.peak_temp_f != null ? `${s.peak_temp_f}°F peak` : '—',          threshold: '< 113°F' },
             { label: 'Battery',  pass: (s.min_battery_pct || 100) > 30,         value: s.min_battery_pct != null ? `${s.min_battery_pct}% min` : '—',     threshold: '> 30%' },
             { label: 'BLE',      pass: !s.ble_fail_count,                       value: s.ble_fail_count ? `${s.ble_fail_count} failures` : 'No failures',  threshold: 'no failures' },
-            { label: 'RSSI',     pass: s.avg_rssi == null || s.avg_rssi > -95,  value: s.avg_rssi != null ? `${s.avg_rssi} dBm avg` : '—',                threshold: '> −95 dBm' },
+            { label: 'RSSI',     pass: s.avg_rssi == null ? null : s.avg_rssi > -95,  value: s.avg_rssi != null ? `${s.avg_rssi} dBm avg` : 'N/A',          threshold: '> −95 dBm' },
             { label: 'Queue',    pass: (s.max_stored_messages || 0) < 5,        value: s.max_stored_messages ? `${s.max_stored_messages} peak` : '0 peak', threshold: '< 5 msgs' },
           ]
-          const score = dims.filter(d => d.pass).length
-          const color = score >= 4 ? C.green : score >= 3 ? C.yellow : C.red
+          const score = dims.filter(d => d.pass === true).length
+          const total = dims.filter(d => d.pass !== null).length
+          const ratio = total ? score / total : 0
+          const color = ratio >= 0.8 ? C.green : ratio >= 0.6 ? C.yellow : C.red
           return (
             <div key={i} style={{ background: 'var(--panel)', border: `1px solid var(--border)`, borderRadius: 8, padding: '16px 18px', display: 'flex', gap: 16, alignItems: 'flex-start', minWidth: 0 }}>
               {/* Score block */}
@@ -1344,19 +1348,23 @@ function HealthTab({ results }) {
                   {r.device?.callsign || r.source_filename?.split('_')[1] || r.source_filename}
                 </div>
                 <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 44, fontWeight: 700, color, lineHeight: 1 }}>
-                  {score}<span style={{ fontSize: 16, color: C.muted }}>/5</span>
+                  {score}<span style={{ fontSize: 16, color: C.muted }}>/{total}</span>
                 </div>
               </div>
               {/* Dimension rows */}
               <div style={{ flex: 1, minWidth: 0 }}>
-                {dims.map(d => (
-                  <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
-                    <span style={{ fontSize: 9, lineHeight: 1, flexShrink: 0 }}>{d.pass ? '✓' : '✗'}</span>
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: d.pass ? C.muted : C.red, width: 52, flexShrink: 0 }}>{d.label}</span>
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: d.pass ? '#c8ddf4' : C.red, fontWeight: d.pass ? 400 : 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.value}</span>
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: '#2a3a52', marginLeft: 'auto', flexShrink: 0 }}>{d.threshold}</span>
-                  </div>
-                ))}
+                {dims.map(d => {
+                  const na = d.pass === null
+                  const failed = d.pass === false
+                  return (
+                    <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
+                      <span style={{ fontSize: 9, lineHeight: 1, flexShrink: 0, color: na ? C.muted : undefined }}>{na ? '–' : d.pass ? '✓' : '✗'}</span>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: failed ? C.red : C.muted, width: 52, flexShrink: 0 }}>{d.label}</span>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: failed ? C.red : na ? C.muted : '#c8ddf4', fontWeight: failed ? 700 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.value}</span>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: '#2a3a52', marginLeft: 'auto', flexShrink: 0 }}>{d.threshold}</span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )
@@ -2044,6 +2052,9 @@ export default function App() {
         peak_temp_c:        peakC,
         peak_temp_f:        cToF(peakC),
         min_battery_pct:    batts.length ? Math.min(...batts) : null,
+        // RSSI dimension input — GRIP incoming RSSI, recomputed from the windowed
+        // grip messages; null (→ N/A) for diagnostic, which has no GRIP data
+        avg_rssi:           rnd(avg(gripMsgs.map(g => g.rssi).filter(v => v != null)), 1),
         ble_fail_count:     bleEvts.length,
         tx_final_ack:       txEvts.filter(t => t.outcome === 'final_ack').length,
         tx_nack:            txEvts.filter(t => t.outcome === 'nack').length,

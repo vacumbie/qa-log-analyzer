@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from parser.diagnostic import parse_diagnostic_log
+from api.routes.parse import _result_to_dict
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
@@ -53,6 +54,14 @@ def test_system_samples():
 def test_no_parse_errors():
     result = parse_diagnostic_log(FIXTURE_DIR / "diagnostic_sample.txt")
     assert result.parse_errors == [], f"Unexpected errors: {result.parse_errors}"
+
+
+def test_avg_rssi_is_na_for_health_score():
+    """Diagnostic logs carry no GRIP session-level RSSI aggregate, so the Health
+    Score RSSI dimension is N/A (avg_rssi is None) — excluded from the score
+    denominator rather than scored as a free pass."""
+    summary = _result_to_dict(parse_diagnostic_log(FIXTURE_DIR / "diagnostic_sample.txt"))["summary"]
+    assert summary["avg_rssi"] is None
 
 
 def test_missing_file_returns_error():
