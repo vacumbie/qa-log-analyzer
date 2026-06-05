@@ -270,3 +270,39 @@ def test_missing_file_returns_error():
     result = parse_fw_log(Path("nonexistent_fw.log"))
     assert len(result.parse_errors) > 0
     assert result.log_format == "fw_log"
+
+
+# ── Serialization round-trip ──────────────────────────────────────────────────
+# The parser tests above stop at the ParseResult boundary. A field can still be
+# dropped in _result_to_dict() — the layer the UI actually reads. These tests
+# guard the full models -> parser -> _result_to_dict -> UI contract.
+
+# Keys FwLogTab reads off r.fw_log (ui/src/App.jsx).
+_FW_LOG_KEYS = {
+    "origin_hash", "fw_format_version", "rf_config", "duration_ms", "buckets",
+    "energy_summary", "routing", "neighbor_hashes", "rhc_poll_count",
+    "battery_error_count", "error_counts", "error_messages", "warn_counts",
+    "warn_messages", "parsed_lines", "skipped_debug",
+}
+_ROUTING_KEYS = {"transmit", "echo", "vine", "flood", "skip_rx", "skip_tx"}
+
+
+def test_serialized_fw_log_has_all_ui_keys():
+    from api.routes.parse import _result_to_dict
+    base = _result_to_dict(parse_fw_log(FIXTURE))
+    assert _FW_LOG_KEYS.issubset(base["fw_log"].keys())
+
+
+def test_serialized_routing_includes_skip_tx():
+    """skip_tx is parsed and rendered in FwLogTab — it must survive serialization."""
+    from api.routes.parse import _result_to_dict
+    base = _result_to_dict(parse_fw_log(FIXTURE))
+    assert _ROUTING_KEYS.issubset(base["fw_log"]["routing"].keys())
+    assert base["fw_log"]["routing"]["skip_tx"] == 1
+
+
+def test_serialized_fw_log_is_json_safe():
+    import json
+    from api.routes.parse import _result_to_dict
+    base = _result_to_dict(parse_fw_log(FIXTURE))
+    json.dumps(base)  # raises if any value is not JSON-serializable

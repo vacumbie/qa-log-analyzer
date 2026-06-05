@@ -1438,7 +1438,7 @@ function FwLogTab({ results }) {
             <SectionHeader
               icon="📡"
               title={`FW Log — ${fw.origin_hash ? fw.origin_hash.toUpperCase() : 'Unknown'}`}
-              sub={`${r.source_filename} · ${durationMin} min · ${(fw.parsed_lines || 0).toLocaleString()} lines parsed · ${fw.skipped_debug?.toLocaleString()} DEBUG skipped`}
+              sub={`${r.source_filename} · ${durationMin} min · ${(fw.parsed_lines || 0).toLocaleString()} lines parsed · ${(fw.skipped_debug || 0).toLocaleString()} DEBUG skipped`}
             />
 
             {/* KPI row */}
@@ -1529,6 +1529,7 @@ function FwLogTab({ results }) {
                 { label: 'Vine',       value: routing.vine,      color: '#c77dff', tip: 'vine=1 — vine routing protocol' },
                 { label: 'Flood',      value: routing.flood,     color: C.red,    tip: 'flooding=1 — broadcast flood' },
                 { label: 'Skip Rx',    value: routing.skip_rx,   color: C.muted,  tip: 'Already received — not processed again' },
+                { label: 'Skip Tx',    value: routing.skip_tx,   color: C.muted,  tip: 'Already transmitted — not sent again' },
               ].map(item => (
                 <KpiCard key={item.label} label={item.label} value={(item.value || 0).toLocaleString()}
                   color={item.color} tooltip={[item.tip]} />

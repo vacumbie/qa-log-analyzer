@@ -23,7 +23,10 @@ router = APIRouter(prefix="/export", tags=["export"])
 # Simple enough for a local tool; no persistence needed.
 _store: dict[str, Any] = {}
 
-# Valid CSV export types per log format
+# Valid CSV export types per log format.
+# relay_manager and fw_log are intentionally JSON-only: their data is nested
+# summary/health structure (relay health requests, RHC buckets, RF config) rather
+# than the flat per-row tables CSV expects. Use /export/{id}/json for those.
 _CSV_TYPES = {
     "diagnostic": {"received_messages", "system_samples", "tx_events", "ble_fail_events"},
     "rsdk":       {"system_samples", "tx_events", "ble_fail_events"},
