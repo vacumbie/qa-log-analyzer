@@ -1307,19 +1307,24 @@ function ChatTab({ results }) {
 function HealthTab({ results }) {
   return (
     <div>
-      <SectionHeader icon="💊" title="Per-Device Health Score" sub="Composite score — Alpha · Dimensions TBD" />
-      <Note>⚠ Health Score dimensions are not yet fully defined. This is a placeholder composite score.</Note>
+      <SectionHeader icon="💊" title="Per-Device Health Score" sub="Composite score — 5 dimensions · thresholds pending field validation" />
+      <Note>
+        ⚠ Thresholds are initial estimates pending field validation.
+        Pass criteria: Thermal &lt; 113°F · Battery &gt; 30% · no BLE failures · avg RSSI &gt; −95 dBm · peak queue &lt; 5 msgs.
+        Hop count is excluded — it reflects network topology, not device health.
+        See <code>docs/ui-requirements.md</code> for full criteria.
+      </Note>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
         {results.map((r, i) => {
           const s = r.summary || {}
-          const checks = [(s.peak_temp_f || 0) < 113, (s.min_battery_pct || 100) > 30, !s.ble_fail_count, (s.avg_hop_count || 99) < 4, (s.max_stored_messages || 0) < 5]
+          const checks = [(s.peak_temp_f || 0) < 113, (s.min_battery_pct || 100) > 30, !s.ble_fail_count, (s.avg_rssi == null || s.avg_rssi > -95), (s.max_stored_messages || 0) < 5]
           const score = checks.filter(Boolean).length
           const color = score >= 4 ? C.green : score >= 3 ? C.yellow : C.red
           return (
             <div key={i} style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: 20, textAlign: 'center' }}>
               <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 13, color: PALETTE[i % PALETTE.length], marginBottom: 12 }}>{r.device?.callsign || r.source_filename}</div>
               <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 52, fontWeight: 700, color, lineHeight: 1 }}>{score}<span style={{ fontSize: 20, color: C.muted }}>/5</span></div>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginTop: 8 }}>Thermal · Battery · BLE · Hops · Queue</div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginTop: 8 }}>Thermal · Battery · BLE · RSSI · Queue</div>
             </div>
           )
         })}

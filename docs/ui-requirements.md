@@ -190,8 +190,23 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
 > **Backlog (not yet implemented):** dedicated "Chat Messages Received by Device" and "Top Chat Senders" charts from the reference design. The current `ChatTab` reuses the PLI-vs-chat split and TX-outcomes charts.
 
 ### 10. Health Score (`health`)
-- **Per-Device Health Score** — one card per device showing a composite score out of 4 (not a radar chart). The four pass/fail dimensions are **Thermal** (peak < 113°F), **Battery** (min > 30%), **BLE** (no BLE fail events), and **Hops** (avg < 4). Score color: green ≥ 3 · yellow ≥ 2 · red below.
-- Labeled Alpha — a `Note` states the dimensions are still placeholder/not fully defined.
+- **Per-Device Health Score** — one card per device showing a composite score out of 5 (not a radar chart). Score color: green ≥ 4 · yellow ≥ 3 · red below.
+
+  **Pass/fail dimensions:**
+  | Dimension | Pass condition | Rationale |
+  |-----------|---------------|----------|
+  | Thermal | Peak PA temp < 113°F | Hardware limit |
+  | Battery | Min battery > 30% | Operational reserve |
+  | BLE | No BLE fail events | Connectivity integrity |
+  | RSSI | Avg RSSI > −95 dBm | From KOPEK field data (median −86, poor threshold −100) |
+  | Queue | Peak storedMessages < 5 | Queue backup indicator — seen peaking at 30 on HOTLIPS |
+
+  **Hop count is intentionally excluded** — hop count reflects network topology, not device health. A device at 3 hops in a healthy mesh is operating correctly.
+
+  **Threshold status:** All thresholds are initial estimates pending field validation against observed failure cases. RSSI threshold (−95 dBm) is grounded in 2026-06-03 KOPEK field session data but has not been validated against device failures.
+
+- **Radio Message Queue** — shown below score cards when any device has `max_stored_messages > 0`. Peak count per device, severity-colored (red ≥ 20, yellow ≥ 5, muted < 5). Explains the HOTLIPS PLI burst behavior (2026-06-03, peak=30, likely firmware buffer ceiling).
+- Note updated from "placeholder" to "thresholds pending field validation".
 
 ---
 
