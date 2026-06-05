@@ -166,6 +166,16 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
 
 > ⚠️ **RSDK hop count source changed.** Previously excluded entirely as unreliable (SDK sequence counter). Now included when sourced from `GRIP_Receiver` incoming message fields — these are genuine RF mesh hop counts. The old `SendMessageResponse` hop count is still excluded.
 
+- **Hop Count Map** — rendered at the bottom of the Hop Count tab for ATAK logs that have `logging_user_location` data. Interactive Leaflet.js map (OpenStreetMap tiles, loaded from unpkg CDN). Each dot is the receiver's GPS position (`logging_user_location`) colored by hop count (green=1, yellow=2, orange=3, red=4+). Dashed RF link lines connect each receiver dot to the sender's `transmitted_location`; line color encodes RSSI quality (green ≥ −70 dBm · yellow −70 to −85 · orange −85 to −100 · red < −100). Lines capped at 80 per render for readability. One diamond marker (◆) per unique hop count (max 4) sits at the midpoint of its RF link line; clicking opens a popup showing distance (miles or feet via Haversine), RSSI + quality label, hop count, sender callsign, and timestamp. Controls: device selector, sender filter (All or specific callsign), RF links toggle. Map auto-fits bounds to visible points. Only renders when ATAK messages with `logging_user_location` are present.
+
+  **RSSI thresholds** grounded in 2026-06-03 KOPEK field session data (range −19 to −118 dBm, median −86 dBm):
+  | Band | Range | Color |
+  |------|-------|-------|
+  | Strong | ≥ −70 dBm | `#00e5a0` green |
+  | Medium | −70 to −85 dBm | `#ffd166` yellow |
+  | Weak | −85 to −100 dBm | `#ff6b35` orange |
+  | Poor | < −100 dBm | `#ff4757` red |
+
 ### 8. RSSI (`rssi`)
 - **RSSI Distribution by Hop Count** — `rssi_by_hop` chart grouped by hop count; diagnostic format: convert unsigned byte (value − 256); ATAK and RSDK GRIP: already signed dBm, no conversion needed
 - **RSSI Distribution per Logging Device** — `rssi_avg_device` chart showing average RSSI per device; RSDK uses `grip_messages` incoming `rssi` field where available
@@ -291,6 +301,9 @@ Two-step upload flow: drop files → app scans timestamps client-side → dual-h
 
 ### GRIP RSSI Line Graph Over Time — ✅ Implemented
 Per-device GRIP RSSI line chart in the RSSI tab (`grip_rssi_over_time`), with summary cards and retransmit (▲) markers on a normalized 0–100% session-progress axis. See RSSI tab spec (section 8).
+
+### Hop Count Map — ✅ Implemented
+Interactive Leaflet.js map in the Hop Count tab showing receiver GPS position colored by hop count, with RSSI-colored RF link lines to sender positions, midpoint diamond markers with distance/signal popups, device + sender filters, and RF links toggle. Capped at 80 RF lines and 4 diamond markers per render. Only shown for ATAK logs with `logging_user_location` data. See Hop Count tab spec (section 7).
 
 ### ATAK Enhanced Log (SDK Logging 2.0) — ✅ Implemented
 Full support for the enhanced ATAK log format. The `SdkLogSummaryCard` renders the aggregated `atak_sdk_error_summary` (counts by tag and by `additionalInfo`, distinct radio types, and a retained sample) — high-volume `sdkError` records are aggregated, never rendered per-record, with the volume-baseline `DATA LIMITATION` surfaced in the banner. Also covers the enhanced message/event fields: `loggingUserLocation` / `transmittedLocation`, `originatorUUID`, the `-99` open-segments sentinel shown as `unknown`, `firmwareUpdate` events, and `deviceDisconnected` location. See ATAK tab spec (section 12).

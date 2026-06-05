@@ -777,6 +777,326 @@ function BatteryTab({ results }) {
   )
 }
 
+// ── Hop Count Map ─────────────────────────────────────────────────────────────
+
+const HOP_COLORS = {
+  1: '#00e5a0',   // green  — direct
+  2: '#ffd166',   // yellow — one relay
+  3: '#ff6b35',   // orange — two relays
+  4: '#ff4757',   // red    — three relays
+}
+const hopColor = (h) => HOP_COLORS[h] || '#ef4444'
+
+const rssiColor = (rssi) => {
+  if (rssi == null) return '#4a6080'
+  if (rssi >= -70)  return '#00e5a0'
+  if (rssi >= -85)  return '#ffd166'
+  if (rssi >= -100) return '#ff6b35'
+  return '#ff4757'
+}
+const rssiLabel = (rssi) => {
+  if (rssi == null) return 'Unknown'
+  if (rssi >= -70)  return 'Strong'
+  if (rssi >= -85)  return 'Medium'
+  if (rssi >= -100) return 'Weak'
+  return 'Poor'
+}
+const haversineDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 3958.8
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLon = (lon2 - lon1) * Math.PI / 180
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2
+  const mi = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+  return { mi, ft: mi*5280, label: mi >= 0.1 ? mi.toFixed(2)+' mi' : Math.round(mi*5280)+' ft' }
+}
+
+function HopCountMap({ results }) {
+  const mapRef    = React.useRef(null)
+  const leafletRef = React.useRef(null)
+  const markersRef = React.useRef([])
+  const linesRef   = React.useRef([])
+
+  // Build device list from ATAK results that have location data
+  const atakResults = results.filter(r => r.log_format === 'atak')
+  
+  const deviceOptions = React.useMemo(() => {
+    return atakResults.map(r => ({
+      label: r.device?.callsign || r.source_filename,
+      filename: r.source_filename,
+    }))
+  }, [atakResults])
+
+  const [selectedDevice, setSelectedDevice] = React.useState(deviceOptions[0]?.filename || '')
+  const [selectedSender, setSelectedSender]  = React.useState('ALL')
+  const [showLinks, setShowLinks]             = React.useState(true)
+  const [leafletReady, setLeafletReady]       = React.useState(!!window.L)
+
+  // Load Leaflet from CDN if not already present
+  React.useEffect(() => {
+    if (window.L) { setLeafletReady(true); return }
+
+    // CSS
+    const link = document.createElement('link')
+    link.rel  = 'stylesheet'
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
+    document.head.appendChild(link)
+
+    // JS
+    const script = document.createElement('script')
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+    script.onload = () => setLeafletReady(true)
+    document.head.appendChild(script)
+  }, [])
+
+  // Build map data for selected device
+  const { points, senderOptions } = React.useMemo(() => {
+    const r = atakResults.find(r => r.source_filename === selectedDevice)
+    if (!r) return { points: [], senderOptions: [] }
+
+    const msgs = (r.atak_messages || []).filter(m =>
+      !m.is_sender &&
+      m.logging_user_location?.lat &&
+      m.transmitted_location?.lat &&
+      m.hop_count != null
+    )
+
+    const senders = ['ALL', ...new Set(msgs.map(m => m.originator_callsign || 'Unknown').filter(Boolean).sort())]
+    
+    const filtered = selectedSender === 'ALL'
+      ? msgs
+      : msgs.filter(m => (m.originator_callsign || 'Unknown') === selectedSender)
+
+    const pts = filtered.map(m => ({
+      lat:        m.logging_user_location.lat,
+      lon:        m.logging_user_location.long,
+      senderLat:  m.transmitted_location.lat,
+      senderLon:  m.transmitted_location.long,
+      hops:       m.hop_count,
+      rssi:       m.rssi,
+      sender:     m.originator_callsign || 'Unknown',
+      time:       m.timestamp,
+      msgType:    m.message_type,
+    }))
+
+    return { points: pts, senderOptions: senders }
+  }, [atakResults, selectedDevice, selectedSender])
+
+  // Init map once Leaflet is ready
+  React.useEffect(() => {
+    if (!leafletReady || !mapRef.current) return
+    if (leafletRef.current) return // already initialized
+
+    const L = window.L
+    const map = L.map(mapRef.current, {
+      center: [45.31, -111.80],
+      zoom: 11,
+      zoomControl: true,
+    })
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(map)
+
+    leafletRef.current = map
+    return () => {
+      map.remove()
+      leafletRef.current = null
+    }
+  }, [leafletReady])
+
+  // Update markers whenever data or toggles change
+  React.useEffect(() => {
+    const L = window.L
+    if (!L || !leafletRef.current || !points.length) return
+    const map = leafletRef.current
+
+    // Clear existing
+    markersRef.current.forEach(m => m.remove())
+    linesRef.current.forEach(l => l.remove())
+    markersRef.current = []
+    linesRef.current   = []
+
+    const bounds = []
+    let linkCount = 0          // cap RF lines at 80 for readability
+    const seenHopDiamonds = new Set()  // one diamond per hop count (max 4)
+
+    points.forEach(p => {
+      const color = hopColor(p.hops)
+      const radius = p.hops === 1 ? 7 : p.hops === 2 ? 6 : 5
+
+      // Receiver dot
+      const circle = L.circleMarker([p.lat, p.lon], {
+        radius,
+        fillColor:   color,
+        color:       '#0d1428',
+        weight:      1.5,
+        opacity:     1,
+        fillOpacity: 0.85,
+      }).bindPopup(`
+        <div style="font-family:monospace;font-size:11px;line-height:1.6">
+          <b style="color:${color}">${p.hops} hop${p.hops !== 1 ? 's' : ''}</b> from <b>${p.sender}</b><br/>
+          RSSI: ${p.rssi} dBm (${rssiLabel(p.rssi)})<br/>
+          Type: ${p.msgType}<br/>
+          Time: ${p.time?.slice(11,19) || '—'}
+        </div>
+      `).addTo(map)
+      markersRef.current.push(circle)
+      bounds.push([p.lat, p.lon])
+
+      // RF link line to sender position
+      if (showLinks && p.senderLat) {
+        const lc = rssiColor(p.rssi)
+        const dist = haversineDistance(p.lat, p.lon, p.senderLat, p.senderLon)
+        // Thin lines when many points — sample to max 150 RF lines for readability
+        if (linkCount < 80) {
+          linkCount++
+          const line = L.polyline([[p.lat,p.lon],[p.senderLat,p.senderLon]],
+            { color: lc, weight: 1.5, opacity: 0.4, dashArray: '4,5' }).addTo(map)
+          linesRef.current.push(line)
+          // One midpoint diamond per unique hop count — keeps map uncluttered
+          if (!seenHopDiamonds.has(p.hops)) {
+            seenHopDiamonds.add(p.hops)
+            const ml = (p.lat+p.senderLat)/2, mn = (p.lon+p.senderLon)/2
+            const hc = hopColor(p.hops)
+            const mid = L.marker([ml,mn], {
+              icon: L.divIcon({
+                className: '',
+                html: '<div style="width:8px;height:8px;background:'+hc+';border:2px solid #0d1428;transform:rotate(45deg);cursor:pointer"></div>',
+                iconAnchor: [6,6],
+              })
+            }).bindPopup(
+              '<div style="font-family:monospace;font-size:11px;line-height:1.7">'
+              +'<b style="color:'+hc+'">'+p.hops+' hop'+(p.hops !== 1 ? 's' : '')+'</b> — '+dist.label+' to sender<br/>'
+              +'RSSI: '+p.rssi+' dBm <span style="color:'+lc+'">('+rssiLabel(p.rssi)+')</span><br/>'
+              +'From: '+p.sender+'<br/>'
+              +'Time: '+(p.time ? p.time.slice(11,19) : '—')
+              +'</div>'
+            ).addTo(map)
+            linesRef.current.push(mid)
+          }
+        }
+      }
+    })
+
+    if (bounds.length > 1) {
+      try { map.fitBounds(bounds, { padding: [32, 32] }) } catch(e) {}
+    } else if (bounds.length === 1) {
+      map.setView(bounds[0], 13)
+    }
+  }, [points, showLinks, leafletReady])
+
+  if (!atakResults.length) return null
+
+  const hopCounts = [1,2,3,4]
+  const countByHop = points.reduce((acc, p) => {
+    acc[p.hops] = (acc[p.hops] || 0) + 1
+    return acc
+  }, {})
+
+  return (
+    <div style={{ marginTop: 24 }}>
+      {/* Controls */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+        {/* Device selector */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Device</span>
+          <select
+            value={selectedDevice}
+            onChange={e => setSelectedDevice(e.target.value)}
+            style={{ fontFamily: 'var(--mono)', fontSize: 9, background: 'var(--panel)', color: '#c8ddf4', border: '1px solid var(--border)', borderRadius: 4, padding: '3px 8px', cursor: 'pointer' }}
+          >
+            {deviceOptions.map(d => (
+              <option key={d.filename} value={d.filename}>{d.label}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Sender filter */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Sender</span>
+          <select
+            value={selectedSender}
+            onChange={e => setSelectedSender(e.target.value)}
+            style={{ fontFamily: 'var(--mono)', fontSize: 9, background: 'var(--panel)', color: '#c8ddf4', border: '1px solid var(--border)', borderRadius: 4, padding: '3px 8px', cursor: 'pointer' }}
+          >
+            {senderOptions.map(s => (
+              <option key={s} value={s}>{s === 'ALL' ? 'All Senders' : s}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* RF link toggle */}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={showLinks}
+            onChange={e => setShowLinks(e.target.checked)}
+            style={{ accentColor: C.accent }}
+          />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted }}>Show RF links</span>
+        </label>
+
+        {/* Point count */}
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#334155', marginLeft: 'auto' }}>
+          {points.length.toLocaleString()} points
+        </span>
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: 'flex', gap: 14, marginBottom: 10, flexWrap: 'wrap' }}>
+        {hopCounts.map(h => (
+          <div key={h} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ width: 10, height: 10, borderRadius: '50%', background: hopColor(h), border: '1.5px solid #0d1428' }} />
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#94a3b8' }}>
+              {h}{h === 4 ? '+' : ''} hop{h !== 1 ? 's' : ''}
+              {countByHop[h] ? <span style={{ color: '#334155' }}> ({countByHop[h]})</span> : ''}
+            </span>
+          </div>
+        ))}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <div style={{ width: 18, height: 0, borderTop: '1px dashed #4a6080' }} />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#334155' }}>RF link (color=RSSI, label=distance)</span>
+        </div>
+      </div>
+
+      {showLinks && (
+        <div style={{ display:'flex', gap:12, flexWrap:'wrap', alignItems:'center', marginBottom:10 }}>
+          <span style={{ fontFamily:'var(--mono)', fontSize:8, color:C.muted, textTransform:'uppercase', letterSpacing:'0.08em' }}>RF Signal:</span>
+          {[
+            { label:'Strong', sub:'>= -70 dBm',       color:'#00e5a0' },
+            { label:'Medium', sub:'-70 to -85 dBm',   color:'#ffd166' },
+            { label:'Weak',   sub:'-85 to -100 dBm',  color:'#ff6b35' },
+            { label:'Poor',   sub:'< -100 dBm',       color:'#ff4757' },
+          ].map(s => (
+            <div key={s.label} style={{ display:'flex', alignItems:'center', gap:5 }}>
+              <div style={{ width:16, height:0, borderTop:'2px dashed '+s.color }} />
+              <span style={{ fontFamily:'var(--mono)', fontSize:8, color:s.color }}>{s.label}</span>
+              <span style={{ fontFamily:'var(--mono)', fontSize:7, color:'#334155' }}>{s.sub}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Map container */}
+      {!leafletReady ? (
+        <div style={{ height: 480, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted }}>Loading map…</span>
+        </div>
+      ) : (
+        <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', position: 'relative' }}>
+          <div ref={mapRef} style={{ height: 480, width: '100%' }} />
+        </div>
+      )}
+
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#334155', marginTop: 8 }}>
+        Dot = receiver position · color = hop count · Dashed line = RF link (color = RSSI) · ◆ = hover for distance & signal details
+      </div>
+    </div>
+  )
+}
+
+
 function HopsTab({ results }) {
   const hasRsdk   = results.some(r => r.log_format === 'rsdk')
   const hasGripHops = results.some(r =>
@@ -850,6 +1170,17 @@ function HopsTab({ results }) {
               </div>
             ))}
           </div>
+        </>
+      )}
+
+      {results.some(r => r.log_format === 'atak' && (r.atak_messages || []).some(m => m.logging_user_location)) && (
+        <>
+          <SectionHeader
+            icon="🗺️"
+            title="Hop Count Map"
+            sub="Receiver position colored by hop count · click any dot for details · filter by sender to track approach"
+          />
+          <HopCountMap results={results} />
         </>
       )}
     </div>

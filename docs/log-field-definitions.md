@@ -455,8 +455,8 @@ One record per RF message sent or received. The majority of records in a typical
 | `rssi` | integer | `message.rssi` | Real dBm (already signed). `0` when `isSender = true` — placeholder, not a real reading. |
 | `originatorCallsign` | string | `message.originator_callsign` | **Always empty string** in observed samples. Identity is GID-only. |
 | `originatorUUID` | string | `message.originator_uuid` | `ANDROID-*` UUID of the originator. `""` when missing. |
-| `loggingUserLocation` | object | `message.logging_user_location` | `{lat, long, alt}` — the logging device's own GPS at log time. Present on every message record. |
-| `transmittedLocation` | object | `message.transmitted_location` | `{lat, long, alt}` — location embedded in the message payload. Present on `pli`/`fileTransfer`/`mapObject`; **absent on `textChat`** (stored as `null`). |
+| `loggingUserLocation` | object | `message.logging_user_location` | `{lat, long, alt}` — the logging device's own GPS at log time. Present on every message record. Used as the **receiver dot position** in the Hop Count Map. |
+| `transmittedLocation` | object | `message.transmitted_location` | `{lat, long, alt}` — location embedded in the message payload. Present on `pli`/`fileTransfer`/`mapObject`; **absent on `textChat`** (stored as `null`). Used as the **sender endpoint of RF link lines** in the Hop Count Map. |
 | `senderCallsign` | string | *(not used)* | **Always empty string** in this log format. |
 | `senderUUID` | string | *(not used)* | **Always empty string** in this log format. |
 | `receiverCallsign` | string | *(not used)* | **Always empty string** in this log format. |
