@@ -33,8 +33,11 @@ _BUCKET_RE = re.compile(
     r"(\d+)\s+messages rx'd\s+(\d+)\s+messages relayed\s+(\d+)\s+messages tx'd"
 )
 _ENERGY_RE  = re.compile(r'Energy on chn=(\d+): last_rssi=(-?\d+)dBm > avg_rssi=(-?\d+)dBm \(cnt=(\d+)\)')
-# Note: RSSI[] lines are DEBUG level — skipped per design.
-# Energy samples (TRX INFO) are used as the RSSI proxy with 40K+ samples per session.
+# RSSI[] detailed samples are DEBUG-level in every log observed so far, and DEBUG
+# is skipped by the level guard below — so _RSSI_RE currently never matches and
+# fw.rssi_samples stays empty. The matcher is kept wired ahead of a firmware build
+# that emits RSSI[] at INFO; until then, energy_samples (TRX INFO, 40K+ per
+# session) are the RSSI proxy and are what the UI surfaces. See FwRssiSample.
 _RSSI_RE    = re.compile(r'RSSI\[(\d+)\]: avg=(-?\d+) dBm, last=(-?\d+) \[min=(-?\d+), max=(-?\d+)\], num=(\d+)')
 _RELAY_RX_RE = re.compile(
     r'Rx: TTL=(\d+), TTL#=(\d+), prevSdr=([0-9a-f]+), currSdr=([0-9a-f]+), '
@@ -46,7 +49,6 @@ _ROUTING_RE = re.compile(
 )
 _NEIGHBOR_RE = re.compile(r'neighborAdd\[\d+\]: update hash=([0-9a-f]+), critical=(\d+), vulnerable=(\d+)')
 _FREQ_RE     = re.compile(r'(\d{9})Hz')   # 9-digit Hz values = radio frequencies
-_TPORT_ADD_RE = re.compile(r'TPORT: Add ID ([0-9a-f-]+), mode=(\d+) at idx=(\d+) (\d+)ms')
 _RHC_ORIGIN_RE = re.compile(r'rhc_build_resp: using origin hash (0x[0-9a-f]+)')
 _ORIGIN_SHORT_RE = re.compile(r'prevSdr=([0-9a-f]+)')
 
@@ -129,7 +131,9 @@ def parse_fw_log(path: Path) -> ParseResult:
                 relayed=int(bm.group(5)),
                 tx=int(bm.group(6)),
             )
-            # Keep latest snapshot per bucket index (highest rx count = most recent)
+            # RHC bucket history repeats once per health poll. Counts grow
+            # monotonically across polls, so the snapshot with the highest rx
+            # for a given index is the one from the most recent poll.
             existing = bucket_last_rx.get(b.bucket_index)
             if existing is None or b.rx >= existing.rx:
                 bucket_last_rx[b.bucket_index] = b
@@ -140,7 +144,7 @@ def parse_fw_log(path: Path) -> ParseResult:
         if not m:
             continue
 
-        ts_abs_str, ts_delta, module, level, msg = m.groups()
+        ts_abs_str, _ts_delta, module, level, msg = m.groups()
         msg = msg.strip()
 
         # Skip DEBUG
@@ -158,8 +162,11 @@ def parse_fw_log(path: Path) -> ParseResult:
             if oh:
                 fw.origin_hash = oh.group(1).replace("0x", "")
 
-        # Fallback: extract from prevSdr on first RELAY Rx line where prevSdr
-        # matches a consistent short address pattern
+        # Best-effort fallback when no RHC origin line is present: the first
+        # RELAY Rx prevSdr. prevSdr is the *previous sender*, so on a log whose
+        # first RELAY line was relayed from a neighbor this may be that
+        # neighbor's hash, not this radio's. The RHC origin above is
+        # authoritative; this only fills the gap when it never appears.
         if not fw.origin_hash and module == "RELAY" and "prevSdr=" in msg:
             ps = _ORIGIN_SHORT_RE.search(msg)
             if ps:

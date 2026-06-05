@@ -12,6 +12,7 @@
 - [Android ATAK Plug-in](#android-atak-plug-in)
 - [Pro+ Application](#pro-application)
 - [Relay Health Manager](#relay-health-manager)
+- [Relay Firmware (UART/USB Debug) Log](#relay-firmware-uartusb-debug-log)
 - [Shared Output Requirements](#shared-output-requirements)
 - [Known Limitations](#known-limitations)
 
@@ -27,6 +28,7 @@ The log parsing tool accepts logs from the following goTenna applications:
 | 2 | Pro+ Application (RSDK) | iOS, Android | 1 per platform (confirmed) | `parser/rsdk.py` ✅ |
 | 3 | Relay Health Manager | Android *(iOS TBD)* | Android logcat (`com.gotenna.relaymanager`) | `parser/relay_manager.py` ✅ |
 | 4 | goTenna Pro+ diagnostic export | iOS, Android | Block-format diagnostic export | `parser/diagnostic.py` ✅ *(detection fallback)* |
+| 5 | Relay radio firmware | Relay radio | UART/USB serial debug console | `parser/fw_log.py` ✅ *(detection priority 1)* |
 
 ---
 
@@ -306,7 +308,7 @@ misleading 5/5. See the Health Score spec in `ui-requirements.md` (section 10).
 
 ## Known Limitations
 
-- **Relay Health Manager — no dedicated app log format:** The Relay Health Manager currently only produces ADB (Android Debug Bridge) system logs — there is no dedicated app-level log export. Relay health data (battery, firmware, signal strength) is not surfaced in a parseable format at this time. A proper user-facing log format may be implemented in a future app version. Parser development is blocked until that format exists.
+- **Relay Health Manager — no dedicated app log format:** The Relay Health Manager currently only produces ADB (Android Debug Bridge) system logs — there is no dedicated app-level log export. Relay health data carried over BLE (battery, firmware version, signal strength) is captured as raw hex but not decoded, so it is not surfaced in a parseable form from the app log. A proper user-facing app log format may arrive in a future app version. (Note: this blockage is specific to the *app-level, BLE-sourced* health export. The relay radio's own **firmware UART/USB debug log is a separate source and is now parsed** — see [Relay Firmware (UART/USB Debug) Log](#relay-firmware-uartusb-debug-log). It surfaces firmware-internal data directly from the radio, but its serial/firmware-version fields live in a binary RHC payload and are likewise undecoded.)
 - **Relay Health Manager — no year in timestamp:** Android logcat timestamps omit the year. Year must be inferred from file metadata or context; flag if ambiguous.
 - **Relay Health Manager — full logcat format:** The log is a complete Android system log, not an isolated app log. Parser must filter aggressively to avoid processing system/Appium noise.
 - **Android ATAK Plug-in:** Both log types confirmed as newline-delimited JSON. Parser built (`parser/atak.py`), including SDK Logging 2.0 `sdkError` aggregation.
@@ -316,7 +318,7 @@ misleading 5/5. See the Health Score spec in `ui-requirements.md` (section 10).
 
 ---
 
-_Last updated: 2026-06-04_
+_Last updated: 2026-06-05_
 
 ---
 
@@ -863,3 +865,105 @@ All iOS RSDK parsing rules apply. Android-specific additions:
 - 6 NACK errors observed between 20:08–20:15
 - Power level changes: 2.0W → 1.0W → 0.5W → 5.0W during session
 - No BLE reconnection failures observed (Android reconnect behavior differs from iOS)
+
+---
+
+## Relay Firmware (UART/USB Debug) Log
+
+### Overview
+
+The relay radio's own firmware emits a serial debug console over UART/USB. This
+is **not** an app log — it comes directly off the radio, so it surfaces
+firmware-internal state (message-history buckets, routing decisions, channel
+energy, neighbor table) that no app-level log exposes. Parsed by
+`parser/fw_log.py`. Detection runs **first** (priority 1) because the line
+format is highly distinctive and cannot collide with the other four formats.
+
+### Log Format
+
+```
+[<ts_abs>-<delta_ms>, <MODULE>, <LEVEL>] <message>
+```
+
+- `ts_abs` / `delta_ms` — **relative milliseconds from boot, not wall clock.**
+  `delta_ms` (time since previous line) is captured by the regex but not used.
+- `MODULE` — one of `TRX`, `RELAY`, `TPORT`, `FLSH`, `MAIN`, `PRNT`, `USB`,
+  `DEBUG`.
+- `LEVEL` — `INFO`, `ERROR`, `WARN`, or `DEBUG`.
+
+Bucket-history lines fall **outside** the bracket pattern and are parsed
+separately:
+
+```
+bucket[N] HH - HH hours ago: X messages rx'd Y messages relayed Z messages tx'd
+```
+
+### Detection
+
+`is_fw_log()` scans the first 30 non-empty lines and returns `True` once it sees
+**≥3** bracket lines whose module is in the known firmware-module set. The
+catch-all `diagnostic` parser never sees these because fw_log is checked first.
+
+### Log Levels
+
+- `INFO`, `ERROR`, `WARN` — parsed.
+- `DEBUG` — **skipped** (roughly half of all lines), counted in `skipped_debug`.
+
+### Fields to Parse
+
+| Source line | Parsed into | Notes |
+|-------------|-------------|-------|
+| `rhc_build_resp: using origin hash 0x<hash>` | `origin_hash` | Authoritative device identity (short address) |
+| First `RELAY` `prevSdr=<hash>` | `origin_hash` (fallback) | **Best-effort only** — `prevSdr` is the previous sender, so this may be a neighbor's hash, not self. Used only when no RHC origin line appears |
+| `rhc_build_resp: version 0x<v>` | `fw_format_version` | RHC response format version, not radio firmware version |
+| `rhc_build_resp: enter` | `rhc_poll_count` (+1) | One per health poll |
+| `bucket[N] HH - HH hours ago: ...` | `buckets[]` (`FwBucket`) | 6-hour message-count windows. RHC history repeats once per poll; counts grow monotonically, so the highest-rx snapshot per index is kept (the most recent poll) |
+| `TRX INFO` `RF Configuration for <device>` … | `rf_config` (`FwRfConfig`) | Block start. Captures `device_type`, `tx_power`, `bit_rate` (ends the block), `region`, `frequencies_hz` (9-digit Hz), `control_channels`, `data_channels` |
+| `TRX INFO` `Energy on chn=N: last_rssi=-XdBm > avg_rssi=-YdBm (cnt=Z)` | `energy_samples[]` | `last_rssi` per preamble detection — the **RSSI proxy** surfaced in the UI |
+| `TRX` `RSSI[N]: avg=… last=… [min=… max=…] num=…` | `rssi_samples[]` (`FwRssiSample`) | **DEBUG-level → skipped → always empty** in observed logs; matcher kept wired ahead of a firmware build that emits these at INFO |
+| `RELAY INFO` `Msg-N cmd=N: transmitMsg=… flooding=… echo=… vine= …` | `routing` (`FwRoutingDecision`) | Increments `transmit` / `flood` / `echo` / `vine` per `=1` flag |
+| `RELAY INFO` `msg already Rx` / `msg already TX` | `routing.skip_rx` / `routing.skip_tx` | Duplicate-suppression counts (rx and tx paths) |
+| `RELAY INFO` `neighborAdd[N]: update hash=<h>, …` | `neighbor_hashes[]` | Unique node hashes seen |
+| `ERROR` `Battery stabilization …` | `battery_error_count` | Counted **separately** from real errors — known firmware quirk |
+| Other `ERROR` lines | `error_counts{module}`, `error_messages[]` | Up to 20 unique messages |
+| `WARN` lines | `warn_counts{module}`, `warn_messages[]` | Up to 20 unique messages |
+| Min/max bracket timestamps | `first_ts_ms` / `last_ts_ms` / `duration_ms` | Relative ms |
+
+### Parsing Rules
+
+1. Two logical passes over the lines: bucket lines (raw text) and bracket lines
+   (`INFO`/`ERROR`/`WARN`).
+2. DEBUG lines are dropped before any field matching — anything that only
+   appears at DEBUG (e.g. `RSSI[]`) will not be captured.
+3. Buckets are de-duplicated per index keeping the highest rx (most recent
+   poll), then sorted by index descending (newest window first).
+4. Battery stabilization errors never count toward `error_counts`.
+5. Serial number and firmware version are **not** extracted — they live in the
+   binary RHC payload (see Known Limitations).
+
+### Known Limitations — Relay Firmware Log
+
+- **Relative timestamps:** ms from boot, not wall clock. A session cannot be
+  pinned to absolute time without a reference point from a correlated Relay
+  Manager log. (The Time Window step is skipped for this format — its timestamps
+  don't match the wall-clock scan.)
+- **Binary RHC payload:** device serial number and firmware version are encoded
+  in the binary RHC response, not plaintext. Identity is the origin hash only.
+- **Battery stabilization quirk:** these errors fire even when the battery is
+  already stable; counted separately, not indicative of hardware failure.
+  Pending field validation.
+- **RSSI[] is DEBUG-only:** `rssi_samples` / `rssi_summary` are always empty;
+  channel energy is the RSSI proxy. The matcher is kept for a future firmware
+  build that may emit RSSI at INFO.
+- **Single-fixture validation:** parser behavior (detection, `prevSdr` origin
+  fallback, bucket de-dup) is currently proven against one sample
+  (`tests/fixtures/fw_log_sample.log`). A second real log is needed to exercise
+  the fallback paths.
+
+### Sample File Observations (fw_log_sample.log)
+
+- Origin hash: `0f07`; RHC format version `0x10`; 1 RHC poll.
+- 12 bucket windows; most recent (0–6 hrs) = 100 rx / 30 relayed / 1 tx.
+- RF config: goTenna Pro, 3 frequencies, control channel [0], data channels [1, 2].
+- Routing: 1 each of transmit / echo / vine; 1 skip_rx; 1 skip_tx.
+- 2 neighbors (`e1a5`, `83e5`); 2 battery stabilization errors; 1 USB error; 1 RELAY warn.

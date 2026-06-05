@@ -118,17 +118,20 @@ are the intended source of truth — keep them in sync with the code.
 
 ## Supported log formats
 
-Four formats, auto-detected by `_detect_format()` in `api/routes/parse.py`.
-**Detection order matters** — relay_manager must precede rsdk because both
-contain `AndroidBleRadio` lines; relay_manager has additional markers that
-distinguish it. `diagnostic` is always the catch-all fallback.
+Five formats, auto-detected by `_detect_format()` in `api/routes/parse.py`.
+**Detection order matters** — fw_log runs first because its bracket pattern
+`[digits-digits, MODULE, LEVEL]` is highly distinctive and cannot match any of
+the other four. relay_manager must precede rsdk because both contain
+`AndroidBleRadio` lines; relay_manager has additional markers that distinguish
+it. `diagnostic` is always the catch-all fallback.
 
 | Priority | Key | Parser | Source |
 |----------|-----|--------|--------|
-| 1 | `atak` | `parser/atak.py` | Android ATAK plug-in |
-| 2 | `relay_manager` | `parser/relay_manager.py` | Android logcat, `com.gotenna.relaymanager` |
-| 3 | `rsdk` | `parser/rsdk.py` | iOS/Android SDK logs |
-| 4 | `diagnostic` | `parser/diagnostic.py` | goTenna Pro+ app export (fallback) |
+| 1 | `fw_log` | `parser/fw_log.py` | goTenna relay radio firmware (UART/USB debug) |
+| 2 | `atak` | `parser/atak.py` | Android ATAK plug-in |
+| 3 | `relay_manager` | `parser/relay_manager.py` | Android logcat, `com.gotenna.relaymanager` |
+| 4 | `rsdk` | `parser/rsdk.py` | iOS/Android SDK logs |
+| 5 | `diagnostic` | `parser/diagnostic.py` | goTenna Pro+ app export (fallback) |
 
 Every parser returns a `ParseResult` from `parser/models.py`. The API and
 UI only depend on that shape — never import parser internals into routes or
@@ -214,6 +217,10 @@ threshold-validation backlog in `docs/ui-requirements.md`.
    filter update, `case` in `TabContent`
 7. Add tests with a fixture in `tests/fixtures/`
 8. Update all docs in `docs/`
+9. Add a `_CSV_TYPES` entry in `api/routes/export.py` listing the flat
+   per-row tables to expose — or, if the format's data is nested
+   summary/health structure, document it as JSON-only in that file (as
+   `relay_manager` and `fw_log` are)
 
 ### Add a new chart
 1. Write a component in `ChartPanel.jsx` — follow `TempOverTime` or
@@ -297,6 +304,10 @@ project's lifecycle, not a sign something is broken.
 | `atak` | `numberOfOpenSegments = -99` is a sentinel (transfer cancelled before count known) — stored as null, never -99 |
 | `atak` | Receiver-side `deliveryTimeInMillis = 0` on fileTransfer is a placeholder — only meaningful when `isSender=true` and status `SUCCESS` |
 | `atak` | Device Health `serialNumber = "Unknown"` is expected during BLE reconnection, not a parser error |
+| `fw_log` | Timestamps are relative ms from boot, not wall clock UTC — a session cannot be pinned to absolute time without a reference point from a correlated Relay Manager log |
+| `fw_log` | Device serial number and firmware version live in the binary RHC response payload — not plaintext. Identity is shown as the origin hash only |
+| `fw_log` | Battery stabilization errors are a known firmware quirk (the routine fires even when the battery is already stable), counted separately from real errors — not indicative of hardware failure, pending field validation |
+| `fw_log` | `RSSI[]` detailed samples are DEBUG-level and skipped, so `rssi_samples`/`rssi_summary` are always empty; channel energy (`energy_samples`) is the RSSI proxy surfaced in the UI |
 
 ---
 

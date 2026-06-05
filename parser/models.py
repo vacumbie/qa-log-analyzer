@@ -1,6 +1,7 @@
 """
 parser/models.py
-Shared dataclasses used by the diagnostic, RSDK, ATAK, and Relay Manager parsers.
+Shared dataclasses used by the diagnostic, RSDK, ATAK, Relay Manager, and
+firmware-log (fw_log) parsers.
 Includes GRIP transfer primitives (GripMessage, GripTransfer) for RSDK logs.
 Every parser returns a ParseResult; the API and UI only need to know this shape.
 """
@@ -522,7 +523,6 @@ class FwRfConfig:
     frequencies_hz:   list = field(default_factory=list)
     control_channels: list = field(default_factory=list)
     data_channels:    list = field(default_factory=list)
-    bandwidth:        str = ""
 
 
 @dataclass
@@ -556,10 +556,11 @@ class FwLogResult:
 class ParseResult:
     """
     The complete output of parsing one log file.
-    diagnostic.py, rsdk.py, atak.py, and relay_manager.py all return this shape.
+    diagnostic.py, rsdk.py, atak.py, relay_manager.py, and fw_log.py all return
+    this shape.
     """
     # Metadata
-    log_format: str = ""        # "diagnostic" | "rsdk" | "atak" | "relay_manager"
+    log_format: str = ""        # "diagnostic" | "rsdk" | "atak" | "relay_manager" | "fw_log"
     source_filename: str = ""
     parse_errors: list[str] = field(default_factory=list)
 

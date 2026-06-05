@@ -245,6 +245,23 @@ ATAK-only tab (`atakOnly`) — appears in the tab bar only when an ATAK plug-in 
 
 ---
 
+### 13. FW Log (`fw-log`)
+FW-log-only tab (`fwOnly`) — appears in the tab bar only when a relay firmware (UART/USB debug) log is loaded. Renders one block per loaded firmware log. Data comes from `r.fw_log` and `r.summary`; the parser is `parser/fw_log.py`.
+
+- **Header** — origin hash, source filename, session duration (minutes), lines parsed, and DEBUG lines skipped
+- **KPI row** — Origin Hash · Session (min) · RHC Polls · Neighbors · Energy Avg (dBm) · Battery Errors (amber when > 0, with a "known firmware quirk" tooltip)
+- **RF Configuration** — device type, region, Tx power, bit rate, frequencies (Hz), control channels, data channels
+- **Message Bucket History** — per-window rows (`HH–HH hrs ago`) with an Rx bar, plus Rx / Relayed / Tx counts. Rows render uniformly (no special-case highlight)
+- **Relay Routing** — KPI cards: Relayed (transmit) · Echo · Vine · Flood · Skip Rx · Skip Tx
+- **Channel Energy** — Avg / Min / Max dBm and sample count, from `energy_summary` (the RSSI proxy; see limitation below)
+- **Neighbor Table** — unique node hashes seen, shown only when present
+- **Errors & Warnings** — counts by module and unique messages; battery stabilization errors are counted separately and not treated as real errors
+- **Data Limitations note** — surfaces the firmware-log `parse_errors` (relative-ms timestamps, binary RHC serial/firmware, battery quirk)
+
+> Identity is the **origin hash only** — serial number and firmware version are in the binary RHC payload. Channel RSSI (`RSSI[]`) is DEBUG-level and skipped, so the tab shows **channel energy** as the signal proxy, not per-channel RSSI. Timestamps are relative ms from boot, so the upload Time Window step is skipped for this format.
+
+---
+
 ## Known Limitations & Open Questions
 
 - **Temperature** must always be converted from Celsius (source) to Fahrenheit (display) — never show raw °C values
@@ -255,7 +272,8 @@ ATAK-only tab (`atakOnly`) — appears in the tab bar only when an ATAK plug-in 
 - **Health Score thresholds** are initial estimates pending field validation (see the Health Score Threshold Validation backlog item) — the tab renders a per-device score card with five labeled attribute rows, not the placeholder radar chart from the reference design
 - **Relay Health tab — BLE payload decoding pending:** Relay health attribute values (SNR, battery %, temperature °F, uptime, firmware version) cannot be displayed until BLE protocol decoding is implemented. The tab must surface this limitation via a Data Limitations Banner rather than showing empty fields silently.
 - **Relay Health tab — prod environment:** Prod log behavior and environment badge are undefined until prod samples are analyzed.
-- **Topology tab** — Alpha/Beta feature; see Tab 12. Accuracy is inherently limited by what the logs can surface — the hardest data point in the dashboard to get right; must be clearly labeled as experimental in the UI
+- **FW Log tab — energy as RSSI proxy:** Per-channel RSSI (`RSSI[]`) is DEBUG-level and skipped, so the tab shows channel energy (`energy_summary`) instead. `rssi_summary` is serialized but always empty. Identity is the origin hash only (serial/firmware in binary RHC payload). Relative-ms timestamps mean the upload Time Window step is skipped for this format.
+- **Topology tab** — Alpha/Beta feature; see Tab 14. Accuracy is inherently limited by what the logs can surface — the hardest data point in the dashboard to get right; must be clearly labeled as experimental in the UI
 - **Multi-log upload** — supported; drag-and-drop or file picker; multiple files processed simultaneously
 - **Duplicate log detection** — files with matching `radio_serial + session_start + session_end` are deduplicated automatically; only first occurrence used. Handles named files (`RSO_HagenM.txt`) loaded alongside auto-exported equivalents (`diagnostic_2026*.txt`).
 - **Time window filtering** — client-side; filters all time-series arrays (`received_messages`, `system_samples`, `ble_fail_events`, `tx_events`, `atak_messages`, `atak_health_samples`). Computable summary fields recomputed from filtered arrays; static fields retain parse-time values.
@@ -263,11 +281,11 @@ ATAK-only tab (`atakOnly`) — appears in the tab bar only when an ATAK plug-in 
 
 ---
 
-_Last updated: 2026-06-04_
+_Last updated: 2026-06-05_
 
 ---
 
-### 13. Network Topology (`topology`) — ⚠️ ALPHA/BETA · NOT YET IMPLEMENTED
+### 14. Network Topology (`topology`) — ⚠️ ALPHA/BETA · NOT YET IMPLEMENTED
 
 > **Not implemented.** There is no `topology` entry in the `TABS` array in `App.jsx` and no topology tab renders today. This section is a forward-looking design spec / backlog item, retained for when the feature is built.
 >
@@ -307,7 +325,7 @@ _Last updated: 2026-06-04_
 
 ---
 
-_Last updated: 2026-06-04_
+_Last updated: 2026-06-05_
 
 ---
 
@@ -392,10 +410,11 @@ remain unvalidated, and this is disclosed honestly in the UI and all four docs.
 
 ### FW Log — RHC Response Field Mappings ⏳ Pending
 
-The firmware log parser extracts raw values from the RHC response that need
-mapping to human-readable equivalents. QA tester to provide mapping tables
-so the parser can decode them at parse time and the UI can display friendly
-values alongside the raw identifiers.
+The firmware log parser and the FW Log tab (section 13) ship today and display
+the raw values. **This backlog item is only the decoding layer** — mapping the
+RHC raw identifiers to human-readable equivalents. QA tester to provide mapping
+tables so the parser can decode them at parse time and the UI can display
+friendly values alongside the raw identifiers.
 
 **Fields requiring mapping tables:**
 
