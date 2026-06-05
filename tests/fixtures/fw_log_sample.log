@@ -1,0 +1,46 @@
+[100000000-000, USB, CLI] CLI and UART logs enabled
+[100000001-001, TRX, INFO] Energy on chn=0: last_rssi=-95dBm > avg_rssi=-110dBm (cnt=1)
+[100000002-001, TRX, INFO] RF Configuration for goTenna Pro
+[100000002-000, TRX, INFO] Region 1 -- Tx Power 3
+[100000002-000, TRX, INFO] Channel freqs (3):
+[100000002-000, TRX, INFO]  0: 464550000Hz	 1: 469550000Hz
+[100000002-000, TRX, INFO]  2: 469500000Hz
+[100000002-000, TRX, INFO] Control channels (1):  0
+[100000002-000, TRX, INFO] Data channels (2): 1 2
+[100000002-000, TRX, INFO] Tx power: 3
+[100000002-000, TRX, INFO] bit_rate=19200
+[100000100-098, RELAY, INFO] Rx: TTL=255, TTL#=251, prevSdr=0f07, currSdr=e1a5, isCN=1, isVul=0, FF=0, tgtRcv=f61b, cgst=0, ver=0, rsvd=0
+[100000100-000, RELAY, INFO] Msg-2 cmd=0: transmitMsg=1, flooding=0, echo=0, vine=0 - rxActivity=5, txActivity=2, queue=0
+[100000101-001, RELAY, INFO] neighborAdd[20]: update hash=e1a5, critical=1, vulnerable=0
+[100000200-099, RELAY, INFO] Msg-2 cmd=0: transmitMsg=0, flooding=0, echo=1, vine=0 - rxActivity=10, txActivity=3, queue=0
+[100000200-000, RELAY, INFO] Relay: msg already Rx --> skip Rx
+[100000300-100, RELAY, INFO] Msg-2 cmd=0: transmitMsg=0, flooding=0, echo=0, vine=1 - rxActivity=15, txActivity=4, queue=0
+[100000400-100, RELAY, INFO] neighborAdd[4]: update hash=83e5, critical=1, vulnerable=0
+[100000500-100, RELAY, INFO] Relay: msg already TX --> skip Tx
+[100000600-100, TRX, INFO] Energy on chn=0: last_rssi=-88dBm > avg_rssi=-100dBm (cnt=1)
+[100000700-100, TRX, INFO] Energy on chn=0: last_rssi=-75dBm > avg_rssi=-95dBm (cnt=1)
+[100000800-100, TRX, ERROR] Battery stabilization began in a stable state
+[100000900-100, TRX, ERROR] Battery stabilization began in a stable state
+[100001000-100, USB, ERROR] Msg with cmd code CMD_NETW_SEND_DATA has no handler
+[100001100-100, RELAY, WARN] early 2nd fullFlood, skip CRITICAL_UNKNOWN !!
+[100001200-100, TPORT, INFO] rhc_build_resp: enter
+[100001200-000, TPORT, INFO] rhc_build_resp: version 0x10 presence 0x00ff
+[100001200-000, TPORT, INFO] rhc_build_resp: using origin hash 0x0f07
+[100001200-000, TPORT, INFO] rhc_build_resp: inserted serial number, new offset 12
+[100001200-000, TPORT, INFO] rhc_build_resp: inserted RSSI, new offset 30
+[100001201-001, TPORT, INFO] rhc_msg_cnt_print: 0,100001200 ms elapsed
+[100001201-000, TPORT, DEBUG] rhc_msg_cnt_print: 12 buckets
+  bucket[11] 00 - 06 hours ago: 100 messages rx'd 30 messages relayed 1 messages tx'd
+  bucket[10] 06 - 12 hours ago: 500 messages rx'd 150 messages relayed 2 messages tx'd
+  bucket[09] 12 - 18 hours ago: 21 messages rx'd 4 messages relayed 0 messages tx'd
+  bucket[08] 18 - 24 hours ago: 800 messages rx'd 200 messages relayed 0 messages tx'd
+  bucket[07] 24 - 30 hours ago: 600 messages rx'd 180 messages relayed 5 messages tx'd
+  bucket[06] 30 - 36 hours ago: 400 messages rx'd 120 messages relayed 10 messages tx'd
+  bucket[05] 36 - 42 hours ago: 300 messages rx'd 90 messages relayed 0 messages tx'd
+  bucket[04] 42 - 48 hours ago: 200 messages rx'd 60 messages relayed 3 messages tx'd
+  bucket[03] 48 - 54 hours ago: 50 messages rx'd 15 messages relayed 0 messages tx'd
+  bucket[02] 54 - 60 hours ago: 80 messages rx'd 25 messages relayed 1 messages tx'd
+  bucket[01] 60 - 66 hours ago: 120 messages rx'd 40 messages relayed 0 messages tx'd
+  bucket[00] 66 - 72 hours ago: 200 messages rx'd 60 messages relayed 2 messages tx'd
+[100001202-001, TPORT, INFO] rhc_build_resp: inserted firmware version, new offset 71
+[100001202-000, TPORT, INFO] rhc-rsp-len: 86

@@ -476,6 +476,80 @@ class GripTransfer:
     segment_count: Optional[int]      # from receiver-side "Full grip file received"
 
 
+
+# ── Firmware log (fw_log) ──────────────────────────────────────────────────────
+
+@dataclass
+class FwBucket:
+    """One 6-hour message count window from the RHC bucket history."""
+    bucket_index: int
+    hrs_start:    int
+    hrs_end:      int
+    rx:           int
+    relayed:      int
+    tx:           int
+
+
+@dataclass
+class FwRssiSample:
+    """One RSSI[] detailed sample from TRX INFO."""
+    channel:  int
+    avg_dbm:  int
+    last_dbm: int
+    min_dbm:  int
+    max_dbm:  int
+    num:      int
+
+
+@dataclass
+class FwRoutingDecision:
+    """Aggregated routing decision counts."""
+    transmit:  int = 0
+    echo:      int = 0
+    vine:      int = 0
+    flood:     int = 0
+    skip_rx:   int = 0
+    skip_tx:   int = 0
+
+
+@dataclass
+class FwRfConfig:
+    """RF radio configuration extracted from TRX INFO config block."""
+    device_type:      str = ""
+    region:           int = 0
+    tx_power:         int = 0
+    bit_rate:         int = 0
+    frequencies_hz:   list = field(default_factory=list)
+    control_channels: list = field(default_factory=list)
+    data_channels:    list = field(default_factory=list)
+    bandwidth:        str = ""
+
+
+@dataclass
+class FwLogResult:
+    """All structured data extracted from a firmware log."""
+    origin_hash:          str = ""
+    fw_format_version:    str = ""
+    rf_config:            Optional["FwRfConfig"] = None
+    first_ts_ms:          int = 0
+    last_ts_ms:           int = 0
+    duration_ms:          int = 0
+    buckets:              list = field(default_factory=list)
+    rssi_samples:         list = field(default_factory=list)
+    energy_samples:       list = field(default_factory=list)
+    routing:              Optional["FwRoutingDecision"] = None
+    neighbor_hashes:      list = field(default_factory=list)
+    battery_error_count:  int = 0
+    error_counts:         dict = field(default_factory=dict)
+    error_messages:       list = field(default_factory=list)
+    warn_counts:          dict = field(default_factory=dict)
+    warn_messages:        list = field(default_factory=list)
+    rhc_poll_count:       int = 0
+    total_lines:          int = 0
+    parsed_lines:         int = 0
+    skipped_debug:        int = 0
+
+
 # ── Top-level parse result ────────────────────────────────────────────────────
 
 @dataclass
@@ -527,6 +601,9 @@ class ParseResult:
     # RSDK only — GRIP transfer data
     grip_messages: list[GripMessage] = field(default_factory=list)
     grip_transfers: list[GripTransfer] = field(default_factory=list)
+
+    # Firmware log only
+    fw_log_result: Optional[FwLogResult] = None
 
     # Relay Manager only
     relay_health_requests: list[RelayHealthRequest] = field(default_factory=list)

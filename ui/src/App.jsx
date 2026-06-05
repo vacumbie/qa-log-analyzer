@@ -20,6 +20,7 @@ const TABS = [
   { id:'health',    label:'Health Score' },
   { id:'relay-health', label:'Relay Health', relayOnly: true },
   { id:'atak',      label:'ATAK', atakOnly: true },
+  { id:'fw-log',    label:'FW Log', fwOnly: true },
 ]
 
 // ── Shared sub-components ─────────────────────────────────────────────────────
@@ -1411,6 +1412,217 @@ function HealthTab({ results }) {
   )
 }
 
+// ── FW Log Tab ────────────────────────────────────────────────────────────────
+
+function FwLogTab({ results }) {
+  const fwResults = results.filter(r => r.log_format === 'fw_log')
+  if (!fwResults.length) return null
+
+  return (
+    <div>
+      {fwResults.map((r, i) => {
+        const fw = r.fw_log || {}
+        const rf = fw.rf_config || {}
+        const routing = fw.routing || {}
+        const energy = fw.energy_summary || {}
+        const buckets = fw.buckets || []
+        const s = r.summary || {}
+
+        const durationMin = fw.duration_ms ? Math.round(fw.duration_ms / 60000) : 0
+        const totalBucketRx = buckets.reduce((a, b) => a + b.rx, 0)
+        const totalBucketRelayed = buckets.reduce((a, b) => a + b.relayed, 0)
+
+        return (
+          <div key={i} style={{ marginBottom: 32 }}>
+            {/* Header */}
+            <SectionHeader
+              icon="📡"
+              title={`FW Log — ${fw.origin_hash ? fw.origin_hash.toUpperCase() : 'Unknown'}`}
+              sub={`${r.source_filename} · ${durationMin} min · ${(fw.parsed_lines || 0).toLocaleString()} lines parsed · ${fw.skipped_debug?.toLocaleString()} DEBUG skipped`}
+            />
+
+            {/* KPI row */}
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+              <KpiCard label="Origin Hash"    value={fw.origin_hash?.toUpperCase() || '—'}   color={C.accent} />
+              <KpiCard label="Session"        value={`${durationMin} min`}                    color={C.muted} />
+              <KpiCard label="RHC Polls"      value={fw.rhc_poll_count ?? '—'}               color={C.green} />
+              <KpiCard label="Neighbors"      value={s.neighbor_count ?? 0}                  color='#c77dff' />
+              <KpiCard label="Energy Avg"     value={energy.avg_dbm != null ? `${energy.avg_dbm} dBm` : '—'} color={C.yellow} />
+              <KpiCard label="Battery Errors" value={(fw.battery_error_count || 0).toLocaleString()}
+                color={fw.battery_error_count > 0 ? C.yellow : C.green}
+                tooltip={fw.battery_error_count > 0 ? ["Known firmware quirk — not hardware failure"] : undefined} />
+            </div>
+
+            {/* RF Configuration */}
+            <SectionHeader icon="📶" title="RF Configuration" sub="From TRX INFO config block" />
+            <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '14px 18px', marginBottom: 16, display: 'flex', gap: 32, flexWrap: 'wrap' }}>
+              {[
+                { label: 'Device',    value: rf.device_type || '—' },
+                { label: 'Region',    value: rf.region || '—' },
+                { label: 'Tx Power',  value: rf.tx_power != null ? rf.tx_power : '—' },
+                { label: 'Bit Rate',  value: rf.bit_rate ? `${rf.bit_rate.toLocaleString()} bps` : '—' },
+                { label: 'Ctrl Ch',   value: rf.control_channels?.join(', ') || '—' },
+                { label: 'Data Ch',   value: rf.data_channels?.join(', ') || '—' },
+              ].map(item => (
+                <div key={item.label}>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>{item.label}</div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: '#c8ddf4' }}>{item.value}</div>
+                </div>
+              ))}
+              <div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>Frequencies</div>
+                {(rf.frequencies_hz || []).map(f => (
+                  <div key={f} style={{ fontFamily: 'var(--mono)', fontSize: 11, color: '#c8ddf4' }}>
+                    {(f / 1e6).toFixed(3)} MHz
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Message Bucket History */}
+            <SectionHeader icon="🪣" title="Message Bucket History" sub="6-hour windows — last RHC health poll snapshot · bucket[11] = most recent 6 hrs" />
+            <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '14px 18px', marginBottom: 16 }}>
+              <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+                <KpiCard label="Total Rx (72hr)"     value={totalBucketRx.toLocaleString()}     color={C.accent} />
+                <KpiCard label="Total Relayed (72hr)" value={totalBucketRelayed.toLocaleString()} color={C.green} />
+                <KpiCard label="Relay Rate"
+                  value={totalBucketRx > 0 ? `${Math.round(totalBucketRelayed/totalBucketRx*100)}%` : '—'}
+                  color={C.yellow} />
+              </div>
+              {buckets.length === 0 ? (
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted }}>No bucket data found.</div>
+              ) : (
+                <div>
+                  {/* Column headers */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 80px 80px 60px', gap: 8, marginBottom: 6 }}>
+                    {['Window', 'Rx (bar)', 'Rx', 'Relayed', 'Tx'].map(h => (
+                      <div key={h} style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</div>
+                    ))}
+                  </div>
+                  {buckets.map(b => {
+                    const maxRx = Math.max(...buckets.map(x => x.rx), 1)
+                    const pct = Math.max(2, Math.round((b.rx / maxRx) * 100))
+                    // Highlight the field session window (bucket 09 = 12-18hrs ago)
+                    const isFieldSession = b.bucket_index === 9 && b.rx < 100
+                    const rowColor = isFieldSession ? C.yellow : '#c8ddf4'
+                    return (
+                      <div key={b.bucket_index} style={{ display: 'grid', gridTemplateColumns: '120px 1fr 80px 80px 60px', gap: 8, marginBottom: 5, alignItems: 'center' }}>
+                        <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: rowColor }}>
+                          {b.hrs_start}–{b.hrs_end} hrs ago
+                          {isFieldSession && <span style={{ color: C.yellow, marginLeft: 4 }}>◀ low</span>}
+                        </div>
+                        <div style={{ height: 8, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden' }}>
+                          <div style={{ width: `${pct}%`, height: '100%', background: isFieldSession ? C.yellow : C.accent, borderRadius: 2, opacity: 0.7 }} />
+                        </div>
+                        <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: rowColor }}>{b.rx.toLocaleString()}</div>
+                        <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted }}>{b.relayed.toLocaleString()}</div>
+                        <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted }}>{b.tx}</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Routing Decisions */}
+            <SectionHeader icon="🔀" title="Relay Routing" sub="From RELAY INFO message decisions" />
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+              {[
+                { label: 'Relayed',    value: routing.transmit,  color: C.green,  tip: 'transmitMsg=1 — forwarded to mesh' },
+                { label: 'Echo',       value: routing.echo,      color: C.accent, tip: 'echo=1 — already received, skipped' },
+                { label: 'Vine',       value: routing.vine,      color: '#c77dff', tip: 'vine=1 — vine routing protocol' },
+                { label: 'Flood',      value: routing.flood,     color: C.red,    tip: 'flooding=1 — broadcast flood' },
+                { label: 'Skip Rx',    value: routing.skip_rx,   color: C.muted,  tip: 'Already received — not processed again' },
+              ].map(item => (
+                <KpiCard key={item.label} label={item.label} value={(item.value || 0).toLocaleString()}
+                  color={item.color} tooltip={[item.tip]} />
+              ))}
+            </div>
+
+            {/* Energy / Signal */}
+            <SectionHeader icon="📊" title="Channel Energy" sub="TRX INFO energy samples — last_rssi per preamble detection (INFO level proxy for RSSI)" />
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+              {[
+                { label: 'Avg',     value: energy.avg_dbm != null ? `${energy.avg_dbm} dBm` : '—' },
+                { label: 'Min',     value: energy.min_dbm != null ? `${energy.min_dbm} dBm` : '—' },
+                { label: 'Max',     value: energy.max_dbm != null ? `${energy.max_dbm} dBm` : '—' },
+                { label: 'Samples', value: (energy.sample_count || 0).toLocaleString() },
+              ].map(item => (
+                <KpiCard key={item.label} label={item.label} value={item.value} color={C.yellow} />
+              ))}
+            </div>
+
+            {/* Neighbors */}
+            {(fw.neighbor_hashes || []).length > 0 && (
+              <>
+                <SectionHeader icon="🕸️" title="Neighbor Table" sub="Unique node hashes seen via RELAY INFO neighborAdd" />
+                <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 16px', marginBottom: 16 }}>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {fw.neighbor_hashes.map(h => (
+                      <span key={h} style={{ fontFamily: 'var(--mono)', fontSize: 10, color: C.accent,
+                        background: `${C.accent}12`, border: `1px solid ${C.accent}30`,
+                        borderRadius: 4, padding: '2px 8px' }}>
+                        {h.toUpperCase()}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Errors and Warnings */}
+            {(Object.keys(fw.error_counts || {}).length > 0 || Object.keys(fw.warn_counts || {}).length > 0) && (
+              <>
+                <SectionHeader icon="⚠️" title="Errors & Warnings" sub="ERROR and WARN lines by module — battery stabilization shown separately" />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                  <div style={{ background: 'var(--panel)', border: `1px solid ${C.red}30`, borderRadius: 8, padding: '12px 16px' }}>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.red, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Errors</div>
+                    {Object.entries(fw.error_counts || {}).map(([mod, cnt]) => (
+                      <div key={mod} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#94a3b8' }}>{mod}</span>
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.red }}>{cnt}</span>
+                      </div>
+                    ))}
+                    {(fw.error_messages || []).map((msg, j) => (
+                      <div key={j} style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#334155', marginTop: 4, paddingTop: 4, borderTop: j === 0 ? '1px solid var(--border)' : 'none' }}>
+                        • {msg}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ background: 'var(--panel)', border: `1px solid ${C.yellow}30`, borderRadius: 8, padding: '12px 16px' }}>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.yellow, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Warnings</div>
+                    {Object.entries(fw.warn_counts || {}).map(([mod, cnt]) => (
+                      <div key={mod} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#94a3b8' }}>{mod}</span>
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.yellow }}>{cnt}</span>
+                      </div>
+                    ))}
+                    {(fw.warn_messages || []).map((msg, j) => (
+                      <div key={j} style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#334155', marginTop: 4, paddingTop: 4, borderTop: j === 0 ? '1px solid var(--border)' : 'none' }}>
+                        • {msg}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Data limitations */}
+            {(r.parse_errors || []).some(e => e.startsWith('DATA LIMITATION')) && (
+              <Note>
+                {r.parse_errors.filter(e => e.startsWith('DATA LIMITATION')).map((e, j) => (
+                  <div key={j} style={{ marginBottom: 4 }}>⚠ {e.replace('DATA LIMITATION: ', '')}</div>
+                ))}
+              </Note>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+
 // ── SDK Logging 2.0 Summary Card ─────────────────────────────────────────────
 
 function SdkLogSummaryCard({ summary }) {
@@ -1857,6 +2069,7 @@ function TabContent({ tab, results }) {
     case 'health':      return <HealthTab      results={results} />
     case 'relay-health': return <RelayHealthTab results={results} />
     case 'atak':         return <AtakTab        results={results} />
+    case 'fw-log':       return <FwLogTab       results={results} />
     default:          return null
   }
 }
@@ -2113,6 +2326,7 @@ export default function App() {
   const visibleTabs   = TABS.filter(t => {
     if (t.atakOnly)   return results.some(r => r.log_format === 'atak')
     if (t.relayOnly)  return results.some(r => r.log_format === 'relay_manager')
+    if (t.fwOnly)     return results.some(r => r.log_format === 'fw_log')
     return true
   })
 

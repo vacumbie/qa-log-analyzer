@@ -19,6 +19,7 @@ from parser.diagnostic import parse_diagnostic_log
 from parser.rsdk import parse_rsdk_log
 from parser.atak import parse_atak_log
 from parser.relay_manager import parse_relay_manager_log
+from parser.fw_log import parse_fw_log, is_fw_log
 from parser.models import ParseResult
 
 router = APIRouter(prefix="/parse", tags=["parse"])
@@ -30,7 +31,8 @@ def _detect_format(filename: str, content: str) -> str:
     Returns 'atak', 'relay_manager', 'diagnostic', or 'rsdk'.
 
     Detection order:
-      1. ATAK          — filename starts with 'diagnostic_ATAK_' or content is JSON
+      1. FW Log        — bracket pattern [digits-digits, MODULE, LEVEL] with TRX/RELAY/TPORT
+      2. ATAK          — filename starts with 'diagnostic_ATAK_' or content is JSON
                          with ATAK-specific fields (logId, connectionState, appVersion)
       2. Relay Manager — filename or content signals the goTenna Relay Manager app
       3. RSDK          — filename contains 'rsdk' or content has RSDK line markers
@@ -38,6 +40,10 @@ def _detect_format(filename: str, content: str) -> str:
     """
     name = filename.lower()
     snippet = content[:2000]   # wider window for relay manager detection
+
+    # ── FW Log detection — first (most distinctive) ──────────────────────────
+    if is_fw_log(content):
+        return "fw_log"
 
     # ── ATAK detection ────────────────────────────────────────────────────────
     # Filename convention: diagnostic_ATAK_<CALLSIGN>_<GID>_<DATE>.log
@@ -436,6 +442,90 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             "max_stored_messages":  max((h.stored_messages for h in r.atak_health_samples if h.stored_messages), default=0),
         }
 
+    elif r.log_format == "fw_log":
+        fw = r.fw_log_result
+        rf = fw.rf_config
+        rf_dict = {
+            "device_type":      rf.device_type if rf else "",
+            "region":           rf.region if rf else 0,
+            "tx_power":         rf.tx_power if rf else 0,
+            "bit_rate":         rf.bit_rate if rf else 0,
+            "frequencies_hz":   rf.frequencies_hz if rf else [],
+            "control_channels": rf.control_channels if rf else [],
+            "data_channels":    rf.data_channels if rf else [],
+        }
+        energy = fw.energy_samples or []
+        energy_summary = {
+            "avg_dbm": round(sum(energy)/len(energy), 1) if energy else None,
+            "min_dbm": min(energy) if energy else None,
+            "max_dbm": max(energy) if energy else None,
+            "sample_count": len(energy),
+        }
+        rssi_by_ch = {}
+        for s in (fw.rssi_samples or []):
+            ch = str(s.channel)
+            rssi_by_ch.setdefault(ch, {"avgs":[],"mins":[],"maxs":[]})
+            rssi_by_ch[ch]["avgs"].append(s.avg_dbm)
+            rssi_by_ch[ch]["mins"].append(s.min_dbm)
+            rssi_by_ch[ch]["maxs"].append(s.max_dbm)
+        rssi_summary = {
+            ch: {
+                "avg_dbm": round(sum(v["avgs"])/len(v["avgs"]), 1),
+                "min_dbm": min(v["mins"]),
+                "max_dbm": max(v["maxs"]),
+                "sample_count": len(v["avgs"]),
+            } for ch, v in rssi_by_ch.items()
+        }
+        rt = fw.routing
+        buckets = [
+            {"bucket_index": b.bucket_index, "hrs_start": b.hrs_start,
+             "hrs_end": b.hrs_end, "rx": b.rx, "relayed": b.relayed, "tx": b.tx}
+            for b in (fw.buckets or [])
+        ]
+        base["fw_log"] = {
+            "origin_hash":         fw.origin_hash,
+            "fw_format_version":   fw.fw_format_version,
+            "rf_config":           rf_dict,
+            "first_ts_ms":         fw.first_ts_ms,
+            "last_ts_ms":          fw.last_ts_ms,
+            "duration_ms":         fw.duration_ms,
+            "buckets":             buckets,
+            "rssi_summary":        rssi_summary,
+            "energy_summary":      energy_summary,
+            "routing": {"transmit": rt.transmit if rt else 0,
+                        "echo": rt.echo if rt else 0,
+                        "vine": rt.vine if rt else 0,
+                        "flood": rt.flood if rt else 0,
+                        "skip_rx": rt.skip_rx if rt else 0,
+                        "skip_tx": rt.skip_tx if rt else 0},
+            "neighbor_hashes":     fw.neighbor_hashes,
+            "rhc_poll_count":      fw.rhc_poll_count,
+            "battery_error_count": fw.battery_error_count,
+            "error_counts":        fw.error_counts,
+            "error_messages":      fw.error_messages,
+            "warn_counts":         fw.warn_counts,
+            "warn_messages":       fw.warn_messages,
+            "total_lines":         fw.total_lines,
+            "parsed_lines":        fw.parsed_lines,
+            "skipped_debug":       fw.skipped_debug,
+        }
+        base["summary"] = {
+            "origin_hash":         fw.origin_hash,
+            "duration_ms":         fw.duration_ms,
+            "rhc_poll_count":      fw.rhc_poll_count,
+            "battery_error_count": fw.battery_error_count,
+            "total_errors":        sum(fw.error_counts.values()),
+            "total_warns":         sum(fw.warn_counts.values()),
+            "neighbor_count":      len(fw.neighbor_hashes),
+            "bucket_count":        len(fw.buckets),
+            "routing_transmit":    rt.transmit if rt else 0,
+            "routing_echo":        rt.echo if rt else 0,
+            "routing_vine":        rt.vine if rt else 0,
+            "energy_avg_dbm":      energy_summary.get("avg_dbm"),
+            "rssi_ch0_avg_dbm":    rssi_summary.get("0", {}).get("avg_dbm"),
+            "rssi_ch1_avg_dbm":    rssi_summary.get("1", {}).get("avg_dbm"),
+        }
+
     elif r.log_format == "relay_manager":
         # Compute average polling interval for the summary
         avg_interval_sec: float | None = None
@@ -559,7 +649,9 @@ async def parse_logs(files: list[UploadFile] = File(...)) -> dict:
             tmp_path = Path(tmp.name)
 
         try:
-            if fmt == "rsdk":
+            if fmt == "fw_log":
+                result = parse_fw_log(tmp_path)
+            elif fmt == "rsdk":
                 result = parse_rsdk_log(tmp_path)
             elif fmt == "atak":
                 result = parse_atak_log(tmp_path)
