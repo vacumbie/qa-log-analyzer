@@ -354,8 +354,6 @@ function computeIntervalDurations(intervalHistory) {
   return durations
 }
 
-const PLI_INTERVAL_ORDER = ['5 seconds','15 seconds','30 seconds','60 seconds','120 seconds','180 seconds','300 seconds']
-
 function PliDurationChart({ pliNodes }) {
   // Only show nodes that have at least one real interval with computed duration
   const chartNodes = pliNodes.filter(n => Object.keys(n.durations).length > 0)
@@ -369,7 +367,6 @@ function PliDurationChart({ pliNodes }) {
   // Bar width per node
   const barH = 22
   const labelW = 110
-  const chartW = 560
   const maxMins = Math.max(...chartNodes.flatMap(n => {
     const total = Object.values(n.durations).reduce((a, b) => a + b, 0)
     return [total]
@@ -689,7 +686,7 @@ function TxRxTab({ results }) {
           />
           <Note>
             GRIP data is sourced from structured <code>Outgoing/Incoming message fields</code> log lines.
-            Delivery time = sender-side "File transmission started" → "File has been successfully delivered".
+            Delivery time = sender-side &quot;File transmission started&quot; → &quot;File has been successfully delivered&quot;.
             repCounter tracks retransmissions per segment; max 3 before firmware cancels the transfer.
           </Note>
           <GripOutcomeBar transfers={allGripTransfers} />
@@ -981,7 +978,7 @@ function HopCountMap({ results }) {
     })
 
     if (bounds.length > 1) {
-      try { map.fitBounds(bounds, { padding: [32, 32] }) } catch(e) {}
+      try { map.fitBounds(bounds, { padding: [32, 32] }) } catch { /* degenerate bounds — leave the current view */ }
     } else if (bounds.length === 1) {
       map.setView(bounds[0], 13)
     }
@@ -2069,21 +2066,6 @@ function TabContent({ tab, results }) {
     default:          return null
   }
 }
-
-// ── Device filter button style ────────────────────────────────────────────────
-
-function deviceBtnStyle(active, color = '#00d4ff') {
-  return {
-    background: active ? `${color}20` : 'none',
-    border: `1px solid ${active ? color : '#1e2f4a'}`,
-    color: active ? color : '#4a6080',
-    borderRadius: 4, padding: '4px 11px', cursor: 'pointer',
-    fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.06em',
-    textTransform: 'uppercase', transition: 'all 0.1s',
-  }
-}
-
-// ── Main App ──────────────────────────────────────────────────────────────────
 
 // ── Log selector dropdown ─────────────────────────────────────────────────────
 

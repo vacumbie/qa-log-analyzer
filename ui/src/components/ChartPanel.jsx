@@ -36,11 +36,6 @@ function downsample(arr, max = 50) {
   return Array.from({ length: max }, (_, i) => arr[Math.floor(i * step)])
 }
 
-function buildTimeLabels(results, key = 'system_samples', max = 40) {
-  const all = results.flatMap(r => (r[key] || []).map(s => s.timestamp?.slice(11, 16)).filter(Boolean))
-  return downsample([...new Set(all)].sort(), max)
-}
-
 /**
  * Build per-device normalized time series for line charts.
  *
