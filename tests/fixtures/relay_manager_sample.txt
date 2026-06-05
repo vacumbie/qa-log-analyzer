@@ -1,0 +1,13 @@
+06-03 14:46:40.100  16170  16170 I na.relaymanager(16170): io_stats: rd_bytes=4096 wr_bytes=8192
+06-03 14:46:41.200  16170  16205 D System.out: Device - PNE234200715 connected over BLE device FB:6C:DB:3B:3A:9A
+06-03 14:46:41.944  16170  16205 D Services Plugin: Command relayHealthRequestCall 2026-06-03T14:46:41.944712Z
+06-03 14:46:41.980  16170  16205 D System.out: Sending bytes to BLE device: Unknown data: 100225ec48000000 2026-06-03T14:46:41.980000Z
+06-03 14:46:42.100  16170  16205 D System.out: notification type: 72, hexValue: 48000000 2026-06-03T14:46:42.100000Z
+06-03 14:46:42.300  16170  16205 D System.out: Confirmed successfully wrote packet 1 of 1
+06-03 14:46:43.000  16170  16205 D System.out: A message has been delivered and we should perform a get/delete 2026-06-03T14:46:43.000000Z
+06-03 14:51:42.100  16170  16205 D System.out: notification type: 72, hexValue: 48000000 2026-06-03T14:51:42.100000Z
+06-03 14:51:43.500  16170  16205 D System.out: State of the battery/charging has changed 2026-06-03T14:51:43.500000Z
+06-03 14:56:41.944  16170  16205 D Services Plugin: Command relayHealthRequestCall 2026-06-03T14:56:41.944712Z
+06-03 14:56:41.980  16170  16205 D System.out: Sending bytes to BLE device: Unknown data: 100225ec48000000 2026-06-03T14:56:41.980000Z
+06-03 14:56:42.100  16170  16205 D System.out: notification type: 72, hexValue: 48000000 2026-06-03T14:56:42.100000Z
+06-03 14:56:50.000  16170  16205 D System.out: An alert has been sent from the device we need to do a pull 2026-06-03T14:56:50.000000Z
