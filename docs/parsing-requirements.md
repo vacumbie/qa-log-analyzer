@@ -967,3 +967,263 @@ catch-all `diagnostic` parser never sees these because fw_log is checked first.
 - RF config: goTenna Pro, 3 frequencies, control channel [0], data channels [1, 2].
 - Routing: 1 each of transmit / echo / vine; 1 skip_rx; 1 skip_tx.
 - 2 neighbors (`e1a5`, `83e5`); 2 battery stabilization errors; 1 USB error; 1 RELAY warn.
+
+---
+
+## Message Protocol Architecture — Cross-Format Requirements
+
+### Overview
+
+The goTenna ATAK plugin supports three message protocols that determine how
+messages are routed across the mesh network. Understanding these is essential
+for correctly interpreting delivery outcomes, failure analysis, and congestion
+measurements across all log formats.
+
+### Protocol Definitions
+
+| Protocol | Value in logs | Description | UI lane |
+|----------|--------------|-------------|---------|
+| BROADCAST | `"BROADCAST"` | One-to-many. Message is transmitted to all devices on the network. All devices receive and log it. | BROADCAST |
+| PRIVATE | `"PRIVATE"` | One-to-one addressed transmission. ATAK plugin log term. Other devices relay but only the intended recipient processes it. | PRIVATE |
+| UNICAST | `"UNICAST"` | One-to-one addressed transmission. RSDK log term. **Functionally synonymous with PRIVATE in the goTenna mesh** — same RF behavior, different label used by the SDK vs the ATAK plugin. | PRIVATE (normalized) |
+
+> **Normalization rule:** `UNICAST` and `PRIVATE` are the same protocol in
+> goTenna mesh — they differ only in naming between log formats. The parser
+> must normalize both to a single `PRIVATE` lane in the UI. Never show
+> UNICAST as a separate lane from PRIVATE.
+
+### Message Type × Protocol Matrix
+
+| Message Type | BROADCAST | PRIVATE | GRIP |
+|-------------|-----------|---------|------|
+| PLI | ✅ Always | ✗ Never | ✗ |
+| textChat | ✅ Yes | ✅ Yes | ✗ |
+| fileTransfer | ✅ Yes | ✅ Yes | ✅ Always |
+| mapObject (PIN, etc.) | ✅ Yes | ✅ Yes | ✗ |
+
+**Key rules:**
+- PLI is always BROADCAST — it is a network-wide position report by definition.
+- fileTransfer always uses GRIP for segmented delivery management, regardless
+  of whether the transfer is BROADCAST or PRIVATE.
+- GRIP is fileTransfer-only. It does not carry textChat or mapObject messages.
+- textChat, fileTransfer, and mapObject can each be sent as BROADCAST or
+  PRIVATE/UNICAST at the user's discretion.
+- PRIVATE and UNICAST are synonymous in goTenna mesh — same RF behavior,
+  different label used by the ATAK plugin (`PRIVATE`) vs the SDK (`UNICAST`).
+  Always normalize to a single PRIVATE lane in analysis and UI.
+- Day 2 field session (2026-06-04) did not include private message tests.
+  The 53 PRIVATE fileTransfer records in gt_Sassy_B_Net's log originated
+  from devices outside the 14-device test inventory (GIDs 90263279227901
+  and 90459992601199) — likely background activity from other network users.
+
+### GRIP — File Transfer Protocol
+
+GRIP (goTenna Reliable IP) is the segmented delivery protocol that manages
+file transfer across the mesh. It operates on top of BROADCAST or PRIVATE
+at the application layer.
+
+**GRIP-specific fields on fileTransfer records:**
+
+| Field | Parsed name | Description |
+|-------|-------------|-------------|
+| `segmentCount` | `segment_count` | Total segments the file was divided into |
+| `numberOfOpenSegments` | `open_segments` | Segments not yet received; −99 = transfer cancelled before count known (treat as `None`) |
+| `retryCount` | `retry_count` | Number of GRIP retransmission attempts |
+| `deliveryTimeInMillis` | `delivery_time_ms` | Sender-side only — time from first segment to final ACK. Always `0` on receiver side (placeholder, not real). |
+| `deliveryStatus: SUCCESS` | `delivery_status` | Sender-side confirmed delivery with ACK. Receiver-side equivalent is `FULLY_RECEIVED`. |
+
+**Segment size:** ~71 bytes/segment confirmed against 2026-06-04 field session
+actual file sizes (e.g. 25.53 KB ÷ 368 segments = 71 bytes/seg, consistent
+across all 6 official transfers).
+
+**BROADCAST vs PRIVATE GRIP behavior:**
+- BROADCAST GRIP: all devices on the mesh receive segments; any device can
+  relay segments to others. Generates one logId shared across all receivers.
+- PRIVATE GRIP: segments addressed to a specific GID; other devices relay
+  but do not process. Generates one logId shared between sender and recipient.
+
+### logId — Cross-Device Correlation Key
+
+`logId` is assigned by the **sender** at transfer initiation and embedded in
+every segment. It is the definitive join key for correlating delivery outcomes
+across multiple device logs.
+
+**Rules:**
+- A matching logId across sender and receiver logs = confirmed same transfer.
+- Segment count similarity alone is NOT sufficient — two different transfers
+  can have the same segment count.
+- When a relay device re-initiates a transfer (retransmission), the new sender
+  generates a **new logId**. The segment count remains the same but the logId
+  changes. This is the relay copy / retransmission mismatch pattern.
+- `logId` values are 32-bit signed integers and can be negative.
+
+**Relay copy detection (observed in 2026-06-04 GATOR data):**
+GATOR received file transfer records with segment counts matching official
+transfers (368, 92, 370, 344 segments) but different logIds than FUJIN's
+originals. These are probable relay copies — the mesh routing the files
+through intermediate nodes, each generating a new logId at the relay point.
+None completed successfully. GATOR's one official success (T4) matched FUJIN's
+logId `-1867690559` exactly at 4 hops / −77 dBm.
+
+---
+
+## Parser Requirements — Day 2 Field Session Findings (2026-06-04)
+
+### P1 — MESMER SDK Tag Profile (HIGH — correctness bug)
+
+**Finding:** MESMER (firmware 3.1.11) produces sdkError records with `DEBUG`
+severity tags (`DEBUG|PROCESSING`, `DEBUG|RADIO`, `BLE|DEBUG`) instead of
+`ERROR` severity tags like all other devices (`ERROR|BLE`, `ERROR|RADIO`).
+The BLE health score dimension uses `ERROR|BLE` counts, causing MESMER to
+falsely pass the BLE health check despite confirmed BLE instability (5
+disconnect events in the first 5 minutes, 204,191 sdkError records).
+
+**Requirement:** `ble_fail_count` in the ATAK summary must count BLE-related
+SDK errors regardless of severity tag. Include both `ERROR|BLE` and `BLE|DEBUG`
+(and any other tag combination containing `BLE`) when computing the BLE health
+dimension. The distinction between firmware 3.1.11 (DEBUG tags) and 3.2.10+
+(ERROR tags) must not affect the health score outcome.
+
+**Status:** ⏳ Pending
+
+---
+
+### P2 — Protocol Separation in TX/RX, File Transfer, and Congestion Analysis (MEDIUM)
+
+**Finding:** BROADCAST and PRIVATE protocol messages have fundamentally
+different failure modes and should not be aggregated together in delivery
+statistics. The 53 PRIVATE fileTransfer failures in gt_Sassy_B_Net's log
+(all `PARTIALLY_RECEIVED`) are invisible when mixed with BROADCAST transfer
+statistics. Congestion analysis is also affected — PRIVATE traffic should
+not inflate the BROADCAST message rate used to measure network load during
+file transfers.
+
+**Requirement — TX/RX Tab:**
+- `messageProtocol` is already parsed. Add protocol breakdown to the TX/RX
+  tab: two lanes — **BROADCAST** and **PRIVATE** (UNICAST normalized to PRIVATE).
+  Show message counts, delivery rates, and message type breakdowns per lane.
+- Sent and received counts shown per lane independently.
+- Do not aggregate PRIVATE/UNICAST delivery rates into BROADCAST — they are
+  different failure modes with different expected outcomes.
+- Display as `PRIVATE / UNICAST` label in the UI to acknowledge both values
+  map to the same lane.
+
+**Requirement — File Transfer Section:**
+- Add a protocol filter (BROADCAST / PRIVATE / All) to the file transfer
+  section of the ATAK tab.
+- Delivery rate, partial receive rate, and open segment counts computed
+  per protocol independently.
+- Flag when all PRIVATE fileTransfers fail — as seen with gt_Sassy_B_Net —
+  as this pattern suggests a contact resolution or addressing issue rather
+  than an RF problem.
+
+**Requirement — Congestion Analysis:**
+- When computing non-file-transfer network traffic during a transfer window,
+  break down the count by protocol: BROADCAST PLI, BROADCAST other,
+  PRIVATE messages.
+- PRIVATE traffic contributes to total network load but should be shown
+  as a separate component so QA engineers can distinguish fronthaul
+  BROADCAST flooding (Poseidon pattern) from PRIVATE background traffic.
+- Rate/min metric should show both total and BROADCAST-only rates since
+  PRIVATE traffic has different propagation characteristics.
+
+**Status:** ⏳ Pending
+
+---
+
+### P3 — Cross-Device Delivery Matrix (MEDIUM)
+
+**Finding:** logId is the definitive join key for correlating delivery outcomes
+across device logs. When multiple ATAK logs from the same session are loaded,
+the parser has all the data needed to automatically compute a cross-device
+delivery matrix. This is currently done manually in analysis.
+
+**Requirement:** When 2+ ATAK logs are loaded simultaneously, compute and
+display a transfer delivery matrix in the ATAK tab:
+- Rows: unique sender logIds with `SUCCESS` status
+- Columns: each loaded device
+- Cells: `FULLY_RECEIVED`, `PARTIALLY_RECEIVED`, or `—` (no record)
+- Include: hop count and RSSI in the cell tooltip on hover
+
+**Status:** ⏳ Pending
+
+---
+
+### P4 — Relay Copy / Retransmission Flag (MEDIUM)
+
+**Finding:** GATOR's log contains file transfer records with segment counts
+matching official transfers but different logIds — probable relay copies
+generated when intermediate mesh nodes re-initiated the transfer. The parser
+currently has no way to distinguish these from unrelated transfers.
+
+**Requirement:** When multiple ATAK logs are loaded, flag file transfer records
+where:
+1. The segment count matches a known sender `SUCCESS` transfer
+2. The logId does NOT match the sender's logId
+3. The timestamp falls within the known transfer window
+
+Flag these as `probable_relay_copy: true` in the parsed output and surface
+them distinctly in the UI — not as failed official transfers, but as evidence
+the mesh was attempting to route copies to the receiver.
+
+**Status:** ⏳ Pending
+
+---
+
+### P5 — Battery Critical Threshold (LOW)
+
+**Finding:** Four devices hit below 10% battery (KOPEK 3%, CL_B 5%, BIRD 8%,
+FONZ-B 9%). The health score battery dimension currently flags below 30% as
+failing with no distinction between 29% (low) and 3% (critical).
+
+**Requirement:** Add a second battery threshold at 10%:
+- `min_battery > 30%` → PASS
+- `10% ≤ min_battery ≤ 30%` → FAIL (existing behavior, yellow in UI)
+- `min_battery < 10%` → CRITICAL (new, distinct red indicator in UI)
+
+**Status:** ⏳ Pending
+
+---
+
+### P6 — KNOT Clock Skew Investigation (LOW — data quality)
+
+**Finding:** KNOT's log shows T4 received at 08:39 MNT and T6 received at
+09:51 MNT — both before those transfers started (10:13 and 11:21 MNT
+respectively per FUJIN's log). This is either significant clock skew or a
+timezone offset in KNOT's device clock.
+
+**Requirement:** Investigate KNOT's `timestampInMillis` values relative to
+other devices in the same session. If clock skew is confirmed, document as a
+data limitation and consider adding a per-device clock offset indicator to
+the Sessions tab when a device's timestamps are inconsistent with the session
+window established by other devices.
+
+**Status:** ⏳ Pending — requires cross-device timestamp comparison
+
+---
+
+### P7 — Poseidon Log Format (LOW — new format)
+
+**Finding:** Poseidon (goTenna SmartEdge fronthaul bridge) produces 4 distinct
+log formats across 7 files. The TAK server connectivity failure pattern
+(`curl code: 1 - Unsupported protocol`) and COMMANDHANDLER failure counts
+are high-value QA signals for identifying fronthaul configuration issues.
+The Poseidon TAK server URL misconfiguration on 2026-06-02 caused incorrect
+callsign fronthauling throughout the 2026-06-04 field session.
+
+**Log formats to implement (in priority order):**
+1. CoreApp Google glog (`[IWEF]yyyymmdd hh:mm:ss.uuuuuu tid file:line] msg`) — most structured, highest value
+2. radioService Spring Boot + SDK — mixed format, goTenna Radio SDK interface
+3. Mosquitto broker — Unix epoch timestamps, MQTT event stream
+4. GPS NMEA — device-dependent, lowest priority
+
+**Status:** ⏳ Deferred — analysis report available at
+`docs/poseidon_analysis_2026-06-02.md`
+
+---
+
+> **Note:** An additional requirement (undocumented transfer warning) was
+> considered but removed. The two unreported transfers found in FUJIN's log
+> (09:32–09:46 and 09:48–09:59 MNT, 150 and 122 segments) were likely a
+> tester warming up before the official session — not a parser issue requiring
+> detection. No warning heuristic is warranted.
