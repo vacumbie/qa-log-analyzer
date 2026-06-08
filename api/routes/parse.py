@@ -405,15 +405,20 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
         hop_counts = [m.hop_count for m in atak_received if m.hop_count]
         rssi_vals   = [m.rssi for m in atak_received if m.rssi_is_valid]
 
-        # BLE health for ATAK: SDK Logging 2.0 surfaces BLE errors as tag combos
-        # in counts_by_tag (e.g. "ERROR|BLE"). When no SDK 2.0 records are present
-        # at all, fall back to the count of deviceDisconnected events. A summary
-        # with zero ERROR|BLE entries is a genuine zero, not a reason to fall back.
+        # BLE health for ATAK: SDK Logging 2.0 surfaces BLE events as tag combos
+        # in counts_by_tag. Any tag containing 'BLE' is counted regardless of
+        # severity — fw 3.1.11 (MESMER) uses BLE|DEBUG while fw 3.2.10+ uses
+        # ERROR|BLE. Both indicate BLE connectivity events that affect health.
+        # When no SDK 2.0 records are present at all, fall back to the count
+        # of deviceDisconnected events. A summary with zero BLE entries is a
+        # genuine zero, not a reason to fall back.
         if r.atak_sdk_error_summary:
             ble_fail_count = 0
             for tag_key, count in r.atak_sdk_error_summary.counts_by_tag.items():
                 tags = tag_key.split("|")
-                if "BLE" in tags and "ERROR" in tags:
+                # Count any tag containing BLE regardless of severity.
+                # fw 3.1.11 uses BLE|DEBUG; fw 3.2.10+ uses ERROR|BLE.
+                if "BLE" in tags:
                     ble_fail_count += count
         else:
             ble_fail_count = sum(1 for e in r.atak_events if e.event_type == "deviceDisconnected")

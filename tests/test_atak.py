@@ -268,9 +268,10 @@ def test_sdk_error_summary_present():
 
 
 def test_sdk_error_total_count():
-    """All sdkError records are counted, not stored individually."""
+    """All sdkError records are counted, not stored individually.
+    Fixture: 3x ERROR|BLE + 2x ERROR|RADIO + 2x BLE|DEBUG = 7 total."""
     result = parse_atak_log(ENHANCED)
-    assert result.atak_sdk_error_summary.total_count == 5
+    assert result.atak_sdk_error_summary.total_count == 7
 
 
 def test_sdk_error_not_stored_as_messages():
@@ -283,7 +284,9 @@ def test_sdk_error_not_stored_as_messages():
 def test_sdk_error_counts_by_tag():
     result = parse_atak_log(ENHANCED)
     by_tag = result.atak_sdk_error_summary.counts_by_tag
-    assert by_tag == {"ERROR|BLE": 3, "ERROR|RADIO": 2}
+    assert by_tag["ERROR|BLE"] == 3
+    assert by_tag["ERROR|RADIO"] == 2
+    assert by_tag["BLE|DEBUG"] == 2
 
 
 def test_sdk_error_counts_by_info():
@@ -320,10 +323,11 @@ def test_sdk_error_data_limitation_surfaced():
 # tests assert against the serialized summary the UI Health tab consumes.
 
 def test_ble_fail_count_from_sdk_errors():
-    """Enhanced logs derive BLE failures from ERROR|BLE entries in counts_by_tag,
-    excluding non-BLE error tags like ERROR|RADIO."""
+    """Enhanced logs count BLE from ANY tag containing BLE.
+    Includes ERROR|BLE (fw 3.2.10+) and BLE|DEBUG (fw 3.1.11/MESMER).
+    Fixture: 3x ERROR|BLE + 2x BLE|DEBUG = 5 total."""
     summary = _result_to_dict(parse_atak_log(ENHANCED))["summary"]
-    assert summary["ble_fail_count"] == 3
+    assert summary["ble_fail_count"] == 5
 
 
 def test_ble_fail_count_falls_back_to_disconnects():
@@ -333,6 +337,17 @@ def test_ble_fail_count_falls_back_to_disconnects():
     disconnects = sum(1 for e in result.atak_events if e.event_type == "deviceDisconnected")
     summary = _result_to_dict(result)["summary"]
     assert summary["ble_fail_count"] == disconnects
+
+
+def test_ble_debug_tag_counts_as_ble_failure():
+    """fw 3.1.11 (MESMER) uses BLE|DEBUG not ERROR|BLE — P1 fix.
+    Severity must not gate BLE failure counting."""
+    result = parse_atak_log(ENHANCED)
+    by_tag = result.atak_sdk_error_summary.counts_by_tag
+    assert "BLE|DEBUG" in by_tag
+    assert by_tag["BLE|DEBUG"] == 2
+    summary = _result_to_dict(result)["summary"]
+    assert summary["ble_fail_count"] >= by_tag["BLE|DEBUG"]
 
 
 def test_ble_fail_count_zero_when_sdk_present_without_ble_errors():
