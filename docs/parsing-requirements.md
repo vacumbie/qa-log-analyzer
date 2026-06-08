@@ -1084,7 +1084,8 @@ SDK errors regardless of severity tag. Include both `ERROR|BLE` and `BLE|DEBUG`
 dimension. The distinction between firmware 3.1.11 (DEBUG tags) and 3.2.10+
 (ERROR tags) must not affect the health score outcome.
 
-**Status:** ⏳ Pending
+**Status:** ✅ Done — `_result_to_dict()` in `api/routes/parse.py` now counts
+any `counts_by_tag` key containing `BLE` regardless of severity (PR #4).
 
 ---
 
