@@ -165,8 +165,8 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
 - **Peak Temperature by Device** — bar chart; highlight max per device
 
 ### 6. Battery (`battery`)
-- **Battery Level Over Time** — line chart; X axis = real wall-clock time (UTC HH:MM), Y axis = battery %. One line per **radio serial number** within each loaded log. `Unknown` serial records shown as scatter triangles (▲) with no connecting line. Radio swaps detected and surfaced in a `DataNote` with LIFO assumption caveat. See `docs/parsing-requirements.md`.
-- **Minimum Battery Recorded** — bar chart; lowest % reached per device. Falls back to `min_battery_unfiltered` when time window excludes all health samples.
+- **Battery Level Over Time** — line chart; X axis = real wall-clock time (UTC HH:MM), Y axis = battery %. **ATAK** logs render one line per **radio serial number**, with `Unknown`-serial records shown as scatter triangles (▲, reconnecting BLE poll) and no connecting line; radio swaps are detected and surfaced in a `DataNote` with the LIFO assumption caveat. **diagnostic/rsdk** logs have no serial field, so each device renders as a single connected line. See `docs/parsing-requirements.md`.
+- **Minimum Battery Recorded** — bar chart; lowest % reached per device. Falls back to the API's `min_battery_unfiltered` (ATAK summary, full-session minimum) when a time window excludes all health samples.
 - **Critical threshold:** Battery < 10% shows `🔴 ⚠ CRITICAL` in the Health Score.
 
 ### 7. Hop Count (`hops`)

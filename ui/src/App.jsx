@@ -616,6 +616,7 @@ function PliTab({ results }) {
 
         </>
       )}
+      <PliSettingsSection results={results} />
     </div>
   )
 }
@@ -696,7 +697,6 @@ function GripOutcomeBar({ transfers }) {
           <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginTop: 3 }}>Had retransmits</div>
         </div>
       )}
-      <PliSettingsSection results={results} />
     </div>
   )
 }
@@ -2267,9 +2267,9 @@ export default function App() {
         peak_temp_c:                  peakC,
         peak_temp_f:                  cToF(peakC),
         min_battery_pct:              atakHlth.map(h=>h.battery_pct).filter(v=>v!=null&&v>=0).reduce((a,b)=>Math.min(a,b), null) ?? null,
-        min_battery_unfiltered:       (r.atak_health_samples||[]).map(h=>h.battery_pct).filter(v=>v!=null&&v>=0).reduce((a,b)=>Math.min(a,b), Infinity) < Infinity
-          ? (r.atak_health_samples||[]).map(h=>h.battery_pct).filter(v=>v!=null&&v>=0).reduce((a,b)=>Math.min(a,b), Infinity)
-          : null,
+        // Full-session minimum from the API — carried over unchanged so the
+        // BatteryMin fallback survives even when the window excludes all samples
+        min_battery_unfiltered:       r.summary?.min_battery_unfiltered ?? null,
         partially_received:           atakMsg.filter(m => m.delivery_status === 'PARTIALLY_RECEIVED').length,
         negative_delivery_time_count: atakMsg.filter(m => m.delivery_time_ms != null && m.delivery_time_ms < 0).length,
         // static — unchanged

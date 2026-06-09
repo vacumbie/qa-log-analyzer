@@ -223,7 +223,8 @@ function BatteryOverTime({ results }) {
   let paletteIdx = 0
   results.forEach(r => {
     const callsign = r.device?.callsign || shortLabel(r)
-    const src = r.log_format === 'atak' ? (r.atak_health_samples || []) : (r.system_samples || [])
+    const isAtak = r.log_format === 'atak'
+    const src = isAtak ? (r.atak_health_samples || []) : (r.system_samples || [])
 
     // Group samples by serial number
     const bySerial = {}
@@ -234,7 +235,6 @@ function BatteryOverTime({ results }) {
       bySerial[serial].push({ ms: toMs(s.timestamp), val: s.battery_pct })
     })
 
-    // Non-ATAK formats have no serial — use single dataset per result
     const serials = Object.keys(bySerial)
     if (!serials.length) return
 
@@ -242,10 +242,12 @@ function BatteryOverTime({ results }) {
     serials.sort().forEach(serial => {
       const samples = bySerial[serial].filter(s => !isNaN(s.ms)).sort((a, b) => a.ms - b.ms)
       const color = PALETTE[paletteIdx % PALETTE.length]
-      // Dashed line for Unknown serial — indicates reconnecting radio
-      const isUnknown = serial === 'Unknown'
-      const labelText = serials.length > 1 || results.length > 1
-        ? `${callsign} · ${isUnknown ? 'Unknown (reconnecting)' : serial}`
+      // Only ATAK distinguishes radios by serial. diagnostic/rsdk have no serial
+      // field at all, so their single 'Unknown' bucket is the device's real
+      // battery line — render it connected, not as reconnecting-scatter.
+      const reconnecting = isAtak && serial === 'Unknown'
+      const labelText = isAtak && (serials.length > 1 || results.length > 1)
+        ? `${callsign} · ${serial === 'Unknown' ? 'Unknown (reconnecting)' : serial}`
         : callsign
 
       const data = labels.map((_, idx) => {
@@ -261,10 +263,10 @@ function BatteryOverTime({ results }) {
         return v
       })
 
-      // Unknown serial: same hue as device but dimmer + longer dash gap
-      const lineColor = isUnknown ? color + '70' : color  // 44% opacity for Unknown
-      datasets.push(isUnknown ? {
-        // Unknown serial: scatter dots only — no line, no connections
+      // Reconnecting (ATAK Unknown serial): same hue as device but dimmer
+      const lineColor = reconnecting ? color + '70' : color  // 44% opacity
+      datasets.push(reconnecting ? {
+        // ATAK reconnecting radio: scatter dots only — no line, no connections
         label: labelText,
         data,
         type: 'scatter',
