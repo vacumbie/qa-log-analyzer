@@ -383,7 +383,7 @@ function PliSettingsSection({ results }) {
                   <div style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700, color }}>
                     {fmtInterval(iv.interval, iv.isDistance)}
                     {iv.isDistance && <span style={{ fontSize: 8, color: C.yellow, marginLeft: 4 }}>distance</span>}
-                    {!iv.isDistance && iv.interval < 60 && <span style={{ fontSize: 8, color: C.red, marginLeft: 4 }}>⚠ accelerated</span>}
+                    {!iv.isDistance && iv.interval != null && iv.interval < 60 && <span style={{ fontSize: 8, color: C.red, marginLeft: 4 }}>⚠ accelerated</span>}
                   </div>
                 </div>
                 <div>
@@ -412,7 +412,7 @@ function PliSettingsSection({ results }) {
                         <span style={{ fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700, color: cc }}>
                           {fmtInterval(c.interval, c.isDistance)}
                           {c.isDistance && <span style={{ fontSize: 8, color: C.yellow, marginLeft: 3 }}>dist</span>}
-                          {!c.isDistance && c.interval < 60 && <span style={{ fontSize: 8, color: C.red, marginLeft: 3 }}>⚠</span>}
+                          {!c.isDistance && c.interval != null && c.interval < 60 && <span style={{ fontSize: 8, color: C.red, marginLeft: 3 }}>⚠</span>}
                         </span>
                         <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: c.autoSend ? C.green : C.muted }}>
                           auto={c.autoSend ? 'on' : 'off'}

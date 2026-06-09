@@ -266,10 +266,11 @@ function BatteryOverTime({ results }) {
       // Reconnecting (ATAK Unknown serial): same hue as device but dimmer
       const lineColor = reconnecting ? color + '70' : color  // 44% opacity
       datasets.push(reconnecting ? {
-        // ATAK reconnecting radio: scatter dots only — no line, no connections
+        // ATAK reconnecting radio: dots only — no line, no connections.
+        // showLine:false on the default line dataset gives points-only without
+        // needing a separate ScatterController registered (keeps the stack lean).
         label: labelText,
         data,
-        type: 'scatter',
         borderColor: lineColor,
         backgroundColor: lineColor,
         pointRadius: 4,
