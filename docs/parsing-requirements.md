@@ -1228,3 +1228,70 @@ callsign fronthauling throughout the 2026-06-04 field session.
 > (09:32–09:46 and 09:48–09:59 MNT, 150 and 122 segments) were likely a
 > tester warming up before the official session — not a parser issue requiring
 > detection. No warning heuristic is warranted.
+
+---
+
+## deviceDisconnected — Serial Number Omission and Attribution Assumption
+
+### Observation (2026-06-04 FUJIN log)
+
+The `deviceDisconnected` event in ATAK plugin diagnostic logs does **not**
+include the serial number of the radio that disconnected. The `serialNumber`
+field in the event payload is always empty on disconnect events.
+
+**Example from FUJIN log:**
+```
+18:28:34 UTC  deviceDisconnected  serialNumber=""   connectionType="BLE"
+18:48:48 UTC  deviceConnected     serialNumber="PNE234200715"  connectionType="BLE"
+```
+
+This means the log alone cannot definitively confirm which radio disconnected
+at any given moment. Multiple `deviceConnected` records for different serials
+without intervening named disconnects could indicate either:
+- Sequential radio swaps (one disconnects, another connects), or
+- Simultaneous multi-radio connections (a genuine bug)
+
+### Assumption — LIFO Attribution
+
+**When a `deviceDisconnected` event fires, it is attributed to the most
+recently connected serial (last in, first out).**
+
+Under this assumption, the FUJIN 2026-06-04 session shows sequential radio
+swaps — one radio at a time — rather than simultaneous connections:
+
+```
+12:28:56  deviceConnected   PNE232700054  → active: [PNE232700054]
+18:48:34  deviceDisconnected (no serial)  → assume PNE232700054 disconnected
+18:48:48  deviceConnected   PNE234200715  → active: [PNE234200715]
+18:49:19  deviceDisconnected (no serial)  → assume PNE234200715 disconnected
+18:49:48  deviceConnected   PNE241500432  → active: [PNE241500432]
+```
+
+This is consistent with expected field behavior — one goTenna radio connected
+to the ATAK app at a time, swapped between transfers.
+
+### Documentation Requirements
+
+1. **`deviceDisconnected` serial omission is a known log format limitation.**
+   It must be documented in `log-field-definitions.md` under the event field
+   definitions. The parser must not attempt to attribute a serial number to
+   disconnect events — they should be recorded as anonymous disconnects.
+
+2. **The LIFO attribution assumption must be noted wherever multi-serial
+   analysis is presented** — battery chart DataNote, health score, and any
+   future cross-log correlation that relies on connection state.
+
+3. **This assumption has not been validated with the dev team.** If the
+   `deviceDisconnected` event is supposed to carry a serial number and its
+   absence is a logging bug, the assumption is unnecessary. If serial omission
+   is intentional by design, the assumption is the correct interpretation.
+
+**Status:** ⏳ Pending dev team confirmation of whether `deviceDisconnected`
+serial omission is intentional or a logging bug.
+
+### Impact on Battery Chart
+
+The battery % over time chart shows one line per serial number. Under the
+LIFO assumption, each line segment represents one connected radio during its
+active window — not simultaneous connections. The DataNote on the chart
+reflects this assumption explicitly.

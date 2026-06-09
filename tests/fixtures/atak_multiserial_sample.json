@@ -1,0 +1,10 @@
+[
+{"appVersion": "2.3.0 (be06682e) - [5.2.0]", "atakVersion": "5.2.0.14", "buildNumber": "be06682e", "launchTimeInMillis": 1780500000000, "deviceInfo": {"deviceModel": "Samsung SM-S711U1", "androidApi": 33, "platformType": "ANDROID", "uuid": "ANDROID-abc123def456"}},
+{"timestampInMillis": 1780500001000, "serialNumber": "PNE234100406", "firmwareVersion": "3.2.10", "gid": 90215634664458, "connectionState": "CONNECTED", "batteryLevel": 80, "powerAmpTemperature": 35.0, "systemTemperature": 30.0, "transmitPowerDifferential": 3, "storedMessages": 0, "endorsements": "PREMIUM"},
+{"timestampInMillis": 1780500001500, "event": {"type": "deviceConnected", "connectionType": "BLE", "serialNumber": "PNE234100406"}},
+{"timestampInMillis": 1780500005000, "serialNumber": "PNE234100406", "firmwareVersion": "3.2.10", "gid": 90215634664458, "connectionState": "CONNECTED", "batteryLevel": 72, "powerAmpTemperature": 36.0, "systemTemperature": 31.0, "transmitPowerDifferential": 3, "storedMessages": 0, "endorsements": "PREMIUM"},
+{"timestampInMillis": 1780500009000, "event": {"type": "deviceDisconnected", "connectionType": "BLE", "serialNumber": "PNE234100406"}},
+{"timestampInMillis": 1780500012000, "serialNumber": "PNE234299999", "firmwareVersion": "3.2.10", "gid": 90215634664458, "connectionState": "CONNECTED", "batteryLevel": 96, "powerAmpTemperature": 33.0, "systemTemperature": 29.0, "transmitPowerDifferential": 3, "storedMessages": 0, "endorsements": "PREMIUM"},
+{"timestampInMillis": 1780500012500, "event": {"type": "deviceConnected", "connectionType": "BLE", "serialNumber": "PNE234299999"}},
+{"timestampInMillis": 1780500016000, "serialNumber": "PNE234299999", "firmwareVersion": "3.2.10", "gid": 90215634664458, "connectionState": "CONNECTED", "batteryLevel": 90, "powerAmpTemperature": 34.0, "systemTemperature": 30.0, "transmitPowerDifferential": 3, "storedMessages": 0, "endorsements": "PREMIUM"}
+]

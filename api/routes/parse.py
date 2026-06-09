@@ -436,6 +436,11 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             "peak_temp_c":        max((s.pa_temp_c for s in r.system_samples if s.pa_temp_c), default=None),
             "peak_temp_f":        round(max((s.pa_temp_c for s in r.system_samples if s.pa_temp_c), default=0) * 9 / 5 + 32) if any(s.pa_temp_c for s in r.system_samples) else None,
             "min_battery_pct":    min((h.battery_pct for h in r.atak_health_samples if h.battery_pct is not None), default=None),
+            # Full-session minimum, never narrowed by the UI time window. The
+            # BatteryMin chart falls back to this when a window excludes all
+            # health samples (min_battery_pct → null). Equal to min_battery_pct
+            # here; the UI's windowed recompute carries this value over unchanged.
+            "min_battery_unfiltered": min((h.battery_pct for h in r.atak_health_samples if h.battery_pct is not None), default=None),
             "session_count":      len(r.atak_app_launches),
             "partially_received": sum(1 for m in r.atak_messages if m.delivery_status == "PARTIALLY_RECEIVED"),
             "negative_delivery_time_count": sum(1 for m in r.atak_messages if m.delivery_time_ms is not None and m.delivery_time_ms < 0),

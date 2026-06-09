@@ -25,6 +25,12 @@ ENHANCED = FIXTURE_DIR / "atak_enhanced_sample.json"
 # disconnect count — the fallback fires only when no SDK 2.0 records exist.
 SDK_NO_BLE = FIXTURE_DIR / "atak_sdk_no_ble_sample.json"
 
+# Synthetic radio-swap fixture: one device session whose health samples carry
+# two distinct serial numbers (a mid-session radio swap). Pins the per-serial
+# data contract the Battery chart depends on — it groups battery_pct by
+# serial_number and detects swaps from the distinct serials.
+MULTISERIAL = FIXTURE_DIR / "atak_multiserial_sample.json"
+
 # Named ATAK log fixture for filename parsing tests
 NAMED_FIXTURE = FIXTURE_DIR / "diagnostic_ATAK_HOTEL_90215634664458_2026-03-04_16_42_04_775.log"
 
@@ -475,3 +481,37 @@ def test_object_type_on_map_object():
     pins = [m for m in result.atak_messages if m.message_object_type == "PIN"]
     assert len(pins) == 1
     assert pins[0].is_map_object
+
+
+# ── Multi-serial / radio swap — Battery chart per-serial data contract ────────
+# The Battery chart groups battery_pct by serial_number and detects radio swaps
+# from distinct serials. The swap logic itself is JSX (no JS test harness here),
+# so these tests pin the parser/serialization contract it relies on.
+
+def test_multiserial_fixture_exists():
+    assert MULTISERIAL.exists(), f"Fixture missing: {MULTISERIAL}"
+
+
+def test_two_distinct_serials_in_health_samples():
+    result = parse_atak_log(MULTISERIAL)
+    serials = {h.serial_number for h in result.atak_health_samples if h.serial_number}
+    assert serials == {"PNE234100406", "PNE234299999"}
+
+
+def test_battery_pct_retained_per_serial():
+    """Each serial keeps its own battery readings — the chart draws one line each."""
+    result = parse_atak_log(MULTISERIAL)
+    by_serial = {}
+    for h in result.atak_health_samples:
+        if h.serial_number and h.battery_pct is not None:
+            by_serial.setdefault(h.serial_number, []).append(h.battery_pct)
+    assert by_serial["PNE234100406"] == [80, 72]
+    assert by_serial["PNE234299999"] == [96, 90]
+
+
+def test_serial_number_serialized_per_sample():
+    """_result_to_dict() must preserve serial_number on each health sample so the
+    UI can group battery lines by radio."""
+    samples = _result_to_dict(parse_atak_log(MULTISERIAL))["atak_health_samples"]
+    serials = {s["serial_number"] for s in samples if s.get("serial_number")}
+    assert serials == {"PNE234100406", "PNE234299999"}

@@ -167,27 +167,190 @@ function TempPeak({ results }) {
 }
 
 function BatteryOverTime({ results }) {
-  const { labels, getDataset } = buildRelativeTimeSeries(results, 'system_samples', 15)
+  // X axis = real wall-clock time (HH:MM UTC), Y axis = battery %
+  // Each device's actual sample timestamps are used directly rather than
+  // normalizing to 0-100% session, so the chart shows real time of day.
+  // Multi-device sessions with different start times are shown on a shared
+  // absolute time axis — gaps appear where a device has no data.
 
-  // Clamp values to 0-100; track any outliers for flagging
-  const outliers = []
-  const datasets = results.map((r, i) => {
-    const raw = getDataset(r, 'battery_pct')
-    raw.forEach((v, idx) => {
-      if (v != null && (v < 0 || v > 100)) outliers.push(`${shortLabel(r)}: ${v}% at ${labels[idx]}`)
+  const toMs = ts => {
+    if (!ts) return NaN
+    const s = ts.includes('T') ? ts : ts.replace(' ', 'T')
+    const ms = new Date(s.endsWith('Z') ? s : s + 'Z').getTime()
+    return isNaN(ms) ? new Date(ts).getTime() : ms
+  }
+
+  const fmtTime = ms => {
+    if (!ms || isNaN(ms)) return ''
+    const d = new Date(ms)
+    return d.toISOString().slice(11, 16) + ' UTC'
+  }
+
+  // Collect all sample points across all results with real timestamps
+  const allPoints = []
+  results.forEach(r => {
+    const src = r.log_format === 'atak' ? (r.atak_health_samples || []) : (r.system_samples || [])
+    src.forEach(s => {
+      if (s.timestamp && s.battery_pct != null && s.battery_pct >= 0) {
+        const ms = toMs(s.timestamp)
+        if (!isNaN(ms)) allPoints.push(ms)
+      }
     })
-    return {
-      label: shortLabel(r),
-      data: raw.map(v => v == null ? null : Math.min(100, Math.max(0, v))),
-      borderColor: PALETTE[i % PALETTE.length], backgroundColor: 'transparent',
-      borderWidth: 2, pointRadius: 3, pointBackgroundColor: PALETTE[i % PALETTE.length],
-      tension: 0.4, spanGaps: true,
-    }
+  })
+
+  if (!allPoints.length) {
+    return (
+      <ChartCard title="Battery % Over Time" subtitle="X axis = real time (UTC) · Y axis = battery %" height={300}>
+        <NoData />
+      </ChartCard>
+    )
+  }
+
+  // Build shared time axis across all devices — 20 evenly spaced ticks
+  const globalMin = Math.min(...allPoints)
+  const globalMax = Math.max(...allPoints)
+  const span = Math.max(1, globalMax - globalMin)
+  const NUM_TICKS = 40  // ~13.6 min buckets at 543 min session; reveals radio disconnect gaps
+  const labels = Array.from({ length: NUM_TICKS }, (_, i) =>
+    fmtTime(globalMin + (i / (NUM_TICKS - 1)) * span)
+  )
+
+  const outliers = []
+  // One dataset per unique serial number within each result (Option B label: callsign · serial)
+  // This shows radio swaps and BLE reconnections as separate lines rather than
+  // a false recovery curve on a single line.
+  const datasets = []
+  let paletteIdx = 0
+  results.forEach(r => {
+    const callsign = r.device?.callsign || shortLabel(r)
+    const isAtak = r.log_format === 'atak'
+    const src = isAtak ? (r.atak_health_samples || []) : (r.system_samples || [])
+
+    // Group samples by serial number
+    const bySerial = {}
+    src.forEach(s => {
+      if (!s.timestamp || s.battery_pct == null) return
+      const serial = s.serial_number || 'Unknown'
+      if (!bySerial[serial]) bySerial[serial] = []
+      bySerial[serial].push({ ms: toMs(s.timestamp), val: s.battery_pct })
+    })
+
+    const serials = Object.keys(bySerial)
+    if (!serials.length) return
+
+    const bucketSpan = span / (NUM_TICKS - 1)
+    serials.sort().forEach(serial => {
+      const samples = bySerial[serial].filter(s => !isNaN(s.ms)).sort((a, b) => a.ms - b.ms)
+      const color = PALETTE[paletteIdx % PALETTE.length]
+      // Only ATAK distinguishes radios by serial. diagnostic/rsdk have no serial
+      // field at all, so their single 'Unknown' bucket is the device's real
+      // battery line — render it connected, not as reconnecting-scatter.
+      const reconnecting = isAtak && serial === 'Unknown'
+      const labelText = isAtak && (serials.length > 1 || results.length > 1)
+        ? `${callsign} · ${serial === 'Unknown' ? 'Unknown (reconnecting)' : serial}`
+        : callsign
+
+      const data = labels.map((_, idx) => {
+        const targetMs = globalMin + (idx / (NUM_TICKS - 1)) * span
+        let closest = null, minDist = Infinity
+        for (const s of samples) {
+          const dist = Math.abs(s.ms - targetMs)
+          if (dist < minDist) { minDist = dist; closest = s }
+        }
+        if (!closest || minDist > bucketSpan * 1) return NaN  // NaN = visible gap in Chart.js 4
+        const v = Math.min(100, Math.max(0, closest.val))
+        if (closest.val < 0 || closest.val > 100) outliers.push(`${labelText}: ${closest.val}% at ${labels[idx]}`)
+        return v
+      })
+
+      // Reconnecting (ATAK Unknown serial): same hue as device but dimmer
+      const lineColor = reconnecting ? color + '70' : color  // 44% opacity
+      datasets.push(reconnecting ? {
+        // ATAK reconnecting radio: dots only — no line, no connections.
+        // showLine:false on the default line dataset gives points-only without
+        // needing a separate ScatterController registered (keeps the stack lean).
+        label: labelText,
+        data,
+        borderColor: lineColor,
+        backgroundColor: lineColor,
+        pointRadius: 4,
+        pointStyle: 'triangle',
+        showLine: false,
+      } : {
+        label: labelText,
+        data,
+        borderColor: lineColor,
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        pointRadius: 3,
+        pointBackgroundColor: lineColor,
+        tension: 0,
+        spanGaps: false,
+      })
+      paletteIdx++
+    })
+  })
+
+  const opts = {
+    ...LINE_OPTS(),
+    scales: {
+      x: {
+        grid: { color: GRID },
+        ticks: { ...TICK, maxTicksLimit: 10, maxRotation: 45 },
+        title: { display: true, text: 'Time (UTC)', color: '#2a3a52', font: { size: 9 } },
+      },
+      y: {
+        min: 0, max: 100,
+        grid: { color: GRID },
+        ticks: TICK,
+        title: { display: true, text: 'Battery %', color: '#2a3a52', font: { size: 9 } },
+      },
+    },
+  }
+
+  // ── Radio swap detection — DataNote only, no chart markers ────────────
+  const swapEvents = []
+  results.forEach(r => {
+    const callsign = r.device?.callsign || shortLabel(r)
+    const src2 = r.log_format === 'atak' ? (r.atak_health_samples || []) : (r.system_samples || [])
+    const bySerial2 = {}
+    src2.forEach(s => {
+      if (!s.timestamp || s.battery_pct == null) return
+      const serial = s.serial_number || 'Unknown'
+      const ms = toMs(s.timestamp)
+      if (!bySerial2[serial] || ms < bySerial2[serial]) bySerial2[serial] = ms
+    })
+    const serials2 = Object.keys(bySerial2).filter(s => s !== 'Unknown')
+    if (serials2.length <= 1) return
+    const primaryMs = Math.min(...serials2.map(s => bySerial2[s]))
+    serials2.forEach(serial => {
+      if (bySerial2[serial] === primaryMs) return
+      swapEvents.push({ ms: bySerial2[serial], serial, callsign })
+    })
+  })
+  swapEvents.sort((a, b) => a.ms - b.ms)
+  const swapNote = swapEvents.length > 0
+    ? `Radio swap${swapEvents.length > 1 ? 's' : ''} detected: `
+      + swapEvents.map(ev => `${fmtTime(ev.ms)} → ${ev.serial}`).join(' · ')
+      + '. Each line = one radio serial. '
+      + 'Multiple serials appearing at the same time point reflect bucket sampling (~14 min window) — '
+      + 'radio swaps within that window overlap on the chart. '
+      + 'Note: deviceDisconnected events do not include serial numbers — '
+      + 'disconnect attribution uses LIFO assumption (most recent connection disconnects first). '
+      + 'Simultaneous multi-radio connection cannot be ruled out from log data alone.'
+    : null
+  const hasMultiSerial = results.some(r => {
+    const src3 = r.log_format === 'atak' ? (r.atak_health_samples || []) : (r.system_samples || [])
+    return new Set(src3.map(s => s.serial_number).filter(Boolean)).size > 1
   })
 
   return (
-    <ChartCard title="Battery % Over Time" subtitle="Percentage recorded periodically · red line = 30% low threshold" height={300}>
-      <Line data={{ labels, datasets }} options={{ ...LINE_OPTS(), scales: makeScales(0, 100, '%') }} />
+    <ChartCard title="Battery % Over Time" subtitle="X axis = real time (UTC) · Y axis = battery % · one line per radio serial · ▲ = Unknown/reconnecting BLE poll" height={320}>
+      <Line data={{ labels, datasets }} options={opts} />
+      {swapNote && <DataNote text={swapNote} />}
+      {hasMultiSerial && !swapNote && (
+        <DataNote text="Multiple radio serials detected. Each line represents one radio — lines do not indicate simultaneous connections." />
+      )}
       {outliers.length > 0 && <DataNote text={`Out-of-range readings clamped to 0–100%: ${outliers.join(', ')}`} />}
     </ChartCard>
   )
@@ -195,7 +358,13 @@ function BatteryOverTime({ results }) {
 
 function BatteryMin({ results }) {
   const labels = results.map(r => shortLabel(r))
-  const data   = results.map(r => r.summary?.min_battery_pct ?? null)
+  // Use windowed summary value; fall back to original summary if windowing
+  // produced null (e.g. time window doesn't cover health sample period)
+  const data   = results.map(r =>
+    r.summary?.min_battery_pct          // windowed value
+    ?? r.summary?.min_battery_unfiltered // full-session fallback (ATAK)
+    ?? null
+  )
   return (
     <ChartCard title="Minimum Battery Recorded per Device" height={200}>
       <Bar
