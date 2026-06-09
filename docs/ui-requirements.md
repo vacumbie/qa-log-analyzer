@@ -115,7 +115,7 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
 
   **Data sources:** `diagnostic`: `originator_pli_interval` from received messages. `atak`: gap inference from sent PLI messages. `pliSettingUpdated` events are config-only — NOT used for frequency cards.
 
-  **Gap inference filters (ATAK):** ±25% tolerance, 1-min minimum duration, buckets 15/30/60/120/180/300/600s. Distance-based PLI excluded.
+  **Gap inference filters (ATAK):** ±25% tolerance, 1-min minimum duration, buckets 15/30/60/120/180/300/600s. Inference works purely on send-time gaps and does not inspect `pli_is_distance`, so distance-based ATAK sends are still time-bucketed. (Distance-based intervals are only filtered out of the `diagnostic` display, where the raw `originator_pli_interval` string contains "meters".)
 
 - **PLI Settings per Device (ATAK only)** — below frequency cards. Session-start interval, auto-send, first-seen timestamp, mid-session changes. Source: `pliSettingUpdated` events only.
 

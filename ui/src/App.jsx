@@ -306,15 +306,6 @@ function pliColor(sec) {
   return C.green
 }
 
-function pliLabel(sec) {
-  if (sec === null) return 'UNKNOWN'
-  if (sec <= 5)   return 'VERY HIGH'
-  if (sec <= 15)  return 'CRITICAL'
-  if (sec <= 30)  return 'HIGH'
-  if (sec <= 180) return 'ELEVATED'
-  return 'STANDARD'
-}
-
 function dominantInterval(intervalCounts) {
   // Most-frequently-occurring non-N/A interval by message count
   const real = Object.entries(intervalCounts).filter(([k]) => k !== 'N/A')
@@ -322,10 +313,6 @@ function dominantInterval(intervalCounts) {
   return real.sort((a, b) => b[1] - a[1])[0][0]
 }
 
-// Compute minutes spent at each interval using consecutive-gap method.
-// N/A entries (radio temporarily disconnected) are skipped — when the same
-// interval appears on both sides of an N/A gap, the gap is bridged and counted
-// if it fits within 3× the interval (otherwise the node was silent too long).
 // ── PLI Settings Summary (ATAK) ───────────────────────────────────────────────
 
 function PliSettingsSection({ results }) {
@@ -461,29 +448,25 @@ function PliTab({ results }) {
           callsign: m.originator_callsign,
           gid,
           intervalCounts: {},
-          intervalHistory: [],
         }
         const iv = m.originator_pli_interval
-        const ts = m.receiver_timestamp || m.originator_timestamp || m.timestamp
-        if (iv && ts) {
-          nodeMap[gid].intervalCounts[iv] = (nodeMap[gid].intervalCounts[iv] || 0) + 1
-          nodeMap[gid].intervalHistory.push({ ts, interval: iv })
-        }
+        if (iv) nodeMap[gid].intervalCounts[iv] = (nodeMap[gid].intervalCounts[iv] || 0) + 1
       })
       // ATAK format — infer interval from actual sent PLI message gaps
       // pliSettingUpdated is a config event, not a network transmission —
       // it belongs in PliSettingsSection only, not in message traffic analysis
       if (r.log_format === 'atak') {
-        // Extract callsign from filename: everything between 'diagnostic_' and the GID
+        // Extract callsign from filename: drop the 'diagnostic_' and optional
+        // 'ATAK_' prefixes, then everything from the GID onward
         const fnCallsign = r.source_filename
-          ? r.source_filename.replace(/^diagnostic_/, '').replace(/_?\d{10,}_.*$/, '').replace(/_/g, ' ').trim()
+          ? r.source_filename.replace(/^diagnostic_/, '').replace(/^ATAK_/, '').replace(/_?\d{10,}_.*$/, '').replace(/_/g, ' ').trim()
           : ''
         const callsign = r.device?.callsign || fnCallsign || r.source_filename
         const gid = r.device?.gid || callsign
         // Use gid+filename as key — two logs can share a GID (same account)
         // CL_B and gt_Sassy_B_Net share GID 90194071247761 in 2026-06-04 session
         const nodeKey = `${gid}|${r.source_filename || callsign}`
-        if (!nodeMap[nodeKey]) nodeMap[nodeKey] = { callsign, gid, intervalCounts: {}, intervalHistory: [] }
+        if (!nodeMap[nodeKey]) nodeMap[nodeKey] = { callsign, gid, intervalCounts: {} }
         const sentPli = (r.atak_messages || [])
           .filter(m => m.message_type === 'pli' && m.is_sender && m.timestamp)
           .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
@@ -499,13 +482,12 @@ function PliTab({ results }) {
             const common = [15,30,60,120,180,300,600]
             // Bucket each gap with ±25% tolerance — gaps outside tolerance are noise, discarded
             // Then filter intervals with < 1 min estimated duration (count × interval < 60s)
-            gaps.forEach((sec, gi) => {
+            gaps.forEach(sec => {
               const nearest = common.reduce((a,b)=>Math.abs(b-sec)<Math.abs(a-sec)?b:a)
               // Only assign if gap is within ±25% of the nearest bucket
               if (Math.abs(sec - nearest) / nearest <= 0.25) {
                 const iv = `${nearest} seconds`
                 nodeMap[nodeKey].intervalCounts[iv] = (nodeMap[nodeKey].intervalCounts[iv] || 0) + 1
-                if (gi === 0) nodeMap[nodeKey].intervalHistory.push({ ts: sentPli[0].timestamp, interval: iv })
               }
             })
             // Remove intervals with < 1 min estimated duration (noise filter)
@@ -554,13 +536,9 @@ function PliTab({ results }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 6 }}>
             {pliNodes.map((node, i) => {
               const realIntervals = Object.keys(node.intervalCounts).filter(iv => iv !== 'N/A')
-              const dominant = dominantInterval(node.intervalCounts)
-              const domSec   = parsePliSeconds(dominant)
+              // Card left-border color is keyed to the dominant (most-counted) interval
+              const domSec   = parsePliSeconds(dominantInterval(node.intervalCounts))
               const color    = pliColor(domSec)
-              const label    = pliLabel(domSec)
-              const otherIntervals = realIntervals
-                .filter(iv => iv !== dominant)
-                .sort((a, b) => (parsePliSeconds(a) || 999) - (parsePliSeconds(b) || 999))
               const hasChanges = realIntervals.length > 1
 
               // Duration: count × interval_sec → h/m
