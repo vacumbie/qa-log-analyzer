@@ -454,6 +454,22 @@ The battery chart `DataNote` explains radio swaps, LIFO assumption, and bucket s
 
 **Status:** ⏳ Pending dev team confirmation.
 
+### Minimum Battery — single-sample reduce returns 0 instead of the real value ⏳ Pending
+
+In the windowed-recompute block in `App.jsx`, `min_battery_pct` for the ATAK
+branch is computed as `atakHlth.map(h => h.battery_pct).filter(...).reduce((a, b) => Math.min(a, b), null)`.
+The `null` initializer is wrong: when the windowed set has exactly **one** sample,
+`Math.min(null, v)` coerces `null` to `0` and returns `0`, so the Minimum Battery
+bar shows `0%` for a device that never dropped below, say, 80%. The trailing
+`?? null` only rescues the empty-array case. Pre-existing on `main` — not introduced
+by the PLI/battery overhaul — surfaced during that PR's peer review.
+
+**Fix:** guard on length and spread instead of seeding the reduce with `null`,
+e.g. `vals.length ? Math.min(...vals) : null` (the non-ATAK branch already does this).
+
+**Status:** ⏳ Pending — not started. Affects the `filteredResults` recompute in
+`ui/src/App.jsx`.
+
 ---
 
 ### Time-Window Step — disabled state for unparseable timestamps
