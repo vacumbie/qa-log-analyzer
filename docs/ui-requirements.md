@@ -108,7 +108,16 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
 - **Network Participants** — grid of all unique originators; shows callsign, GID, PLI rate
 
 ### 2. PLI Frequency (`pli`)
-- **Originator PLI — All Network Nodes** — one card per originator node; shows dominant PLI rate (by message count), interval label, STABLE / ⚠ CHANGES badge, and an ALSO OBSERVED section listing every other interval seen with its message count
+
+**Tab gate:** Shown when any `diagnostic` or `atak` log is loaded.
+
+- **Originator PLI — All Network Nodes** — one card per loaded log (GID collisions handled via `gid|source_filename` key). Shows callsign, GID, `⚠ MIXED` badge for mixed-rate devices, flat list of intervals with estimated duration (`count × interval_sec` → h/m), `⚠ accelerated` label for < 60s intervals.
+
+  **Data sources:** `diagnostic`: `originator_pli_interval` from received messages. `atak`: gap inference from sent PLI messages. `pliSettingUpdated` events are config-only — NOT used for frequency cards.
+
+  **Gap inference filters (ATAK):** ±25% tolerance, 1-min minimum duration, buckets 15/30/60/120/180/300/600s. Distance-based PLI excluded.
+
+- **PLI Settings per Device (ATAK only)** — below frequency cards. Session-start interval, auto-send, first-seen timestamp, mid-session changes. Source: `pliSettingUpdated` events only.
 
 **PLI interval color thresholds (applied to dominant interval and all ALSO OBSERVED chips):**
 
@@ -156,8 +165,9 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
 - **Peak Temperature by Device** — bar chart; highlight max per device
 
 ### 6. Battery (`battery`)
-- **Battery Level Over Time** — line chart per device; %; red threshold line at 30%. X-axis uses **normalized session progress (0–100%)** — same approach as Thermal.
-- **Minimum Battery Recorded** — bar chart; lowest % reached per device
+- **Battery Level Over Time** — line chart; X axis = real wall-clock time (UTC HH:MM), Y axis = battery %. One line per **radio serial number** within each loaded log. `Unknown` serial records shown as scatter triangles (▲) with no connecting line. Radio swaps detected and surfaced in a `DataNote` with LIFO assumption caveat. See `docs/parsing-requirements.md`.
+- **Minimum Battery Recorded** — bar chart; lowest % reached per device. Falls back to `min_battery_unfiltered` when time window excludes all health samples.
+- **Critical threshold:** Battery < 10% shows `🔴 ⚠ CRITICAL` in the Health Score.
 
 ### 7. Hop Count (`hops`)
 - **Hop Count Distribution per Device** — bar/histogram per logging device; diagnostic and ATAK use `received_messages.hop_count`; RSDK uses `grip_messages` where `direction = "incoming"` and `hops` is not null — these are genuine RF hop counts from `GRIP_Receiver` structured fields lines
@@ -196,7 +206,7 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
   | Dimension | Pass condition | Rationale |
   |-----------|---------------|----------|
   | Thermal | Peak PA temp < 113°F | Hardware limit |
-  | Battery | Min battery > 30% | Operational reserve |
+  | Battery | Min battery > 30% | Operational reserve. Critical < 10% shown as `🔴 ⚠ CRITICAL`. |
   | BLE | No BLE fail events | Connectivity integrity. For ATAK logs, `ble_fail_count` comes from SDK Logging 2.0 `ERROR\|BLE` entries in `counts_by_tag`, falling back to the `deviceDisconnected` count only when no SDK 2.0 summary is present (a summary with zero `ERROR\|BLE` is a genuine 0). diagnostic/rsdk use the BLE failure-event count; `relay_manager` is excluded (see scoping below). |
   | RSSI | Avg RSSI > −95 dBm | From KOPEK field data (median −86, poor threshold −100). `avg_rssi` source by format — ATAK: received-message RSSI (`rssi_is_valid`); rsdk: GRIP incoming RSSI; diagnostic: **N/A** (no session-level RSSI aggregate — dimension excluded from the denominator, not free-passed). |
   | Queue | Peak storedMessages < 5 | Queue backup indicator — seen peaking at 30 on HOTLIPS |
@@ -275,13 +285,14 @@ FW-log-only tab (`fwOnly`) — appears in the tab bar only when a relay firmware
 - **FW Log tab — energy as RSSI proxy:** Per-channel RSSI (`RSSI[]`) is DEBUG-level and skipped, so the tab shows channel energy (`energy_summary`) instead. `rssi_summary` is serialized but always empty. Identity is the origin hash only (serial/firmware in binary RHC payload). Relative-ms timestamps mean the upload Time Window step is skipped for this format.
 - **Topology tab** — Alpha/Beta feature; see Tab 14. Accuracy is inherently limited by what the logs can surface — the hardest data point in the dashboard to get right; must be clearly labeled as experimental in the UI
 - **Multi-log upload** — supported; drag-and-drop or file picker; multiple files processed simultaneously
-- **Duplicate log detection** — files with matching `radio_serial + session_start + session_end` are deduplicated automatically; only first occurrence used. Handles named files (`RSO_HagenM.txt`) loaded alongside auto-exported equivalents (`diagnostic_2026*.txt`).
+- **Duplicate log detection** — files with matching `radio_serial + session_start + session_end` are deduplicated automatically; only first occurrence used.
+- **GID collision** — two devices can share the same GID (observed: CL_B and gt_Sassy_B_Net share `90194071247761`, 2026-06-04). PLI `nodeMap` uses `gid|source_filename` key so both get separate cards. Dev team notified.
 - **Time window filtering** — client-side; filters all time-series arrays (`received_messages`, `system_samples`, `ble_fail_events`, `tx_events`, `atak_messages`, `atak_health_samples`). Computable summary fields recomputed from filtered arrays; static fields retain parse-time values.
-- **Chart time axis** — line charts use per-device normalized session-progress axis (0–100%) rather than shared absolute time axis, ensuring sessions of very different lengths all render fully.
+- **Chart time axis** — most line charts use per-device normalized session-progress axis (0–100%). **Exception: Battery % Over Time** uses real wall-clock UTC time on the X axis.
 
 ---
 
-_Last updated: 2026-06-05_
+_Last updated: 2026-06-09_
 
 ---
 
@@ -436,6 +447,14 @@ friendly values alongside the raw identifiers.
 - Add a `DATA LIMITATION` note when a hash is not in the lookup table
 
 **Status:** ⏳ Blocked — waiting on mapping tables from QA tester.
+
+### Battery Chart — Multi-Radio False Recovery ⏳ Pending
+
+The battery chart `DataNote` explains radio swaps, LIFO assumption, and bucket sampling overlap (~14 min window). Pending dev team confirmation on `deviceDisconnected` serial omission — if confirmed as a bug, the LIFO caveat can be removed. Filed from 2026-06-04 KOPEK and FUJIN logs.
+
+**Status:** ⏳ Pending dev team confirmation.
+
+---
 
 ### Time-Window Step — disabled state for unparseable timestamps
 When the client-side scanner cannot parse timestamps from the uploaded logs, the

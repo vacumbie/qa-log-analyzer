@@ -326,120 +326,134 @@ function dominantInterval(intervalCounts) {
 // N/A entries (radio temporarily disconnected) are skipped — when the same
 // interval appears on both sides of an N/A gap, the gap is bridged and counted
 // if it fits within 3× the interval (otherwise the node was silent too long).
-function computeIntervalDurations(intervalHistory) {
-  if (!intervalHistory.length) return {}
-  const toMs = ts => new Date(ts.replace(' ', 'T') + 'Z').getTime()
-  const durations = {}
+// ── PLI Settings Summary (ATAK) ───────────────────────────────────────────────
 
-  // Strip N/A entries — work only with real interval messages
-  const real = intervalHistory.filter(e => e.interval !== 'N/A')
-  if (!real.length) return {}
+function PliSettingsSection({ results }) {
+  const atakResults = results.filter(r => r.log_format === 'atak')
+  if (!atakResults.length) return null
 
-  for (let i = 1; i < real.length; i++) {
-    const prev = real[i - 1]
-    const curr = real[i]
-    if (prev.interval !== curr.interval) continue  // interval changed — skip gap
-    const gapMs  = toMs(curr.ts) - toMs(prev.ts)
-    const secVal = parsePliSeconds(prev.interval) || 300
-    const capMs  = secVal * 3 * 1000  // bridge N/A gaps up to 3× the interval
-    const counted = Math.min(gapMs, capMs)
-    durations[prev.interval] = (durations[prev.interval] || 0) + counted / 60000
+  // Build per-device PLI setting timeline from atak_events
+  const deviceSettings = atakResults.map(r => {
+    const callsign = r.device?.callsign || r.source_filename
+    const events = (r.atak_events || [])
+      .filter(e => e.event_type === 'pliSettingUpdated')
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+
+    if (!events.length) return { callsign, initial: null, changes: [] }
+
+    const toSetting = e => ({
+      ts:         e.timestamp?.slice(11, 19) || '—',
+      interval:   e.pli_interval_sec,
+      isDistance: e.pli_is_distance,
+      autoSend:   e.pli_auto_send,
+    })
+
+    const initial = toSetting(events[0])
+    const changes = events.slice(1).map(toSetting)
+
+    return { callsign, initial, changes }
+  }).filter(d => d.initial !== null)
+
+  if (!deviceSettings.length) return null
+
+  const fmtInterval = (interval, isDistance) => {
+    if (interval == null) return '—'
+    const unit = isDistance ? 'm' : 's'
+    return `${interval}${unit}`
   }
 
-  // Credit at least one interval period per node seen (floor for single-message nodes)
-  for (const { interval } of real) {
-    const floor = (parsePliSeconds(interval) || 300) / 60
-    if (!durations[interval]) durations[interval] = floor
+  const intervalColor = (interval, isDistance) => {
+    if (isDistance) return C.yellow  // distance-based — can't compare directly to time threshold
+    if (interval == null) return C.muted
+    if (interval < 60) return C.red    // accelerated — highlight per requirement
+    if (interval <= 180) return C.yellow
+    return C.green
   }
-  return durations
-}
-
-function PliDurationChart({ pliNodes }) {
-  // Only show nodes that have at least one real interval with computed duration
-  const chartNodes = pliNodes.filter(n => Object.keys(n.durations).length > 0)
-  if (!chartNodes.length) return null
-
-  // All interval keys seen, sorted by seconds ascending
-  const allIntervals = [...new Set(chartNodes.flatMap(n => Object.keys(n.durations)))]
-    .filter(iv => iv !== 'N/A')
-    .sort((a, b) => (parsePliSeconds(a) || 999) - (parsePliSeconds(b) || 999))
-
-  // Bar width per node
-  const barH = 22
-  const labelW = 110
-  const maxMins = Math.max(...chartNodes.flatMap(n => {
-    const total = Object.values(n.durations).reduce((a, b) => a + b, 0)
-    return [total]
-  }), 1)
 
   return (
-    <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '16px 18px', marginTop: 16 }}>
-      <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 14, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#c8ddf4', marginBottom: 4 }}>
-        Estimated Time per PLI Interval
-      </div>
-      <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginBottom: 14 }}>
-        Minutes observed at each interval · computed from consecutive message gaps · capped at 2× interval to exclude silence
-      </div>
-
-      {/* Legend */}
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-        {allIntervals.map(iv => {
-          const sec = parsePliSeconds(iv)
-          const color = pliColor(sec)
+    <>
+      <SectionHeader
+        icon="📡"
+        title="PLI Settings per Device"
+        sub="Session-start setting and mid-session changes · intervals < 60s highlighted red"
+      />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 10, marginBottom: 16 }}>
+        {deviceSettings.map((d, i) => {
+          const iv = d.initial
+          const color = intervalColor(iv.interval, iv.isDistance)
+          const hasChanges = d.changes.length > 0
           return (
-            <div key={iv} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <div style={{ width: 10, height: 10, borderRadius: 2, background: color, opacity: 0.85 }} />
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color }}>{iv.replace(' seconds', 's')}</span>
+            <div key={i} style={{ background: 'var(--panel)', border: `1px solid var(--border)`, borderLeft: `3px solid ${color}`, borderRadius: 6, padding: '12px 14px' }}>
+              {/* Device name */}
+              <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 13, color: PALETTE[i % PALETTE.length], marginBottom: 8 }}>
+                {d.callsign}
+              </div>
+
+              {/* Session-start setting */}
+              <div style={{ display: 'flex', gap: 12, marginBottom: hasChanges ? 8 : 0, flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginBottom: 2 }}>INTERVAL</div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700, color }}>
+                    {fmtInterval(iv.interval, iv.isDistance)}
+                    {iv.isDistance && <span style={{ fontSize: 8, color: C.yellow, marginLeft: 4 }}>distance</span>}
+                    {!iv.isDistance && iv.interval < 60 && <span style={{ fontSize: 8, color: C.red, marginLeft: 4 }}>⚠ accelerated</span>}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginBottom: 2 }}>AUTO SEND</div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: iv.autoSend ? C.green : C.muted }}>
+                    {iv.autoSend ? 'Yes' : 'No'}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginBottom: 2 }}>FIRST SEEN</div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#94a3b8' }}>{iv.ts}</div>
+                </div>
+              </div>
+
+              {/* Mid-session changes */}
+              {hasChanges && (
+                <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Changes during session ({d.changes.length})
+                  </div>
+                  {d.changes.map((c, j) => {
+                    const cc = intervalColor(c.interval, c.isDistance)
+                    return (
+                      <div key={j} style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 4 }}>
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#334155', flexShrink: 0 }}>{c.ts}</span>
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700, color: cc }}>
+                          {fmtInterval(c.interval, c.isDistance)}
+                          {c.isDistance && <span style={{ fontSize: 8, color: C.yellow, marginLeft: 3 }}>dist</span>}
+                          {!c.isDistance && c.interval < 60 && <span style={{ fontSize: 8, color: C.red, marginLeft: 3 }}>⚠</span>}
+                        </span>
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: c.autoSend ? C.green : C.muted }}>
+                          auto={c.autoSend ? 'on' : 'off'}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )
         })}
       </div>
-
-      {/* Bars */}
-      <div style={{ overflowX: 'auto' }}>
-        {chartNodes.map((node, i) => {
-          const total = Object.values(node.durations).reduce((a, b) => a + b, 0)
-          return (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <div style={{ width: labelW, fontFamily: 'var(--mono)', fontSize: 9, color: '#c8ddf4', textAlign: 'right', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {node.callsign}
-              </div>
-              <div style={{ flex: 1, height: barH, display: 'flex', borderRadius: 3, overflow: 'hidden', background: 'var(--bg)', minWidth: 200 }}>
-                {allIntervals.map(iv => {
-                  const mins = node.durations[iv] || 0
-                  if (!mins) return null
-                  const pct = (mins / maxMins) * 100
-                  const sec = parsePliSeconds(iv)
-                  const color = pliColor(sec)
-                  return (
-                    <div
-                      key={iv}
-                      title={`${iv}: ${mins.toFixed(1)} min`}
-                      style={{
-                        width: `${pct}%`, height: '100%',
-                        background: color, opacity: 0.8,
-                        borderRight: '1px solid var(--bg)',
-                        minWidth: mins > 0 ? 2 : 0,
-                      }}
-                    />
-                  )
-                })}
-              </div>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, flexShrink: 0, width: 40 }}>
-                {total.toFixed(0)}m
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </div>
+      <Note>
+        PLI settings from ATAK logs only. Interval &lt; 60s is highlighted red per test requirements.
+        Distance-based PLI (meters) is highlighted yellow — cannot be directly compared to time-based intervals.
+        deviceDisconnected events do not include serial numbers — see parsing-requirements.md for the LIFO assumption.
+      </Note>
+    </>
   )
 }
+
 
 function PliTab({ results }) {
   const pliNodes = useMemo(() => {
     const nodeMap = {}
     results.forEach(r => {
+      // Diagnostic format — received_messages with originator_pli_interval
       r.received_messages?.forEach(m => {
         if (!m.originator_callsign) return
         const gid = m.originator_gid
@@ -456,32 +470,77 @@ function PliTab({ results }) {
           nodeMap[gid].intervalHistory.push({ ts, interval: iv })
         }
       })
+      // ATAK format — infer interval from actual sent PLI message gaps
+      // pliSettingUpdated is a config event, not a network transmission —
+      // it belongs in PliSettingsSection only, not in message traffic analysis
+      if (r.log_format === 'atak') {
+        // Extract callsign from filename: everything between 'diagnostic_' and the GID
+        const fnCallsign = r.source_filename
+          ? r.source_filename.replace(/^diagnostic_/, '').replace(/_?\d{10,}_.*$/, '').replace(/_/g, ' ').trim()
+          : ''
+        const callsign = r.device?.callsign || fnCallsign || r.source_filename
+        const gid = r.device?.gid || callsign
+        // Use gid+filename as key — two logs can share a GID (same account)
+        // CL_B and gt_Sassy_B_Net share GID 90194071247761 in 2026-06-04 session
+        const nodeKey = `${gid}|${r.source_filename || callsign}`
+        if (!nodeMap[nodeKey]) nodeMap[nodeKey] = { callsign, gid, intervalCounts: {}, intervalHistory: [] }
+        const sentPli = (r.atak_messages || [])
+          .filter(m => m.message_type === 'pli' && m.is_sender && m.timestamp)
+          .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+        if (sentPli.length >= 2) {
+          const gaps = []
+          for (let i = 1; i < sentPli.length; i++) {
+            const ms = new Date(sentPli[i].timestamp.replace(' ','T')+'Z').getTime()
+                     - new Date(sentPli[i-1].timestamp.replace(' ','T')+'Z').getTime()
+            const sec = Math.round(ms / 1000)
+            if (sec > 0 && sec < 600) gaps.push(sec)
+          }
+          if (gaps.length) {
+            const common = [15,30,60,120,180,300,600]
+            // Bucket each gap with ±25% tolerance — gaps outside tolerance are noise, discarded
+            // Then filter intervals with < 1 min estimated duration (count × interval < 60s)
+            gaps.forEach((sec, gi) => {
+              const nearest = common.reduce((a,b)=>Math.abs(b-sec)<Math.abs(a-sec)?b:a)
+              // Only assign if gap is within ±25% of the nearest bucket
+              if (Math.abs(sec - nearest) / nearest <= 0.25) {
+                const iv = `${nearest} seconds`
+                nodeMap[nodeKey].intervalCounts[iv] = (nodeMap[nodeKey].intervalCounts[iv] || 0) + 1
+                if (gi === 0) nodeMap[nodeKey].intervalHistory.push({ ts: sentPli[0].timestamp, interval: iv })
+              }
+            })
+            // Remove intervals with < 1 min estimated duration (noise filter)
+            Object.keys(nodeMap[nodeKey].intervalCounts).forEach(iv => {
+              const sec = parseInt(iv)
+              const totalSec = sec * nodeMap[nodeKey].intervalCounts[iv]
+              if (totalSec < 60) delete nodeMap[nodeKey].intervalCounts[iv]
+            })
+            nodeMap[nodeKey].inferred = true
+          }
+        }
+      }
     })
 
     return Object.values(nodeMap)
-      .map(node => ({
-        ...node,
-        durations: computeIntervalDurations(
-          node.intervalHistory.sort((a, b) => a.ts.localeCompare(b.ts))
-        ),
-      }))
+      .map(node => ({ ...node }))
       .sort((a, b) => a.callsign.localeCompare(b.callsign))
   }, [results])
 
   const hasDiag = results.some(r => r.log_format === 'diagnostic')
+  const hasAtak = results.some(r => r.log_format === 'atak')
+  const hasPliData = hasDiag || hasAtak
 
   return (
     <div>
       <SectionHeader icon="📶" title="Originator PLI — All Network Nodes" sub="Dominant PLI rate per observed node · ≤30s = red · 60–180s = yellow · 300s+ = green" />
-      {!hasDiag && <Note>PLI interval data is available in diagnostic logs only. Upload a goTenna Pro+ diagnostic log (.txt) to see PLI frequency data.</Note>}
-      {hasDiag && pliNodes.length > 0 && (() => {
+      {!hasPliData && <Note>PLI interval data is available in diagnostic and ATAK enhanced logs. Upload a goTenna Pro+ diagnostic log (.txt) or ATAK diagnostic log to see PLI frequency data.</Note>}
+      {hasPliData && pliNodes.length > 0 && (() => {
         const allIvs = [...new Set(pliNodes.flatMap(n => Object.keys(n.intervalCounts).filter(iv => iv !== 'N/A')))]
           .sort((a, b) => (parsePliSeconds(a) || 999) - (parsePliSeconds(b) || 999))
         const has5s = allIvs.some(iv => parsePliSeconds(iv) <= 5)
         return (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10, padding: '6px 10px', background: 'var(--bg2)', borderRadius: 5, border: '1px solid var(--border)' }}>
             <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted }}>INTERVALS IN LOADED DATA:</span>
-            {allIvs.map(iv => {
+            {allIvs.filter(iv => !iv.includes('meters')).map(iv => {
               const s = parsePliSeconds(iv)
               const c = pliColor(s)
               return <span key={iv} style={{ fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700, color: c }}>{iv.replace(' seconds', 's')}</span>
@@ -504,6 +563,14 @@ function PliTab({ results }) {
                 .sort((a, b) => (parsePliSeconds(a) || 999) - (parsePliSeconds(b) || 999))
               const hasChanges = realIntervals.length > 1
 
+              // Duration: count × interval_sec → h/m
+              const fmtDur = (iv, count) => {
+                const sec = parsePliSeconds(iv)
+                if (!sec || !count) return '—'
+                const t = sec * count
+                const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60)
+                return h > 0 ? `${h}h ${m}m` : `${m}m`
+              }
               return (
                 <div key={i} style={{
                   background: 'var(--panel)',
@@ -511,71 +578,42 @@ function PliTab({ results }) {
                   borderLeft: `3px solid ${color}`,
                   borderRadius: 5,
                   padding: '10px 12px',
+                  minHeight: 140,
                 }}>
-                  {/* Top row: callsign + badge */}
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 }}>
                     <div>
                       <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: '#c8ddf4', fontWeight: 700 }}>{node.callsign}</div>
                       <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.dim, marginTop: 1 }}>{node.gid}</div>
                     </div>
                     {hasChanges && (
-                      <div style={{
-                        fontFamily: 'var(--mono)', fontSize: 8,
-                        color: C.red,
-                        background: `${C.red}15`,
-                        border: `1px solid ${C.red}40`,
-                        borderRadius: 3, padding: '2px 7px',
-                        whiteSpace: 'nowrap',
-                      }}>
-                        ⚠ CHANGES
+                      <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.yellow, background: `${C.yellow}15`, border: `1px solid ${C.yellow}40`, borderRadius: 3, padding: '2px 7px', whiteSpace: 'nowrap' }}>
+                        ⚠ MIXED
                       </div>
                     )}
                   </div>
-
-                  {/* Dominant interval */}
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 2 }}>
-                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 28, fontWeight: 700, color, lineHeight: 1 }}>
-                      {dominant ? dominant.replace(' seconds', 's') : 'N/A'}
-                    </div>
-                    <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color, opacity: 0.8 }}>{label}</div>
-                  </div>
-
-                  {/* Msg count */}
-                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.dim, marginBottom: hasChanges ? 6 : 0 }}>
-                    {dominant && node.intervalCounts[dominant] ? `${node.intervalCounts[dominant]} msgs` : ''}
-                  </div>
-
-                  {/* Also observed */}
-                  {hasChanges && (
-                    <div style={{ borderTop: `1px solid ${C.red}25`, paddingTop: 6 }}>
-                      <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.red, marginBottom: 4, letterSpacing: '0.06em' }}>
-                        ALSO OBSERVED
+                  {realIntervals.filter(iv => !iv.includes('meters')).map(iv => {
+                    const ivSec = parsePliSeconds(iv)
+                    const ivColor = pliColor(ivSec)
+                    const cnt = node.intervalCounts[iv] || 0
+                    return (
+                      <div key={iv} style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+                        <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, color: ivColor, lineHeight: 1, minWidth: 52 }}>
+                          {iv.replace(' seconds', 's')}
+                        </span>
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#94a3b8' }}>
+                          {fmtDur(iv, cnt)}
+                        </span>
+                        {ivSec !== null && ivSec < 60 && (
+                          <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.red }}>⚠ accelerated</span>
+                        )}
                       </div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                        {otherIntervals.map(iv => {
-                          const s = parsePliSeconds(iv)
-                          const c = pliColor(s)
-                          return (
-                            <div key={iv} style={{
-                              fontFamily: 'var(--mono)', fontSize: 8,
-                              color: c,
-                              background: `${c}12`,
-                              border: `1px solid ${c}40`,
-                              borderRadius: 3, padding: '2px 6px',
-                            }}>
-                              {iv.replace(' seconds', 's')} · {node.intervalCounts[iv]}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )}
+                    )
+                  })}
                 </div>
               )
             })}
           </div>
 
-          <PliDurationChart pliNodes={pliNodes} />
         </>
       )}
     </div>
@@ -658,6 +696,7 @@ function GripOutcomeBar({ transfers }) {
           <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginTop: 3 }}>Had retransmits</div>
         </div>
       )}
+      <PliSettingsSection results={results} />
     </div>
   )
 }
@@ -767,7 +806,7 @@ function ThermalTab({ results }) {
 function BatteryTab({ results }) {
   return (
     <div>
-      <SectionHeader icon="🔋" title="Battery Level Over Time" sub="Red threshold at 30%" />
+      <SectionHeader icon="🔋" title="Battery Level Over Time" sub="Red threshold at 30% · critical below 10%" />
       <ChartPanel results={results} selectedPoints={['battery_over_time']} />
       <SectionHeader icon="📉" title="Minimum Battery Recorded" />
       <ChartPanel results={results} selectedPoints={['battery_min']} />
@@ -1318,7 +1357,7 @@ function HealthTab({ results }) {
       <SectionHeader icon="💊" title="Per-Device Health Score" sub="Composite score — 5 dimensions · thresholds pending field validation" />
       <Note>
         ⚠ Thresholds are initial estimates pending field validation.
-        Pass criteria: Thermal &lt; 113°F · Battery &gt; 30% · no BLE failures · avg RSSI &gt; −95 dBm · peak queue &lt; 5 msgs.
+        Pass criteria: Thermal &lt; 113°F · Battery &gt; 30% (critical &lt; 10%) · no BLE failures · avg RSSI &gt; −95 dBm · peak queue &lt; 5 msgs.
         Hop count is excluded — it reflects network topology, not device health.
         See <code>docs/ui-requirements.md</code> for full criteria.
       </Note>
@@ -1329,7 +1368,7 @@ function HealthTab({ results }) {
           // excluded from the score denominator rather than counted as a free pass).
           const dims = [
             { label: 'Thermal',  pass: (s.peak_temp_f || 0) < 113,              value: s.peak_temp_f != null ? `${s.peak_temp_f}°F peak` : '—',          threshold: '< 113°F' },
-            { label: 'Battery',  pass: (s.min_battery_pct || 100) > 30,         value: s.min_battery_pct != null ? `${s.min_battery_pct}% min` : '—',     threshold: '> 30%' },
+            { label: 'Battery',  pass: (s.min_battery_pct || 100) > 30,         value: s.min_battery_pct != null ? `${s.min_battery_pct}% min` : '—',     threshold: '> 30%', critical: s.min_battery_pct != null && s.min_battery_pct < 10 },
             { label: 'BLE',      pass: !s.ble_fail_count,                       value: s.ble_fail_count ? `${s.ble_fail_count} failures` : 'No failures',  threshold: 'no failures' },
             { label: 'RSSI',     pass: s.avg_rssi == null ? null : s.avg_rssi > -95,  value: s.avg_rssi != null ? `${s.avg_rssi} dBm avg` : 'N/A',          threshold: '> −95 dBm' },
             { label: 'Queue',    pass: (s.max_stored_messages || 0) < 5,        value: s.max_stored_messages ? `${s.max_stored_messages} peak` : '0 peak', threshold: '< 5 msgs' },
@@ -1356,9 +1395,9 @@ function HealthTab({ results }) {
                   const failed = d.pass === false
                   return (
                     <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
-                      <span style={{ fontSize: 9, lineHeight: 1, flexShrink: 0, color: na ? C.muted : undefined }}>{na ? '–' : d.pass ? '✓' : '✗'}</span>
+                      <span style={{ fontSize: 9, lineHeight: 1, flexShrink: 0, color: na ? C.muted : undefined }}>{na ? '–' : d.pass ? '✓' : d.critical ? '🔴' : '✗'}</span>
                       <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: failed ? C.red : C.muted, width: 52, flexShrink: 0 }}>{d.label}</span>
-                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: failed ? C.red : na ? C.muted : '#c8ddf4', fontWeight: failed ? 700 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.value}</span>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: failed ? (d.critical ? '#ff4757' : C.red) : na ? C.muted : '#c8ddf4', fontWeight: failed ? 700 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.value}{d.critical ? ' ⚠ CRITICAL' : ''}</span>
                       <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: '#2a3a52', marginLeft: 'auto', flexShrink: 0 }}>{d.threshold}</span>
                     </div>
                   )
@@ -2228,6 +2267,9 @@ export default function App() {
         peak_temp_c:                  peakC,
         peak_temp_f:                  cToF(peakC),
         min_battery_pct:              atakHlth.map(h=>h.battery_pct).filter(v=>v!=null&&v>=0).reduce((a,b)=>Math.min(a,b), null) ?? null,
+        min_battery_unfiltered:       (r.atak_health_samples||[]).map(h=>h.battery_pct).filter(v=>v!=null&&v>=0).reduce((a,b)=>Math.min(a,b), Infinity) < Infinity
+          ? (r.atak_health_samples||[]).map(h=>h.battery_pct).filter(v=>v!=null&&v>=0).reduce((a,b)=>Math.min(a,b), Infinity)
+          : null,
         partially_received:           atakMsg.filter(m => m.delivery_status === 'PARTIALLY_RECEIVED').length,
         negative_delivery_time_count: atakMsg.filter(m => m.delivery_time_ms != null && m.delivery_time_ms < 0).length,
         // static — unchanged

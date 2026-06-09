@@ -348,6 +348,17 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | BLE payload decoding (relay health attributes) | Blocked — waiting on protocol spec |
 | Relay Manager JSON log format (SDK Logging 2.0) | Pending — format in design |
 | Health Score threshold validation (BLE, thermal, battery, queue, RSSI) | Pending — blocked on field data; dimensions wired, thresholds are initial estimates |
+| P1: MESMER BLE tag profile (DEBUG vs ERROR) | ✅ Done — any tag containing BLE counts regardless of severity |
+| P2: Protocol separation (BROADCAST/PRIVATE) in TX/RX, file transfer, congestion | ⏳ Pending |
+| P3: Cross-device delivery matrix using logId | ⏳ Pending |
+| P4: Relay copy/retransmission flag | ⏳ Pending |
+| P5: Battery critical threshold < 10% | ✅ Done — 🔴 ⚠ CRITICAL in Health Score |
+| P6: KNOT clock skew investigation | ⏳ Pending |
+| P7: Poseidon log format | ⏳ Deferred |
+| PLI tab ATAK support + gap inference | ✅ Done — all 14 devices shown |
+| Battery chart real UTC timestamps + per-serial lines | ✅ Done |
+| PLI Settings section (pliSettingUpdated) | ✅ Done |
+| GID collision fix (CL_B + gt_Sassy_B_Net) | ✅ Done — nodeMap key = gid+filename |
 | Time-window step disabled state for unparseable timestamps | Pending — not started; currently skips the step silently |
 
 ---
@@ -356,11 +367,14 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 
 - **Fetch current file state before editing.** Do not assume a file matches
   a previous session's output — the repo may have changed.
+- **deviceDisconnected LIFO assumption:** Serial is omitted on disconnect events. Attribution uses LIFO (most recent connect = first to disconnect). Documented in `docs/parsing-requirements.md`. Pending dev team confirmation.
+- **GID collision (CL_B + gt_Sassy_B_Net):** Share GID `90194071247761` and serial `PNE233200347`. PLI `nodeMap` uses `gid|source_filename` as key. Dev team notified.
 - **Check `docs/` before adding anything non-trivial.** The specs there
   describe intended behavior. If the code disagrees with the docs, flag it.
 - **One commit per logical change.** Format: `type(scope): description` —
   e.g. `feat(parser): add relay_manager` or `fix(ui): modal z-index via createPortal`.
 - **Update docs alongside code.** Parser rule changed → update
   `parsing-requirements.md`. UI component changed → update `ui-requirements.md`.
+- **Parser requirements P1–P7** are in `docs/parsing-requirements.md`. P1 (BLE tag) and P5 (battery critical) are done. P2–P4, P6 pending. P7 deferred. Protocol architecture (BROADCAST/PRIVATE/UNICAST normalization, GRIP, logId) also documented there.
 - **Do not add npm packages without justification.** Check Chart.js 4.4,
   React 18, and plain CSS first.
