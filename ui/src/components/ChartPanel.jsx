@@ -188,7 +188,7 @@ function BatteryOverTime({ results }) {
 
   // Collect all sample points across all results with real timestamps
   const allPoints = []
-  results.forEach((r, i) => {
+  results.forEach(r => {
     const src = r.log_format === 'atak' ? (r.atak_health_samples || []) : (r.system_samples || [])
     src.forEach(s => {
       if (s.timestamp && s.battery_pct != null && s.battery_pct >= 0) {
