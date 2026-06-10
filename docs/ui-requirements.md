@@ -491,9 +491,14 @@ broken or whether my window was applied.
 - Honest about gaps, consistent with the project philosophy — surface the limitation
   rather than hiding the step.
 
-**Observed:** relay_manager logcat timestamps omit the year (`MM-DD HH:MM:SS.mmm`),
-which the client-side scanner in `FileUpload.jsx` does not parse, so the range step is
-skipped. Noticed during browser verification of the Health-tab scoping.
+**Observed:** the real trigger is **fw_log**, whose timestamps are relative ms from
+boot (`[100000000-000, …]`) with no wall-clock date, so the client-side scanner
+(`extractTimeRange` in `FileUpload.jsx`, regex requires a 4-digit year) finds no match
+and the range step is shown disabled. Note that relay_manager — originally assumed to
+be the trigger because its logcat prefix omits the year (`MM-DD HH:MM:SS.mmm`) — does
+**not** hit this path: its `System.out` lines carry an internal ISO timestamp with year
+(`2026-06-03T14:46:41.944712Z`, see `relay_manager.py` `_INTERNAL_TS_RE`), which the
+scanner does parse, so relay_manager routes to the normal working slider.
 
 **Status:** ✅ Done. Implemented in `ui/src/components/FileUpload.jsx`: when no
 parseable timestamps are found, the upload flow routes to a `range-unavailable`

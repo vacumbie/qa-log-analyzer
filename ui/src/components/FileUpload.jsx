@@ -420,8 +420,9 @@ function UploadModal({ onFiles, loading, onClose }) {
                   </div>
                   <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--muted)', lineHeight: 1.6 }}>
                     No parseable timestamps were found in {pending.length > 1 ? 'these files' : 'this file'}.
-                    Relay Manager logcat logs omit the year from timestamps — the time window
-                    step requires a full date to work. Analysis will use the full log contents.
+                    The time-window step needs full-date timestamps; some logs only record
+                    relative or partial times (e.g. firmware logs use ms-from-boot). Analysis
+                    will use the full log contents.
                   </div>
                 </div>
               </div>
