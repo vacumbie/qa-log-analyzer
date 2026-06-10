@@ -376,6 +376,7 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | GID collision fix (CL_B + gt_Sassy_B_Net) | ✅ Done — nodeMap key = gid+filename |
 | Time-window step disabled state for unparseable timestamps | ✅ Done — `range-unavailable` step in FileUpload.jsx replaces the silent skip |
 | Min battery windowed reduce returns 0 for single-sample sets (ATAK branch) | ✅ Done — IIFE pattern: `(batPcts => batPcts.length ? Math.min(...batPcts) : null)(filtered)` |
+| `extractTimeRange` doesn't detect ATAK epoch-ms timestamps (`timestampInMillis`) — ATAK logs route to `range-unavailable`, lose the slider | ⏳ Pending — **High**; extend the client scanner to parse epoch-ms values |
 
 ---
 
