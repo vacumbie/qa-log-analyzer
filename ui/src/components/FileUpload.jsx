@@ -279,9 +279,10 @@ function UploadModal({ onFiles, loading, onClose }) {
     setScanning(false)
 
     if (absMin === Infinity || absMax === -Infinity || absMin >= absMax) {
-      // Could not detect timestamps — just upload directly
-      onFiles(accepted)
-      onClose()
+      // Could not detect timestamps — show the range step in a disabled state
+      // so the user knows why filtering is unavailable rather than silently skipping
+      setPending(accepted)
+      setStep('range-unavailable')
       return
     }
 
@@ -340,11 +341,13 @@ function UploadModal({ onFiles, loading, onClose }) {
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 20 }}>
           <div>
             <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 16, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#c8ddf4' }}>
-              {step === 'drop' ? 'Add Log Files' : 'Select Time Window'}
+              {step === 'drop' ? 'Add Log Files' : step === 'range-unavailable' ? 'Select Time Window' : 'Select Time Window'}
             </div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--muted)', marginTop: 2 }}>
               {step === 'drop'
                 ? 'Accepts .txt · .log · diagnostic, RSDK, ATAK, and Relay Manager formats'
+                : step === 'range-unavailable'
+                ? `${pending.length} file${pending.length > 1 ? 's' : ''} · time filtering unavailable · full log will be analysed`
                 : `${pending.length} file${pending.length > 1 ? 's' : ''} · drag handles to narrow the analysis window · all times UTC`}
             </div>
           </div>
@@ -399,6 +402,53 @@ function UploadModal({ onFiles, loading, onClose }) {
                   </div>
                 </>
               )}
+            </div>
+          </>
+        ) : step === 'range-unavailable' ? (
+          <>
+            {/* Time filtering unavailable — no parseable timestamps found */}
+            <div style={{ padding: '8px 0 20px' }}>
+              <div style={{
+                background: '#ffd16615', border: '1px solid #ffd16640',
+                borderRadius: 6, padding: '12px 16px', marginBottom: 20,
+                display: 'flex', gap: 10, alignItems: 'flex-start',
+              }}>
+                <span style={{ fontSize: 14, marginTop: 1 }}>⚠</span>
+                <div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: '#ffd166', letterSpacing: '0.04em', marginBottom: 4 }}>
+                    Time filtering unavailable
+                  </div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--muted)', lineHeight: 1.6 }}>
+                    No parseable timestamps were found in {pending.length > 1 ? 'these files' : 'this file'}.
+                    Relay Manager logcat logs omit the year from timestamps — the time window
+                    step requires a full date to work. Analysis will use the full log contents.
+                  </div>
+                </div>
+              </div>
+
+              {/* Disabled slider placeholder */}
+              <div style={{ opacity: 0.25, pointerEvents: 'none', padding: '4px 0 12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--muted)', background: 'var(--border2)', border: '1px solid var(--border2)', borderRadius: 3, padding: '3px 8px' }}>▶ — unavailable —</div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--muted)', background: 'var(--border2)', border: '1px solid var(--border2)', borderRadius: 3, padding: '3px 8px' }}>— unavailable — ◀</div>
+                </div>
+                <div style={{ height: 8, background: 'var(--border2)', borderRadius: 4, margin: '0 8px' }} />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setStep('drop')}
+                style={{ background: 'none', border: '1px solid var(--border2)', color: 'var(--muted)', borderRadius: 4, padding: '7px 14px', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.06em', textTransform: 'uppercase' }}
+              >
+                ← Back
+              </button>
+              <button
+                onClick={() => { onFiles(pending); onClose() }}
+                style={{ background: 'var(--accent)15', border: '1px solid var(--accent)50', color: 'var(--accent)', borderRadius: 4, padding: '7px 20px', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.06em', textTransform: 'uppercase' }}
+              >
+                Analyse →
+              </button>
             </div>
           </>
         ) : (
