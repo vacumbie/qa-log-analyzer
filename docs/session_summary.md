@@ -219,6 +219,14 @@ pytest tests/test_atak.py -v  # single file verbose
 
 ## Most Recent Work (Last Few PRs)
 
+**2026-06-10 — PRs #10–#14: verification follow-ups (jenny/karen/vera) on the two time-window fixes:**
+- **PR #11** (`6d776e9`) — karen's end-to-end check found the `range-unavailable` step never fires for relay_manager (its `System.out` lines carry a year-bearing ISO timestamp the scanner parses). Corrected the trigger to **fw_log** (relative-ms, no wall clock) in `ui-requirements.md`, `session_summary.md`, and the user-facing banner copy in `FileUpload.jsx` (made format-neutral). jenny had passed it at the spec level; karen caught the false premise.
+- **PR #12** (`0b2e6aa`) — added `tests/test_timewindow_trigger.py` (6 cases) pinning the trigger premise against real fixtures, since `extractTimeRange` had zero coverage (lean stack, no JS runner — tested via pytest premise). Also added `.claude/agents/vera.md` to version control (was untracked).
+- **PR #13** (`0b8bf01`) — backlogged (High) that `extractTimeRange` doesn't detect ATAK epoch-ms timestamps (`timestampInMillis`), so ATAK logs also route to `range-unavailable` and lose the slider. Surfaced while writing the PR #12 tests.
+- **PR #14** (`36892b2`) — documented the **vera** agent (unit test specialist) in both agent rosters; added a new "Available agents" table to `CLAUDE.md` (it had none before).
+- **PR #10** (`7e95773`) — session-summary housekeeping (recorded PR #9 + corrected PR #8 entry).
+- Net on the two fixes: **min-battery reduce (Fix 2) verified WORKS end-to-end**; **time-window disabled state (Fix 1) works but its trigger was mis-documented** — now corrected, tested, and the ATAK gap backlogged.
+
 **2026-06-10 — PR #7: time-window disabled state — validation, ternary cleanup, docs reconcile:**
 - Feature itself shipped in `7cc7bf8`: when `FileUpload.jsx` can't derive `globalMin`/`globalMax` (no parseable timestamps), the flow routes to a new `range-unavailable` step instead of silently skipping the time-window step — warning banner, disabled slider placeholder, **← Back**, and a working **Analyse →** that proceeds with the full log (`timeWindow = null`). Real trigger is **fw_log** (relative-ms timestamps, no wall-clock date); relay_manager was the originally-assumed trigger but its `System.out` lines carry a year-bearing ISO timestamp, so it routes to the working slider instead (corrected after karen end-to-end verification)
 - task-completion-validator flagged the code as done but four doc locations still said "Pending — not started"; PR #7 closes that gap
