@@ -108,7 +108,8 @@ qa-log-analyzer/
 └── docs/
     ├── parsing-requirements.md   # Parser rules, field sources, known limitations
     ├── log-field-definitions.md  # Every log field: raw → parsed → model field
-    └── ui-requirements.md        # Tab specs, KPI cards, backlog items
+    ├── ui-requirements.md        # Tab specs, KPI cards, backlog items
+    └── session_summary.md        # Running session log — context bridge between sessions
 ```
 
 Look in `docs/` first when adding anything non-trivial. The specs there
@@ -231,6 +232,20 @@ threshold-validation backlog in `docs/ui-requirements.md`.
 
 ### Add a new ParseResult field
 `models.py` → parser → `_result_to_dict()` in `parse.py` → UI. In that order.
+
+### Update the session summary
+After completing any task — adding a parser, fixing a bug, implementing a tab,
+updating docs — update `docs/session_summary.md`:
+
+1. Read the current `docs/session_summary.md`
+2. Under **Most Recent Work**, replace or append with what was just built/decided
+3. Update any **Backlog** items whose status changed (✅ Done, Blocked, etc.)
+4. Add any new **Known Data Limitations** that were surfaced
+5. Update **What to Work On Next** if priorities shifted
+6. Commit alongside the code: `docs(session): update session summary`
+
+This file is the primary context bridge between sessions. Keep it accurate —
+a stale summary is worse than no summary.
 
 ### Run tests
 ```bash
@@ -368,6 +383,11 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 
 - **Fetch current file state before editing.** Do not assume a file matches
   a previous session's output — the repo may have changed.
+- **Update `docs/session_summary.md` after every task.** This is the context
+  bridge between sessions — for both Claude Code agents and claude.ai chat.
+  Read it at the start of any non-trivial task; update it when the task is done.
+  Commit it alongside the code change: `docs(session): update session summary`.
+  See "Update the session summary" under Common Tasks for the update checklist.
 - **deviceDisconnected LIFO assumption:** Serial is omitted on disconnect events. Attribution uses LIFO (most recent connect = first to disconnect). Documented in `docs/parsing-requirements.md`. Pending dev team confirmation.
 - **GID collision (CL_B + gt_Sassy_B_Net):** Share GID `90194071247761` and serial `PNE233200347`. PLI `nodeMap` uses `gid|source_filename` as key. Dev team notified.
 - **Check `docs/` before adding anything non-trivial.** The specs there
