@@ -217,11 +217,12 @@ pytest tests/test_atak.py -v  # single file verbose
 
 ## Most Recent Work (Last Few PRs)
 
-**2026-06-10 — feat(ui): time-window disabled state for unparseable timestamps:**
-- When `FileUpload.jsx` can't derive `globalMin`/`globalMax` (no parseable timestamps, e.g. relay_manager logcat which omits the year), the flow now routes to a new `range-unavailable` step instead of silently skipping the time-window step
-- The step shows a warning banner explaining filtering is unavailable, a disabled slider placeholder, a **← Back** button, and a working **Analyse →** that proceeds with the full log (`timeWindow = null`)
-- Tidied a redundant ternary in the modal header (`step === 'range-unavailable' ? 'Select Time Window' : 'Select Time Window'`)
-- Commit: `feat(ui): show disabled time-window step when timestamps are unparseable`
+**2026-06-10 — PR #7: time-window disabled state — validation, ternary cleanup, docs reconcile:**
+- Feature itself shipped in `7cc7bf8`: when `FileUpload.jsx` can't derive `globalMin`/`globalMax` (no parseable timestamps, e.g. relay_manager logcat which omits the year), the flow routes to a new `range-unavailable` step instead of silently skipping the time-window step — warning banner, disabled slider placeholder, **← Back**, and a working **Analyse →** that proceeds with the full log (`timeWindow = null`)
+- task-completion-validator flagged the code as done but four doc locations still said "Pending — not started"; PR #7 closes that gap
+- `fix(ui)` (`9c100d5`): collapsed a redundant modal-header ternary (both branches returned `'Select Time Window'`)
+- `docs(session)` (`2f74692`): marked the item ✅ Done in `ui-requirements.md`, `session_summary.md`, and `CLAUDE.md` line 377 (line-377 hunk staged surgically so unrelated working-tree CLAUDE.md edits stayed out)
+- Branch: `feat-time-window-disabled-step` → PR #7 (open, base `main`)
 
 **2026-06-10 — feat(ui): always show Relay Health and FW Log tabs:**
 - Relay Health and FW Log tabs are now always visible in the tab bar
