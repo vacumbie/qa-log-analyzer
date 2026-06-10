@@ -225,9 +225,13 @@ pytest tests/test_atak.py -v  # single file verbose
 - `fix(ui)` (`d026110`): UI Lint failed CI (`--max-warnings 0`) on a `react-hooks/exhaustive-deps` warning — `7cc7bf8` moved the no-timestamps branch off `onFiles()`/`onClose()`, leaving `onDrop` with stale `[onFiles, onClose]` deps. Emptied the dep array (body only calls stable setters); verified lint clean locally
 - Branch: `feat-time-window-disabled-step` → **PR #7 merged** (`31bc8a3`), branch deleted
 
-**2026-06-10 — docs: document the session-summary workflow in CLAUDE.md:**
+**2026-06-10 — PR #9: mark min-battery windowed-reduce backlog item Done in CLAUDE.md:**
+- CLAUDE.md backlog row still showed the single-sample ATAK min-battery coercion bug as ⏳ Pending though it was fixed in `040d40b`; synced it to ✅ Done with the IIFE pattern to match `session_summary.md` line 161
+- Branch `fix-claudemd-min-battery-backlog` → **PR #9 merged** (`61bd561`), branch deleted
+
+**2026-06-10 — PR #8: document the session-summary workflow in CLAUDE.md:**
 - Added `session_summary.md` to the project-shape doc map, a new "Update the session summary" task under Common Tasks, and an agent-note reminder to update it after every task
-- Commit `9a9005f` on branch `docs-session-summary-workflow` — pushed to origin, no PR opened
+- Branch `docs-session-summary-workflow` (`9a9005f`) → **PR #8 merged** (`8caf8f3`), branch deleted
 
 **2026-06-10 — feat(ui): always show Relay Health and FW Log tabs:**
 - Relay Health and FW Log tabs are now always visible in the tab bar
