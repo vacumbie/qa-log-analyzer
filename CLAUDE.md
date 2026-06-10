@@ -397,6 +397,21 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 
 ---
 
+## Quality gate sequence
+
+**Mandatory (every feature):**
+1. `vera` — test coverage and DATA LIMITATION audit
+2. `task-completion-validator` — end-to-end completion check
+3. `jenny` — spec compliance
+4. `karen` — live browser verification
+5. `peer-reviewer` — pre-merge code review
+6. `claude-md-compliance-checker` — CLAUDE.md rules check
+
+**Optional (when complexity is suspected):**
+- `code-quality-pragmatist` — invoke after implementation if the solution feels over-engineered
+
+---
+
 ## Agent-specific notes
 
 - **Fetch current file state before editing.** Do not assume a file matches
