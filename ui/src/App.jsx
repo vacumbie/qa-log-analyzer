@@ -2244,7 +2244,7 @@ export default function App() {
         avg_rssi:                     rnd(avg(rssiVals), 1),
         peak_temp_c:                  peakC,
         peak_temp_f:                  cToF(peakC),
-        min_battery_pct:              atakHlth.map(h=>h.battery_pct).filter(v=>v!=null&&v>=0).reduce((a,b)=>Math.min(a,b), null) ?? null,
+        min_battery_pct:              (batPcts => batPcts.length ? Math.min(...batPcts) : null)(atakHlth.map(h=>h.battery_pct).filter(v=>v!=null&&v>=0)),
         // Full-session minimum from the API — carried over unchanged so the
         // BatteryMin fallback survives even when the window excludes all samples
         min_battery_unfiltered:       r.summary?.min_battery_unfiltered ?? null,

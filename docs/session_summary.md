@@ -1,0 +1,255 @@
+# QA Log Analyzer — Session Summary
+_Last updated: 2026-06-10 (reconstructed from repo + all docs + agent files)_
+
+---
+
+## Project Identity
+
+**Repo:** https://github.com/vacumbie/qa-log-analyzer  
+**Owner:** Valerie Cumbie (`vacumbie`)  
+**Description:** Local log parsing and visualization tool for goTenna mesh network diagnostic data.  
+**Machine path (Windows):** `C:\Users\Valerie.Cumbie\Documents\qa-log-analyzer`  
+**Machine path (Mac/Linux):** `~/Documents/qa-log-analyzer`
+
+---
+
+## Stack
+
+| Layer | Technology | Notes |
+|-------|-----------|-------|
+| Parser | Python 3.10+ | Pure stdlib + dataclasses |
+| API | FastAPI + Uvicorn | `cd api && uvicorn main:app --reload --port 8000` |
+| UI | React 18 + Vite | `cd ui && npm run dev` → http://localhost:5173 |
+| Charts | Chart.js 4.4 + react-chartjs-2 | Line and Bar only; NO annotation plugin |
+| Tests | Pytest | `pytest tests/` from repo root with venv active |
+| Fonts | Barlow Condensed, Rajdhani, Share Tech Mono | Via Google Fonts `<link>` in `index.html` |
+| CI | GitHub Actions | Pytest on every push/PR |
+
+**Critical UI rules:**
+- Do NOT add npm packages unless Chart.js 4.4, React 18, or plain CSS can't do it
+- Leaflet.js (Hop Count Map) loaded from unpkg CDN — not installed via npm
+- Playwright (if needed for browser testing): use `channel: 'msedge'` — bundled Chromium doesn't work on Valerie's machine
+
+---
+
+## Log Formats — 5 Supported
+
+Detection order in `_detect_format()` — ORDER MATTERS:
+
+| Priority | Key | Parser | Detection Marker |
+|----------|-----|--------|-----------------|
+| 1 | `fw_log` | `parser/fw_log.py` | `[digits-digits, MODULE, LEVEL]` bracket pattern |
+| 2 | `atak` | `parser/atak.py` | `logId` / `connectionState` / `atakVersion` JSON keys |
+| 3 | `relay_manager` | `parser/relay_manager.py` | `na.relaymanager(` or `com.gotenna.relaymanager` — MUST be before rsdk |
+| 4 | `rsdk` | `parser/rsdk.py` | `IosBleRadio` or `AndroidBleRadio` or `GRIP_SENDER` |
+| 5 | `diagnostic` | `parser/diagnostic.py` | Catch-all fallback |
+
+---
+
+## Architecture Decisions (Critical — Don't Change Without Reading CLAUDE.md)
+
+1. **ParseResult is the ONLY contract.** Every parser returns `ParseResult` from `models.py`. API serializes via `_result_to_dict()` in `parse.py`. UI reads the dict. The chain is: `models.py` → parser → `_result_to_dict()` → UI. Skip any step = silent failure.
+
+2. **Temperature:** Log files record Celsius. Convert to °F in `_result_to_dict()` ONLY. Never in a parser. Never in a UI component. Fields: `pa_temp_f`, `system_temp_f`.
+
+3. **RSDK hop count:** Only from `GRIP_Receiver` incoming fields lines. Old `SendMessageResponse` hop count was an SDK sequence counter — still excluded.
+
+4. **FileUpload uses createPortal:** The upload modal renders via `createPortal(..., document.body)` to escape the header's `backdropFilter: blur(12px)` stacking context. Do not move it back inside the header.
+
+5. **Time series charts use normalized 0–100% x-axis** (`buildRelativeTimeSeries()` / `buildGripRssiSeries()`). Exception: Battery % Over Time uses real wall-clock UTC.
+
+6. **CHART_MAP in ChartPanel.jsx:** All charts must be registered here. A key in `App.jsx` that's missing from `CHART_MAP` silently renders nothing.
+
+7. **Chart registration order:** `fw_log` detection first (bracket pattern distinctive). `relay_manager` before `rsdk` (both have AndroidBleRadio lines).
+
+8. **GID collision fix:** CL_B + gt_Sassy_B_Net share GID `90194071247761` and serial `PNE233200347`. PLI `nodeMap` uses `gid|source_filename` as key.
+
+9. **Health Score:** Scoped to `atak`, `diagnostic`, `rsdk` only via `HEALTH_FORMATS` in `App.jsx`. `relay_manager` excluded (no dimension data → misleading 5/5).
+
+---
+
+## Design Tokens (Use These — Don't Drift)
+
+```js
+const C = {
+  accent: '#00d4ff',   // cyan — primary highlight
+  green:  '#00e5a0',
+  yellow: '#ffd166',
+  red:    '#ff4757',
+  muted:  '#4a6080',
+  dim:    '#2a3a52',
+}
+const PALETTE = ['#00d4ff','#ff6b35','#ffd166','#c77dff','#00e5a0','#ff4757','#4a90e2','#ff6b9d']
+```
+Backgrounds: `#060d16` page · `#080e18` panel · `#0f1923` card  
+Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mono'` via `var(--mono)`
+
+---
+
+## 14 Tabs (Current State)
+
+| # | Tab Key | Name | Gate | Status |
+|---|---------|------|------|--------|
+| 1 | `overview` | Overview | Always | ✅ |
+| 2 | `pli` | PLI Frequency | diagnostic or atak loaded | ✅ |
+| 3 | `txrx` | TX/RX Analysis | Always | ✅ |
+| 4 | `sessions` | Sessions & Radio Stats | Always | ✅ |
+| 5 | `thermal` | Thermal | Always | ✅ |
+| 6 | `battery` | Battery | Always | ✅ |
+| 7 | `hops` | Hop Count | Always | ✅ |
+| 8 | `rssi` | RSSI | Always | ✅ |
+| 9 | `chat` | Chat Activity | Always | ✅ |
+| 10 | `health` | Health Score | Always (device formats only) | ✅ |
+| 11 | `relay-health` | Relay Health | relay_manager loaded | ✅ |
+| 12 | `atak` | ATAK (α badge) | atak loaded | ✅ |
+| 13 | `fw-log` | FW Log | fw_log loaded | ✅ |
+| 14 | `topology` | Network Topology | NOT IMPLEMENTED | ⚠️ Design spec only |
+
+---
+
+## Known Data Limitations (Surface Honestly — Never Paper Over)
+
+| Format | Limitation |
+|--------|-----------|
+| `relay_manager` | BLE payloads captured but NOT decoded — SNR, battery%, temp°F, uptime, FW version are raw hex bytes |
+| `relay_manager` | Single relay node per observed session — multi-node unknown |
+| `relay_manager` | Prod logs not analyzed — stage/prod behavioral differences unknown |
+| `rsdk` | GRIP hop count and RSSI only when `GRIP_Receiver` incoming fields lines are present |
+| `diagnostic` | Firmware 3.1.11 omits callsign and GID from Received Message blocks |
+| `atak` | Callsign always empty — identity is GID-only (filename is only callsign source) |
+| `atak` | `sdkError` (SDK Logging 2.0) volume baseline unknown — count is informational, not pass/fail |
+| `atak` | `numberOfOpenSegments = -99` is a sentinel → stored as null |
+| `atak` | Receiver-side `deliveryTimeInMillis = 0` on fileTransfer is a placeholder |
+| `atak` | `serialNumber = "Unknown"` during BLE reconnection is expected, not an error |
+| `fw_log` | Timestamps are relative ms from boot — not wall clock |
+| `fw_log` | Serial number and FW version in binary RHC payload — not plaintext |
+| `fw_log` | Battery stabilization errors are a known FW quirk — counted separately |
+| `fw_log` | `RSSI[]` samples are DEBUG-level and skipped — channel energy is the RSSI proxy |
+| `atak` | `deviceDisconnected` omits serial — attribution uses LIFO assumption (pending dev team confirmation) |
+
+---
+
+## Backlog Status
+
+| Item | Status |
+|------|--------|
+| Time Window Filtering | ✅ Done |
+| GRIP RSSI Line Graph Over Time | ✅ Done |
+| ATAK Enhanced Log (SDK Logging 2.0) | ✅ Done |
+| FW Log — relay firmware parser & tab | ✅ Done |
+| PLI tab overhaul + battery chart real UTC timestamps | ✅ Done (PR #6) |
+| P5: Battery critical threshold < 10% | ✅ Done |
+| P1: MESMER BLE tag profile (BLE\|DEBUG vs ERROR\|BLE) | ✅ Done (PR #4) |
+| Hop Count Map (Leaflet, ATAK only) | ✅ Done |
+| GID collision fix (CL_B + gt_Sassy_B_Net) | ✅ Done |
+| PLI Settings section (pliSettingUpdated) | ✅ Done |
+| Battery chart real UTC timestamps + per-serial lines | ✅ Done |
+| PLI tab ATAK support + gap inference | ✅ Done |
+| FW Log — RHC payload decoding (hash→serial, FW version) | ⛔ Blocked — waiting on mapping tables from QA |
+| Session Persistence | ⏸ Deferred |
+| Relay Manager prod log support | ⛔ Blocked — waiting on prod samples |
+| BLE payload decoding (relay health attributes) | ⛔ Blocked — waiting on protocol spec |
+| Relay Manager JSON log format (SDK Logging 2.0) | ⏳ Pending — format in design |
+| Health Score threshold validation | ⏳ Pending — blocked on field data |
+| P2: Protocol separation (BROADCAST/PRIVATE) in TX/RX | ⏳ Pending |
+| P3: Cross-device delivery matrix using logId | ⏳ Pending |
+| P4: Relay copy/retransmission flag | ⏳ Pending |
+| P6: KNOT clock skew investigation | ⏳ Pending |
+| P7: Poseidon log format | ⏳ Deferred |
+| Network Topology tab (Section 14) | ⏳ Pending (design spec exists) |
+| Time-window disabled state for unparseable timestamps | ⏳ Pending |
+| Min battery windowed reduce returns 0 for single-sample sets (ATAK) | ⏳ Pending — `Math.min(…, null)` bug in `App.jsx` |
+| Battery Chart — Multi-Radio False Recovery DataNote | ⏳ Pending dev team confirmation |
+
+---
+
+## Claude Code Agents (in `.claude/agents/`)
+
+| Agent | Purpose | When to Use |
+|-------|---------|-------------|
+| `jenny` | Spec compliance auditor | Feature claimed complete — verify against docs |
+| `karen` | Reality manager / no-nonsense status check | Something feels off, verify what actually works |
+| `parser-agent` | Full parser chain specialist | Adding/modifying any parser or ParseResult field |
+| `log-analyst` | Raw log analysis before parser is written | New log file arrives — understand it first |
+| `docs-agent` | Keeps all 4 docs in sync with code | After any significant code change |
+| `peer-reviewer` | Pre-merge code review | Before merging a branch |
+| `task-completion-validator` | End-to-end completion check | After claiming a feature is done |
+| `code-quality-pragmatist` | Simplicity check | After implementing — check for over-engineering |
+| `claude-md-compliance-checker` | Verifies against CLAUDE.md rules | After any significant change |
+
+---
+
+## Standing Rules (Always Apply)
+
+- **Temperature:** Always °F in UI. Convert in `_result_to_dict()` only.
+- **Data limitations:** Flag honestly in `parse_errors` with `DATA LIMITATION —` prefix. Never silently drop fields or return zeros.
+- **Log format detection:** Never assume — auto-detect via `_detect_format()`.
+- **No npm packages** without justification (Chart.js 4.4, React 18, plain CSS first).
+- **Commit format:** `type(scope): description` — e.g. `feat(parser): add relay_manager`
+- **Tests are first-class code.** Fixtures in `tests/fixtures/`, not inlined as strings.
+- **Readability over cleverness.** A clear `for` loop beats a clever comprehension.
+- **Comments explain WHY, not what.** The code explains what; comments explain parser quirks, CSS workarounds, format inconsistencies.
+- **Fetch current file state before editing.** Never assume files match a previous session's output.
+
+---
+
+## How to Start Dev Environment
+
+```bash
+# Terminal 1 — API (Windows PowerShell)
+cd C:\Users\Valerie.Cumbie\Documents\qa-log-analyzer
+.\venv\Scripts\activate
+cd api
+uvicorn main:app --reload --port 8000
+
+# Terminal 2 — UI (both platforms)
+cd <repo-root>/ui
+npm run dev
+# → http://localhost:5173
+
+# Run tests
+pytest tests/           # full suite
+pytest tests/ -x        # stop on first failure
+pytest tests/test_atak.py -v  # single file verbose
+```
+
+---
+
+## Most Recent Work (Last Few PRs)
+
+**PR #6 — PLI/Battery overhaul** (most recent merged work):
+- PLI tab overhauled — originator cards, gap inference for ATAK, interval color thresholds
+- Battery chart moved to real wall-clock UTC x-axis with per-serial lines
+- P5 battery critical threshold (< 10%) implemented
+- Known bug documented: `Math.min(…, null)` in windowed min battery reduce for single-sample ATAK sets
+
+**PR #4 — P1 MESMER BLE tag fix:**
+- `ble_fail_count` now counts any `counts_by_tag` key containing `BLE` regardless of severity (fixes MESMER firmware 3.1.11 DEBUG-tagged BLE errors being missed)
+
+**PR #3/FW Log work:**
+- `parser/fw_log.py` implemented and merged
+- FW Log tab (tab 13) implemented
+- All 4 docs updated
+
+---
+
+## What to Work On Next
+
+Based on the backlog, the most actionable items (not blocked):
+
+1. **`Math.min(…, null)` bug** in `App.jsx` — min battery windowed reduce returns 0 for single-sample ATAK sets. Simple fix: `vals.length ? Math.min(...vals) : null`
+
+2. **P2: Protocol separation (BROADCAST/PRIVATE)** in TX/RX analysis — `messageProtocol` is already parsed, just needs UI lanes
+
+3. **P3: Cross-device delivery matrix** — `logId` is already parsed across ATAK logs
+
+4. **Time-window disabled state** for logs with unparseable timestamps (relay_manager logcat)
+
+---
+
+## How to Use This File
+
+At the start of every new Claude session, paste the contents of this file (or upload it).  
+At natural breakpoints, say: **"Update the session summary with what we just did"** and I'll revise the relevant sections.
+
+Save this file in the repo at `docs/SESSION_SUMMARY.md` (gitignored or committed — your call).
