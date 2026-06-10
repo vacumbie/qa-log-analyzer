@@ -218,7 +218,7 @@ pytest tests/test_atak.py -v  # single file verbose
 ## Most Recent Work (Last Few PRs)
 
 **2026-06-10 — PR #7: time-window disabled state — validation, ternary cleanup, docs reconcile:**
-- Feature itself shipped in `7cc7bf8`: when `FileUpload.jsx` can't derive `globalMin`/`globalMax` (no parseable timestamps, e.g. relay_manager logcat which omits the year), the flow routes to a new `range-unavailable` step instead of silently skipping the time-window step — warning banner, disabled slider placeholder, **← Back**, and a working **Analyse →** that proceeds with the full log (`timeWindow = null`)
+- Feature itself shipped in `7cc7bf8`: when `FileUpload.jsx` can't derive `globalMin`/`globalMax` (no parseable timestamps), the flow routes to a new `range-unavailable` step instead of silently skipping the time-window step — warning banner, disabled slider placeholder, **← Back**, and a working **Analyse →** that proceeds with the full log (`timeWindow = null`). Real trigger is **fw_log** (relative-ms timestamps, no wall-clock date); relay_manager was the originally-assumed trigger but its `System.out` lines carry a year-bearing ISO timestamp, so it routes to the working slider instead (corrected after karen end-to-end verification)
 - task-completion-validator flagged the code as done but four doc locations still said "Pending — not started"; PR #7 closes that gap
 - `fix(ui)` (`9c100d5`): collapsed a redundant modal-header ternary (both branches returned `'Select Time Window'`)
 - `docs(session)` (`2f74692`): marked the item ✅ Done in `ui-requirements.md`, `session_summary.md`, and `CLAUDE.md` line 377 (line-377 hunk staged surgically so unrelated working-tree CLAUDE.md edits stayed out)
