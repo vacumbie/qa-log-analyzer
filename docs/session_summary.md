@@ -1,5 +1,5 @@
 # QA Log Analyzer — Session Summary
-_Last updated: 2026-06-10 (reconstructed from repo + all docs + agent files)_
+_Last updated: 2026-06-10_
 
 ---
 
@@ -100,9 +100,9 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | 8 | `rssi` | RSSI | Always | ✅ |
 | 9 | `chat` | Chat Activity | Always | ✅ |
 | 10 | `health` | Health Score | Always (device formats only) | ✅ |
-| 11 | `relay-health` | Relay Health | relay_manager loaded | ✅ |
+| 11 | `relay-health` | Relay Health | Always visible; dimmed + empty state when no relay_manager log loaded | ✅ |
 | 12 | `atak` | ATAK (α badge) | atak loaded | ✅ |
-| 13 | `fw-log` | FW Log | fw_log loaded | ✅ |
+| 13 | `fw-log` | FW Log | Always visible; dimmed + empty state when no fw_log loaded | ✅ |
 | 14 | `topology` | Network Topology | NOT IMPLEMENTED | ⚠️ Design spec only |
 
 ---
@@ -158,7 +158,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | P7: Poseidon log format | ⏳ Deferred |
 | Network Topology tab (Section 14) | ⏳ Pending (design spec exists) |
 | Time-window disabled state for unparseable timestamps | ⏳ Pending |
-| Min battery windowed reduce returns 0 for single-sample sets (ATAK) | ⏳ Pending — `Math.min(…, null)` bug in `App.jsx` |
+| Min battery windowed reduce returns 0 for single-sample sets (ATAK) | ✅ Done — IIFE pattern: `(batPcts => batPcts.length ? Math.min(...batPcts) : null)(filtered)` |
 | Battery Chart — Multi-Radio False Recovery DataNote | ⏳ Pending dev team confirmation |
 
 ---
@@ -217,7 +217,20 @@ pytest tests/test_atak.py -v  # single file verbose
 
 ## Most Recent Work (Last Few PRs)
 
-**PR #6 — PLI/Battery overhaul** (most recent merged work):
+**2026-06-10 — feat(ui): always show Relay Health and FW Log tabs:**
+- Relay Health and FW Log tabs are now always visible in the tab bar
+- When no relevant log is loaded: tab label is dimmed (opacity 45%, darker color, default cursor) and tab body shows a centered empty-state message
+- Empty state messages: "No Relay Manager Logs Uploaded" / "No Firmware Logs Uploaded" with file type guidance
+- New `EmptyTabState` component added to `App.jsx`
+- Commit: `feat(ui): always show Relay Health and FW Log tabs, dim when no relevant log loaded`
+
+**2026-06-10 — fix(ui): min battery single-sample reduce bug:**
+- Fixed `Math.min(…, null)` coercion in `App.jsx` line 2247 (ATAK windowed recompute block)
+- Old: `.reduce((a,b)=>Math.min(a,b), null)` — `Math.min(null, 80)` coerces null to 0, returns 0
+- New: IIFE `(batPcts => batPcts.length ? Math.min(...batPcts) : null)(filtered)` — same pattern as non-ATAK branch on line 2266
+- Commit: `fix(ui): min battery windowed reduce returns real value for single-sample ATAK sets`
+
+**PR #6 — PLI/Battery overhaul** (previously most recent merged work):
 - PLI tab overhauled — originator cards, gap inference for ATAK, interval color thresholds
 - Battery chart moved to real wall-clock UTC x-axis with per-serial lines
 - P5 battery critical threshold (< 10%) implemented
@@ -237,13 +250,13 @@ pytest tests/test_atak.py -v  # single file verbose
 
 Based on the backlog, the most actionable items (not blocked):
 
-1. **`Math.min(…, null)` bug** in `App.jsx` — min battery windowed reduce returns 0 for single-sample ATAK sets. Simple fix: `vals.length ? Math.min(...vals) : null`
+1. **Time-window disabled state** for logs with unparseable timestamps (relay_manager logcat) — small, contained fix in `FileUpload.jsx`
 
 2. **P2: Protocol separation (BROADCAST/PRIVATE)** in TX/RX analysis — `messageProtocol` is already parsed, just needs UI lanes
 
 3. **P3: Cross-device delivery matrix** — `logId` is already parsed across ATAK logs
 
-4. **Time-window disabled state** for logs with unparseable timestamps (relay_manager logcat)
+4. **P4: Relay copy/retransmission flag** — flag file transfers with matching segment count but different logId
 
 ---
 
