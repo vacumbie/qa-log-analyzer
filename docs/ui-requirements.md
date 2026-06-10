@@ -505,3 +505,24 @@ parseable timestamps are found, the upload flow routes to a `range-unavailable`
 step (replacing the prior silent skip) that shows a warning banner, a disabled
 slider placeholder, a **← Back** button, and a working **Analyse →** that
 proceeds with the full log (no window applied).
+
+### Time-Window Scanner — detect ATAK epoch-ms timestamps
+`extractTimeRange` in `FileUpload.jsx` only matches wall-clock strings
+(`TS_RE` = `\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}`, requires a 4-digit year).
+ATAK logs store time as epoch milliseconds in `timestampInMillis` (e.g.
+`1780500001000`), which has no `YYYY-MM-DD` form — so ATAK logs find zero matches
+and route to the disabled `range-unavailable` step, losing the time-window slider
+even though they carry perfectly good timestamps. Confirmed against
+`tests/fixtures/atak_sample.json` and `atak_multiserial_sample.json` (0 matches);
+`atak_enhanced_sample.json` happens to also carry wall-clock strings so it is
+unaffected, which makes the behavior inconsistent across ATAK logs.
+
+**Fix:** extend the client scanner to also parse epoch-ms values (e.g. 13-digit
+integers in a plausible recent range, or the `timestampInMillis` field
+specifically) and fold them into the min/max range so ATAK logs get the working
+slider. Mirror the same regex/logic change in `tests/test_timewindow_trigger.py`.
+
+**Priority:** High.
+
+**Status:** ⏳ Pending — not started. Surfaced 2026-06-10 while adding
+`tests/test_timewindow_trigger.py`; related to the disabled-state feature above.

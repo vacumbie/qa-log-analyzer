@@ -159,6 +159,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | Network Topology tab (Section 14) | ⏳ Pending (design spec exists) |
 | Time-window disabled state for unparseable timestamps | ✅ Done — `range-unavailable` step in FileUpload.jsx replaces the silent skip |
 | Min battery windowed reduce returns 0 for single-sample sets (ATAK) | ✅ Done — IIFE pattern: `(batPcts => batPcts.length ? Math.min(...batPcts) : null)(filtered)` |
+| `extractTimeRange` doesn't detect ATAK epoch-ms timestamps (`timestampInMillis`) — ATAK logs lose the time-window slider | ⏳ Pending — **High**; extend client scanner to parse epoch-ms |
 | Battery Chart — Multi-Radio False Recovery DataNote | ⏳ Pending dev team confirmation |
 
 ---
