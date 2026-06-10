@@ -241,7 +241,7 @@ function RangeSlider({ globalMin, globalMax, startMs, endMs, onChange }) {
 // ── Modal drop zone ───────────────────────────────────────────────────────────
 
 function UploadModal({ onFiles, loading, onClose }) {
-  const [step,      setStep]     = useState('drop')   // 'drop' | 'range'
+  const [step,      setStep]     = useState('drop')   // 'drop' | 'range' | 'range-unavailable'
   const [pending,   setPending]  = useState([])
   const [globalMin, setGlobalMin] = useState(0)
   const [globalMax, setGlobalMax] = useState(0)
@@ -293,7 +293,7 @@ function UploadModal({ onFiles, loading, onClose }) {
     setStartMs(snappedMin)
     setEndMs(snappedMax)
     setStep('range')
-  }, [onFiles, onClose])
+  }, [])
 
   const handleConfirm = useCallback(() => {
     onFiles(pending, { startMs, endMs })
