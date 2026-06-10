@@ -25,6 +25,19 @@ const TABS = [
 
 // ── Shared sub-components ─────────────────────────────────────────────────────
 
+function EmptyTabState({ message, detail }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', gap: 12 }}>
+      <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 20, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#2a3a52' }}>
+        {message}
+      </div>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: C.muted, letterSpacing: '0.04em', maxWidth: 420, textAlign: 'center' }}>
+        {detail}
+      </div>
+    </div>
+  )
+}
+
 function SectionHeader({ icon, title, sub }) {
   return (
     <div style={{ marginBottom: 14, marginTop: 28 }}>
@@ -2078,9 +2091,15 @@ function TabContent({ tab, results }) {
     case 'rssi':      return <RssiTab      results={results} />
     case 'chat':      return <ChatTab      results={results} />
     case 'health':      return <HealthTab      results={results} />
-    case 'relay-health': return <RelayHealthTab results={results} />
+    case 'relay-health':
+      if (!results.some(r => r.log_format === 'relay_manager'))
+        return <EmptyTabState message="No Relay Manager Logs Uploaded" detail="Upload an Android logcat file from com.gotenna.relaymanager to analyze relay health data." />
+      return <RelayHealthTab results={results} />
     case 'atak':         return <AtakTab        results={results} />
-    case 'fw-log':       return <FwLogTab       results={results} />
+    case 'fw-log':
+      if (!results.some(r => r.log_format === 'fw_log'))
+        return <EmptyTabState message="No Firmware Logs Uploaded" detail="Upload a UART/USB debug log from the goTenna relay radio to analyze firmware data." />
+      return <FwLogTab results={results} />
     default:          return null
   }
 }
@@ -2324,8 +2343,7 @@ export default function App() {
   const activeResults = activeDevice !== null ? [dedupedResults[activeDevice]] : dedupedResults
   const visibleTabs   = TABS.filter(t => {
     if (t.atakOnly)   return results.some(r => r.log_format === 'atak')
-    if (t.relayOnly)  return results.some(r => r.log_format === 'relay_manager')
-    if (t.fwOnly)     return results.some(r => r.log_format === 'fw_log')
+    // relay-health and fw-log are always visible — dimmed when no relevant log loaded
     return true
   })
 
@@ -2394,21 +2412,27 @@ export default function App() {
 
           {/* Tab bar */}
           <div style={{ display: 'flex', gap: 0, padding: '0 36px', borderBottom: '1px solid var(--border2)', background: 'rgba(5,8,15,0.80)', flexShrink: 0, flexWrap: 'wrap', alignItems: 'center', backdropFilter: 'blur(4px)' }}>
-            {visibleTabs.map(t => (
-              <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                padding: '10px 16px 12px',
-                fontFamily: "'Barlow Condensed',sans-serif", fontSize: 13, fontWeight: 600,
-                letterSpacing: '0.06em', textTransform: 'uppercase',
-                color: activeTab === t.id ? 'var(--accent)' : C.muted,
-                borderBottom: `2px solid ${activeTab === t.id ? 'var(--accent)' : 'transparent'}`,
-                marginBottom: -1, transition: 'color 0.15s, border-color 0.15s',
-              }}>
-                {t.label}
-                {t.atakOnly   && <span style={{ marginLeft: 4, fontSize: 8, color: C.yellow,   fontFamily: 'var(--mono)' }}>α</span>}
-                {t.relayOnly  && <span style={{ marginLeft: 4, fontSize: 8, color: '#22d3ee', fontFamily: 'var(--mono)' }}>📡</span>}
-              </button>
-            ))}
+            {visibleTabs.map(t => {
+              const hasRelay = results.some(r => r.log_format === 'relay_manager')
+              const hasFw    = results.some(r => r.log_format === 'fw_log')
+              const inactive = (t.relayOnly && !hasRelay) || (t.fwOnly && !hasFw)
+              return (
+                <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
+                  background: 'none', border: 'none', cursor: inactive ? 'default' : 'pointer',
+                  padding: '10px 16px 12px',
+                  fontFamily: "'Barlow Condensed',sans-serif", fontSize: 13, fontWeight: 600,
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                  color: activeTab === t.id ? 'var(--accent)' : inactive ? '#2a3a52' : C.muted,
+                  borderBottom: `2px solid ${activeTab === t.id ? 'var(--accent)' : 'transparent'}`,
+                  marginBottom: -1, transition: 'color 0.15s, border-color 0.15s',
+                  opacity: inactive ? 0.45 : 1,
+                }}>
+                  {t.label}
+                  {t.atakOnly  && <span style={{ marginLeft: 4, fontSize: 8, color: C.yellow,   fontFamily: 'var(--mono)' }}>α</span>}
+                  {t.relayOnly && <span style={{ marginLeft: 4, fontSize: 8, color: inactive ? '#2a3a52' : '#22d3ee', fontFamily: 'var(--mono)' }}>📡</span>}
+                </button>
+              )
+            })}
           </div>
 
           {/* Tab content */}
