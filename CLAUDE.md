@@ -359,7 +359,7 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | Battery chart real UTC timestamps + per-serial lines | ✅ Done |
 | PLI Settings section (pliSettingUpdated) | ✅ Done |
 | GID collision fix (CL_B + gt_Sassy_B_Net) | ✅ Done — nodeMap key = gid+filename |
-| Time-window step disabled state for unparseable timestamps | Pending — not started; currently skips the step silently |
+| Time-window step disabled state for unparseable timestamps | ✅ Done — `range-unavailable` step in FileUpload.jsx replaces the silent skip |
 | Min battery windowed reduce returns 0 for single-sample sets (ATAK branch) | ⏳ Pending — pre-existing `Math.min(…, null)` coercion bug |
 
 ---
