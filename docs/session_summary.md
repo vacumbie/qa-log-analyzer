@@ -222,7 +222,12 @@ pytest tests/test_atak.py -v  # single file verbose
 - task-completion-validator flagged the code as done but four doc locations still said "Pending — not started"; PR #7 closes that gap
 - `fix(ui)` (`9c100d5`): collapsed a redundant modal-header ternary (both branches returned `'Select Time Window'`)
 - `docs(session)` (`2f74692`): marked the item ✅ Done in `ui-requirements.md`, `session_summary.md`, and `CLAUDE.md` line 377 (line-377 hunk staged surgically so unrelated working-tree CLAUDE.md edits stayed out)
-- Branch: `feat-time-window-disabled-step` → PR #7 (open, base `main`)
+- `fix(ui)` (`d026110`): UI Lint failed CI (`--max-warnings 0`) on a `react-hooks/exhaustive-deps` warning — `7cc7bf8` moved the no-timestamps branch off `onFiles()`/`onClose()`, leaving `onDrop` with stale `[onFiles, onClose]` deps. Emptied the dep array (body only calls stable setters); verified lint clean locally
+- Branch: `feat-time-window-disabled-step` → **PR #7 merged** (`31bc8a3`), branch deleted
+
+**2026-06-10 — docs: document the session-summary workflow in CLAUDE.md:**
+- Added `session_summary.md` to the project-shape doc map, a new "Update the session summary" task under Common Tasks, and an agent-note reminder to update it after every task
+- Commit `9a9005f` on branch `docs-session-summary-workflow` — pushed to origin, no PR opened
 
 **2026-06-10 — feat(ui): always show Relay Health and FW Log tabs:**
 - Relay Health and FW Log tabs are now always visible in the tab bar
