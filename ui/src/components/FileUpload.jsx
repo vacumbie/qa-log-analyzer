@@ -341,7 +341,7 @@ function UploadModal({ onFiles, loading, onClose }) {
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 20 }}>
           <div>
             <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 16, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#c8ddf4' }}>
-              {step === 'drop' ? 'Add Log Files' : step === 'range-unavailable' ? 'Select Time Window' : 'Select Time Window'}
+              {step === 'drop' ? 'Add Log Files' : 'Select Time Window'}
             </div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--muted)', marginTop: 2 }}>
               {step === 'drop'
