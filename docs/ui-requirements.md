@@ -495,5 +495,8 @@ broken or whether my window was applied.
 which the client-side scanner in `FileUpload.jsx` does not parse, so the range step is
 skipped. Noticed during browser verification of the Health-tab scoping.
 
-**Status:** ⏳ Pending — not started. Affects `ui/src/components/FileUpload.jsx`
-(the `drop` → `range` step transition and `RangeSlider`).
+**Status:** ✅ Done. Implemented in `ui/src/components/FileUpload.jsx`: when no
+parseable timestamps are found, the upload flow routes to a `range-unavailable`
+step (replacing the prior silent skip) that shows a warning banner, a disabled
+slider placeholder, a **← Back** button, and a working **Analyse →** that
+proceeds with the full log (no window applied).

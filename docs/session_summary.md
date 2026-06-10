@@ -157,7 +157,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | P6: KNOT clock skew investigation | ⏳ Pending |
 | P7: Poseidon log format | ⏳ Deferred |
 | Network Topology tab (Section 14) | ⏳ Pending (design spec exists) |
-| Time-window disabled state for unparseable timestamps | ⏳ Pending |
+| Time-window disabled state for unparseable timestamps | ✅ Done — `range-unavailable` step in FileUpload.jsx replaces the silent skip |
 | Min battery windowed reduce returns 0 for single-sample sets (ATAK) | ✅ Done — IIFE pattern: `(batPcts => batPcts.length ? Math.min(...batPcts) : null)(filtered)` |
 | Battery Chart — Multi-Radio False Recovery DataNote | ⏳ Pending dev team confirmation |
 
@@ -217,6 +217,12 @@ pytest tests/test_atak.py -v  # single file verbose
 
 ## Most Recent Work (Last Few PRs)
 
+**2026-06-10 — feat(ui): time-window disabled state for unparseable timestamps:**
+- When `FileUpload.jsx` can't derive `globalMin`/`globalMax` (no parseable timestamps, e.g. relay_manager logcat which omits the year), the flow now routes to a new `range-unavailable` step instead of silently skipping the time-window step
+- The step shows a warning banner explaining filtering is unavailable, a disabled slider placeholder, a **← Back** button, and a working **Analyse →** that proceeds with the full log (`timeWindow = null`)
+- Tidied a redundant ternary in the modal header (`step === 'range-unavailable' ? 'Select Time Window' : 'Select Time Window'`)
+- Commit: `feat(ui): show disabled time-window step when timestamps are unparseable`
+
 **2026-06-10 — feat(ui): always show Relay Health and FW Log tabs:**
 - Relay Health and FW Log tabs are now always visible in the tab bar
 - When no relevant log is loaded: tab label is dimmed (opacity 45%, darker color, default cursor) and tab body shows a centered empty-state message
@@ -250,13 +256,11 @@ pytest tests/test_atak.py -v  # single file verbose
 
 Based on the backlog, the most actionable items (not blocked):
 
-1. **Time-window disabled state** for logs with unparseable timestamps (relay_manager logcat) — small, contained fix in `FileUpload.jsx`
+1. **P2: Protocol separation (BROADCAST/PRIVATE)** in TX/RX analysis — `messageProtocol` is already parsed, just needs UI lanes
 
-2. **P2: Protocol separation (BROADCAST/PRIVATE)** in TX/RX analysis — `messageProtocol` is already parsed, just needs UI lanes
+2. **P3: Cross-device delivery matrix** — `logId` is already parsed across ATAK logs
 
-3. **P3: Cross-device delivery matrix** — `logId` is already parsed across ATAK logs
-
-4. **P4: Relay copy/retransmission flag** — flag file transfers with matching segment count but different logId
+3. **P4: Relay copy/retransmission flag** — flag file transfers with matching segment count but different logId
 
 ---
 
