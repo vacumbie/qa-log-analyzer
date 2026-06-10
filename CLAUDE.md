@@ -380,39 +380,63 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 
 ---
 
-## Available agents (in `.claude/agents/`)
+## Quality Gate Sequence
 
-| Agent | Purpose | When to use |
-|-------|---------|-------------|
-| `jenny` | Spec compliance auditor | Feature claimed complete — verify against docs |
-| `karen` | Reality manager / no-nonsense status check | Something feels off, verify what actually works |
-| `parser-agent` | Full parser chain specialist | Adding/modifying any parser or ParseResult field |
-| `log-analyst` | Raw log analysis before parser is written | New log file arrives — understand it first |
-| `docs-agent` | Keeps all 4 docs in sync with code | After any significant code change |
-| `peer-reviewer` | Pre-merge code review | Before merging a branch |
-| `vera` | Unit test specialist — writes tests, audits coverage gaps, ensures fixtures are realistic | After parser work (adding/modifying a parser), when coverage feels thin, or as a routine pre-merge check |
-| `task-completion-validator` | End-to-end completion check | After claiming a feature is done |
-| `code-quality-pragmatist` | Simplicity check | After implementing — check for over-engineering |
-| `claude-md-compliance-checker` | Verifies against CLAUDE.md rules | After any significant change |
+Every feature or fix must pass through the following agents before merge.
+Run them in order — each agent assumes the previous one has already passed.
 
----
+### Mandatory (every feature)
 
-## Quality gate sequence
+| Step | Agent | What It Checks | Invoke With |
+|------|-------|---------------|-------------|
+| 1 | `vera` | Test coverage depth, fixture realism, sentinel value handling, `DATA LIMITATION` entries in `parse_errors` | `run vera to audit coverage for <feature>` |
+| 2 | `task-completion-validator` | End-to-end completion checklist — ParseResult chain, pytest clean, docs updated | `run task-completion-validator to verify <feature>` |
+| 3 | `jenny` | Spec compliance — does the implementation match `docs/` and `CLAUDE.md`? | `run jenny to verify <feature> against the docs` |
+| 4 | `karen` | Live browser verification — real log, real data, no dashes or NoData | `run karen to verify <feature> in the UI` |
+| 5 | `peer-reviewer` | Pre-merge code review — diff reviewed, helpers read, no invented findings | `run peer-reviewer` |
+| 6 | `claude-md-compliance-checker` | CLAUDE.md rules — ParseResult chain, detection order, temperature conversion, commit format | `run claude-md-compliance-checker` |
 
-**Mandatory (every feature):**
-1. `vera` — test coverage and DATA LIMITATION audit
-2. `task-completion-validator` — end-to-end completion check
-3. `jenny` — spec compliance
-4. `karen` — live browser verification
-5. `peer-reviewer` — pre-merge code review
-6. `claude-md-compliance-checker` — CLAUDE.md rules check
+### Optional (invoke when complexity is suspected)
 
-**Optional (when complexity is suspected):**
-- `code-quality-pragmatist` — invoke after implementation if the solution feels over-engineered
+| Agent | When to Use | Invoke With |
+|-------|------------|-------------|
+| `code-quality-pragmatist` | After implementing — if the solution feels over-engineered, abstractions feel wide, or a helper grew an options bag | `run code-quality-pragmatist to review <feature or file>` |
 
----
+`code-quality-pragmatist` is **not a routine checkbox**. It enforces the
+"readability over cleverness" and "reuse without over-abstraction" rules
+already in this file. Run it when something feels wrong, not after every
+small fix. The other agents will recommend it if they spot complexity during
+their own checks.
 
-## Agent-specific notes
+### Agent division of labor (avoid duplicate effort)
+
+These responsibilities are owned by one agent — others defer rather than
+re-check:
+
+| Responsibility | Owner | Others defer to |
+|---------------|-------|-----------------|
+| `parse_errors` DATA LIMITATION coverage | `vera` | task-completion-validator, jenny |
+| ParseResult chain enforcement | `claude-md-compliance-checker` | code-quality-pragmatist |
+| Live browser verification | `karen` | task-completion-validator |
+| Spec alignment | `jenny` | karen |
+| Test coverage depth | `vera` | task-completion-validator |
+
+### Available agents (in `.claude/agents/`)
+
+| Agent | Purpose | Mandatory / Optional |
+|-------|---------|---------------------|
+| `vera` | Unit test specialist — writes tests, audits coverage, ensures fixtures are realistic; owns DATA LIMITATION auditing | Mandatory |
+| `task-completion-validator` | End-to-end completion checklist | Mandatory |
+| `jenny` | Spec compliance auditor — implementation vs docs | Mandatory |
+| `karen` | Live browser verification only — assumes validator already ran | Mandatory |
+| `peer-reviewer` | Pre-merge code review | Mandatory |
+| `claude-md-compliance-checker` | CLAUDE.md rules enforcement; owns ParseResult chain check | Mandatory |
+| `code-quality-pragmatist` | Simplicity and readability check | Optional |
+| `parser-agent` | Full parser chain specialist | Use when adding/modifying any parser |
+| `log-analyst` | Raw log analysis before parser is written | Use when new log format arrives |
+| `docs-agent` | Keeps all 4 docs in sync with code | Use after any significant change |
+
+### Agent-specific notes
 
 - **Fetch current file state before editing.** Do not assume a file matches
   a previous session's output — the repo may have changed.
