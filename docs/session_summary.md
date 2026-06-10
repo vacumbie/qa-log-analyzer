@@ -174,6 +174,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | `log-analyst` | Raw log analysis before parser is written | New log file arrives — understand it first |
 | `docs-agent` | Keeps all 4 docs in sync with code | After any significant code change |
 | `peer-reviewer` | Pre-merge code review | Before merging a branch |
+| `vera` | Unit test specialist — writes tests, audits coverage gaps, ensures fixtures are realistic | After parser work (adding/modifying a parser), when coverage feels thin, or as a routine pre-merge check |
 | `task-completion-validator` | End-to-end completion check | After claiming a feature is done |
 | `code-quality-pragmatist` | Simplicity check | After implementing — check for over-engineering |
 | `claude-md-compliance-checker` | Verifies against CLAUDE.md rules | After any significant change |
