@@ -314,11 +314,12 @@ misleading 5/5. See the Health Score spec in `ui-requirements.md` (section 10).
 - **Android ATAK Plug-in:** Both log types confirmed as newline-delimited JSON. Parser built (`parser/atak.py`), including SDK Logging 2.0 `sdkError` aggregation.
 - **Pro+ Application:** 1 log type per platform confirmed. iOS: rsdk_log_JonathaniOS.txt analyzed. Android: rsdk_log_wendell_and.txt analyzed.
 - **Relay Health Manager — iOS:** Not yet confirmed whether an iOS version exists.
+- **Pro+ diagnostic (block format) — firmware 3.1.11 omits originator identity:** Some firmware-3.1.11 diagnostic logs omit the originator callsign and GID from Received Message blocks, so the sender of those messages cannot be identified. `parser/diagnostic.py` now surfaces this in `parse_errors` with a `DATA LIMITATION —` entry, emitted **only when it actually manifests** (a Received Message block carrying neither originator identity field) and reporting the affected count (`{n} of {total}`). Logs that include the fields emit nothing.
 - All temperatures stored internally in Celsius and must be converted to Fahrenheit for display.
 
 ---
 
-_Last updated: 2026-06-05_
+_Last updated: 2026-06-12_
 
 ---
 
@@ -733,6 +734,7 @@ The delta between `File transmission started` and `File has been successfully de
 - **Contact callsigns** are available via `ContactManager` lines but not currently parsed by `rsdk.py`
 - ✅ **TX pattern bug fixed:** `rsdk.py` previously targeted `SendMessageResponse.*FINAL_ACK` etc. Now correctly matches `GRIP_Receiver` structured fields lines and final ACK text lines. NACKs handled via `component == "NACK"` (unchanged).
 - **GRIP structured fields now parsed:** `GRIP_SENDER` outgoing and `GRIP_Receiver` incoming message fields lines are fully parsed into `GripMessage` records. `hops` and `rssi` from incoming lines are genuine RF data. `repCounter` tracks retransmissions per segment.
+- **GRIP hop count / RSSI availability now surfaced in `parse_errors`:** hop count and RSSI exist **only** on `GRIP_Receiver` incoming message-fields lines. When a session has no such lines (e.g. outgoing-only GRIP, or no GRIP at all), those RF fields are unavailable for the whole log. `parser/rsdk.py` now emits a `DATA LIMITATION —` entry in that case rather than implying the radio reported no hops. Outgoing GRIP messages alone do **not** suppress the entry — the lines must be incoming.
 - **GRIP transfer lifecycle now tracked:** End-to-end delivery time (`delivery_ms`) computed from `File transmission started` → `File has been successfully delivered` delta. Stored in `GripTransfer` records.
 - **`Send_Defferred`** and `Remaining_messages` components contain potentially useful data not currently captured
 

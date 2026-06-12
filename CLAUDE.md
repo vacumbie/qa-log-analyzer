@@ -377,6 +377,9 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | Time-window step disabled state for unparseable timestamps | ✅ Done — `range-unavailable` step in FileUpload.jsx replaces the silent skip |
 | Min battery windowed reduce returns 0 for single-sample sets (ATAK branch) | ✅ Done — IIFE pattern: `(batPcts => batPcts.length ? Math.min(...batPcts) : null)(filtered)` |
 | `extractTimeRange` doesn't detect ATAK epoch-ms timestamps (`timestampInMillis`) — ATAK logs route to `range-unavailable`, lose the slider | ⏳ Pending — **High**; extend the client scanner to parse epoch-ms values |
+| DATA LIMITATION prefix normalization (em-dash) across all 5 parsers | ✅ Done (PR #19) — canonical `DATA LIMITATION — ` (U+2014) in atak/fw_log/diagnostic/rsdk/relay_manager; both `App.jsx` banner strip sites updated |
+| diagnostic 3.1.11 `parse_errors` emission (originator callsign + GID omitted) | ✅ Done (PR #19) — data-driven, fires only when a Received Message block omits both; reports "{n} of {total}" affected |
+| rsdk GRIP-availability `parse_errors` emission (no `GRIP_Receiver` incoming fields) | ✅ Done (PR #19) — hop count / RSSI unavailability surfaced honestly when no incoming GRIP fields lines are present |
 
 ---
 

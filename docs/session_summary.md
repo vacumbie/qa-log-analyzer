@@ -145,6 +145,11 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | PLI Settings section (pliSettingUpdated) | ✅ Done |
 | Battery chart real UTC timestamps + per-serial lines | ✅ Done |
 | PLI tab ATAK support + gap inference | ✅ Done |
+| DATA LIMITATION prefix normalization (em-dash) across all 5 parsers | ✅ Done (PR #19) |
+| diagnostic 3.1.11 `parse_errors` emission (callsign + GID omitted) | ✅ Done (PR #19) |
+| rsdk GRIP-availability `parse_errors` emission | ✅ Done (PR #19) |
+| Quality-gate agent deduplication (single-owner responsibilities) | ✅ Done (PR #20) |
+| API route double-translates CRLF → diagnostic CRLF uploads parse to 0 blocks | ⏳ Pending — **High**; karen found during PR #19 gate, fix in a separate `fix(api)` PR (temp file `newline=""` + API-path regression test) |
 | FW Log — RHC payload decoding (hash→serial, FW version) | ⛔ Blocked — waiting on mapping tables from QA |
 | Session Persistence | ⏸ Deferred |
 | Relay Manager prod log support | ⛔ Blocked — waiting on prod samples |
@@ -218,6 +223,32 @@ pytest tests/test_atak.py -v  # single file verbose
 ---
 
 ## Most Recent Work (Last Few PRs)
+
+**2026-06-12 — PR #20: quality-gate agent deduplication:**
+- Refactored the 5 quality-gate agent definitions (`.claude/agents/`) so each overlapping
+  responsibility has a single owner and the others defer: vera owns `parse_errors` DATA
+  LIMITATION auditing + test-coverage depth; claude-md-compliance-checker owns the
+  ParseResult chain; karen is the post-validation live-browser check only (no longer
+  re-runs pytest or re-traces the chain); jenny owns spec alignment. jenny / TCV /
+  code-quality-pragmatist dropped the checks they were duplicating.
+- Branch `refactor-agent-deduplication`, kept **separate** from PR #19 (these were the
+  5 long-pending uncommitted agent edits). Reviewer note in the PR: the `vera.md` edit
+  also *removes* the JS-premise-via-pytest guidance (`test_timewindow_trigger.py` pattern)
+  rather than relocating it — flagged for confirmation.
+
+**2026-06-12 — PR #19 quality gate complete + a follow-up bug found:**
+- All gate steps passed: claude-md-compliance-checker ✅, vera ✅ (after closing 2 coverage
+  gaps — partial-count diagnostic + outgoing-only-GRIP rsdk), task-completion-validator ✅,
+  karen ✅ (banner prefix strips cleanly at both UI sites, no leak), peer-reviewer ✅ (2 Low
+  nits fixed: relay test tightened to em-dash assertion, inline-content rationale documented).
+  `jenny` (spec compliance) was not run this round.
+- **karen surfaced a separate, pre-existing bug** (NOT introduced by PR #19): `api/routes/parse.py`
+  writes the uploaded text to a temp file in text mode, which on Windows double-translates
+  CRLF (`\r\n` → `\r\r\n`); `Path.read_text()` universal-newline reading then turns that into
+  `\n\n`, prematurely splitting diagnostic blocks → **0 received messages** for any CRLF
+  diagnostic upload through the API. The unit test misses it because it calls the parser
+  directly, bypassing the route. Decision: merge #19 on its (clean) scope, fix CRLF in a
+  separate `fix(api)` PR with an **API-path** regression test. See Backlog Status.
 
 **2026-06-12 — parse_errors DATA LIMITATION gaps (3 fixes + test set):**
 - **Prefix normalization:** `atak.py` and `fw_log.py` (3 entries) now use the canonical
