@@ -386,6 +386,7 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | General DATA LIMITATION banner for diagnostic/rsdk/atak tabs | ⏳ Pending — diagnostic 3.1.11 & atak sdkError `parse_errors` entries reach the API + file-list ⚠ glyph but have no dedicated tab banner (rsdk is shown via the HopsTab note); CLAUDE.md "Known data limitations" qualified accordingly |
 | diagnostic 3.1.11 `parse_errors` emission (originator callsign + GID omitted) | ✅ Done (PR #19) — data-driven, fires only when a Received Message block omits both; reports "{n} of {total}" affected |
 | rsdk GRIP-availability `parse_errors` emission (no `GRIP_Receiver` incoming fields) | ✅ Done (PR #19) — hop count / RSSI unavailability surfaced honestly when no incoming GRIP fields lines are present |
+| Rename "Relay Firmware" / "Relay radio firmware" to "Firmware" throughout codebase and docs | ⏳ Pending — cosmetic/naming only; do not change variable names, function names, or key strings (fw_log stays fw_log) |
 
 ---
 

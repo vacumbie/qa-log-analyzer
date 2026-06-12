@@ -541,3 +541,16 @@ remains the sole `range-unavailable` trigger. Premise pinned in
 > mid-file timestamp outlier is not seen — acceptable because the slider snaps to
 > the hour. Do not widen `EPOCH_MS_RE` to bare 13-digit integers: it must stay
 > key-anchored or it will capture durations and corrupt the range.
+
+### Rename "Relay Firmware" / "Relay radio firmware" to "Firmware" — ⏳ Pending
+Cosmetic/naming cleanup: standardize the user-facing label "Relay Firmware" /
+"Relay radio firmware" to simply "Firmware" throughout the codebase and docs
+(tab titles, headings, descriptions, comments, doc prose).
+
+**Scope:** display strings and documentation wording only.
+
+**Do NOT change** variable names, function names, or key strings — `fw_log`
+stays `fw_log` (the format key, parser filename, detection branch, tab key, etc.
+are all unchanged). This is a label/wording pass, not a refactor.
+
+**Status:** ⏳ Pending — not started.
