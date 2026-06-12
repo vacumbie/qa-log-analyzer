@@ -149,7 +149,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | diagnostic 3.1.11 `parse_errors` emission (callsign + GID omitted) | ✅ Done (PR #19) |
 | rsdk GRIP-availability `parse_errors` emission | ✅ Done (PR #19) |
 | Quality-gate agent deduplication (single-owner responsibilities) | ✅ Done (PR #20) |
-| API route double-translates CRLF → diagnostic CRLF uploads parse to 0 blocks | ⏳ Pending — **High**; karen found during PR #19 gate, fix in a separate `fix(api)` PR (temp file `newline=""` + API-path regression test) |
+| API route double-translates CRLF → diagnostic CRLF uploads parse to 0 blocks | ✅ Fixed (PR #21, open) — karen found during PR #19 gate; temp file now opened with `newline=""`, plus `tests/test_parse_route.py` API-path regression test |
 | FW Log — RHC payload decoding (hash→serial, FW version) | ⛔ Blocked — waiting on mapping tables from QA |
 | Session Persistence | ⏸ Deferred |
 | Relay Manager prod log support | ⛔ Blocked — waiting on prod samples |
