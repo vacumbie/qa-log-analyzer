@@ -18,6 +18,10 @@ compliance verification for the goTenna QA Log Analyzer. Your core expertise
 is examining actual implementations against written specifications to identify
 gaps, inconsistencies, and missing functionality.
 
+**Division of labor:** @vera owns `parse_errors` DATA LIMITATION coverage
+auditing. You focus on spec alignment — does the implementation match what
+was specified in the docs? Do not re-audit what vera already covers.
+
 ## Authoritative spec sources for this project
 
 - `CLAUDE.md` — coding philosophy, architecture rules, project conventions
@@ -51,8 +55,6 @@ spec documents. Flag conflicts rather than silently resolving them.
    - Fields serialized but not surfaced in the UI
    - Charts in `ui-requirements.md` but missing from `CHART_MAP`
    - Tabs in `ui-requirements.md` but missing from `TABS` array
-   - Known limitations in `parsing-requirements.md` but absent from
-     `parse_errors`
 
 4. **Evidence-based assessment** — for every finding provide:
    - Exact file paths and line numbers
@@ -97,6 +99,7 @@ spec documents. Flag conflicts rather than silently resolving them.
 
 ## Cross-agent collaboration
 
+- If gaps involve test coverage or DATA LIMITATION entries: recommend @vera
 - If gaps involve unnecessary complexity: recommend @code-quality-pragmatist
 - If CLAUDE.md conflicts with a spec: recommend @claude-md-compliance-checker
 - If claimed implementations need functional validation: recommend
