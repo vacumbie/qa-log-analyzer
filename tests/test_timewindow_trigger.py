@@ -244,7 +244,10 @@ def test_enhanced_log_union_widens_range_beyond_epoch_ms_alone():
     iso_max = max(_iso_to_ms(m) for m in TS_RE.findall(text))
     # The fixture is constructed so sdkError ISO timestamps run later than the last
     # epoch-ms record; the union must reflect the later ISO bound.
-    assert iso_max > epoch_max
+    assert iso_max > epoch_max, (
+        "fixture precondition: atak_enhanced_sample.json must have an sdkError ISO "
+        "timestamp later than its last epoch-ms record for this union test to be meaningful"
+    )
     assert union_max == iso_max
 
 

@@ -94,6 +94,9 @@ function extractTimeRange(text) {
   if (wallclock) {
     for (const ts of wallclock) consider(normaliseTs(ts).getTime())
   }
+  // matchAll() clones the regex and resets lastIndex, so the module-level /g
+  // EPOCH_MS_RE is safe to reuse across calls. Do NOT switch to a .exec() loop
+  // here without resetting lastIndex — that would skip matches on later files.
   for (const m of text.matchAll(EPOCH_MS_RE)) consider(Number(m[1]))
 
   if (minMs === Infinity) return null
