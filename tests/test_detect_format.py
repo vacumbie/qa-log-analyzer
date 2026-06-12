@@ -4,6 +4,13 @@ Covers _detect_format() in api/routes/parse.py — the heuristic that picks a
 parser from filename + content. Detection ORDER is the thing most likely to
 break silently when a new format is added, so the ordering rules documented in
 CLAUDE.md ("fw_log first", "relay_manager before rsdk") get dedicated tests.
+
+Convention note: CLAUDE.md says fixtures live in tests/fixtures/, not inline.
+The filename-signal and ordering tests below intentionally pass content inline
+instead. Filename tests use a bare "{}" because detection is driven by the name,
+not the body; ordering tests need synthetic content that mixes markers from two
+formats at once — no real log does that, so a fixture file would be misleading.
+The per-format detection tests above use the real fixtures.
 """
 
 from pathlib import Path
