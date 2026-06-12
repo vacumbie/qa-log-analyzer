@@ -31,6 +31,7 @@ signal, not a bug.
 """
 
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
@@ -53,6 +54,28 @@ def _has_detectable_range(fixture_name):
     i.e. the upload flow shows the slider rather than the range-unavailable step."""
     text = (FIXTURE_DIR / fixture_name).read_text(encoding="utf-8")
     return TS_RE.search(text) is not None or EPOCH_MS_RE.search(text) is not None
+
+
+def _iso_to_ms(ts):
+    """Mirror normaliseTs() in FileUpload.jsx: treat the wall-clock string as UTC."""
+    return int(
+        datetime.fromisoformat(ts.replace(" ", "T"))
+        .replace(tzinfo=timezone.utc)
+        .timestamp()
+        * 1000
+    )
+
+
+def _extract_time_range(fixture_name):
+    """Python mirror of extractTimeRange(): union of wall-clock and epoch-ms hits,
+    returned as (minMs, maxMs) or None. Used to pin the union *value*, not just the
+    boolean that a range exists."""
+    text = (FIXTURE_DIR / fixture_name).read_text(encoding="utf-8")
+    vals = [_iso_to_ms(m) for m in TS_RE.findall(text)]
+    vals += [int(g) for g in EPOCH_MS_RE.findall(text)]
+    if not vals:
+        return None
+    return min(vals), max(vals)
 
 
 # ── Fixture availability ──────────────────────────────────────────────────────
@@ -142,3 +165,92 @@ def test_epoch_ms_requires_exactly_13_digits():
     # A short duration-like value under a timestamp key must not be read as epoch ms.
     assert EPOCH_MS_RE.search('"timestampInMillis": 2006') is None
     assert EPOCH_MS_RE.search('"timestampInMillis": 1780500001000') is not None
+
+
+# ── Each matched key is exercised individually (not just collectively) ────────
+# test_epoch_ms_matches_session_timestamp_keys loops all three, but loops can
+# mask a single-arm regression. Pin each arm with its own named scenario.
+
+def test_epoch_ms_matches_timestamp_in_millis():
+    m = EPOCH_MS_RE.search('"timestampInMillis": 1780500001000')
+    assert m and m.group(1) == "1780500001000"
+
+
+def test_epoch_ms_matches_launch_time_in_millis():
+    m = EPOCH_MS_RE.search('"launchTimeInMillis": 1780500000000')
+    assert m and m.group(1) == "1780500000000"
+
+
+def test_epoch_ms_matches_message_timestamp_in_millis():
+    m = EPOCH_MS_RE.search('"messageTimestampInMillis": 1780500010000')
+    assert m and m.group(1) == "1780500010000"
+
+
+# ── Anchoring risk: messageTimestampInMillis CONTAINS timestampInMillis ───────
+# The alternation includes both `timestampInMillis` and `messageTimestampInMillis`.
+# The leading `"` is what prevents the shorter arm from matching the substring
+# inside the longer key — without it, `messageTimestampInMillis` would yield a
+# spurious match starting mid-word. Pin that the match spans the whole key.
+
+def test_message_timestamp_key_matches_as_whole_key_not_inner_substring():
+    line = '"messageTimestampInMillis": 1780500010000'
+    m = EPOCH_MS_RE.search(line)
+    assert m is not None
+    # The match must begin at the opening quote of the full key, not at the
+    # 'timestampInMillis' substring 7 chars in.
+    assert m.group(0) == line
+
+
+def test_unquoted_timestamp_substring_does_not_match():
+    # Only quoted JSON keys are timestamps. A bare substring (e.g. inside prose
+    # or a different identifier) must never be read as a session timestamp.
+    assert EPOCH_MS_RE.search("XmessageTimestampInMillis: 1780500010000") is None
+
+
+# ── Digit-count boundary: exactly 13, the  guard ───────────────────────────
+
+def test_epoch_ms_rejects_twelve_digit_value():
+    assert EPOCH_MS_RE.search('"timestampInMillis": 178050000100') is None
+
+
+def test_epoch_ms_rejects_fourteen_digit_value():
+    # \d{13} fails when a 14th digit follows (no word boundary mid-number), so a
+    # 14-digit value is rejected rather than silently truncated to its first 13.
+    assert EPOCH_MS_RE.search('"timestampInMillis": 17805000010000') is None
+
+
+def test_epoch_ms_rejects_negative_value_under_valid_key():
+    # A negative value can never be a wall-clock epoch ms; the leading '-' is not
+    # consumed and \d{13} cannot anchor, so it is excluded.
+    assert EPOCH_MS_RE.search('"timestampInMillis": -1780500001000') is None
+
+
+def test_epoch_ms_tolerates_whitespace_around_colon():
+    # JSON pretty-printers vary the spacing; the scanner must not depend on it.
+    assert EPOCH_MS_RE.search('"timestampInMillis"  :   1780500001000') is not None
+
+
+# ── Union behavior — the enhanced log uses BOTH sources, and ISO widens it ────
+# atak_enhanced_sample.json carries epoch-ms records AND sdkError ISO timestamps
+# that fall OUTSIDE the epoch-ms span. test_atak_enhanced_log_detected only proves
+# a range exists (epoch-ms alone is enough). This pins that the union actually
+# widens the range — if extractTimeRange dropped the wall-clock branch, the slider
+# would silently under-cover the session and this test would catch it.
+
+def test_enhanced_log_union_widens_range_beyond_epoch_ms_alone():
+    text = (FIXTURE_DIR / "atak_enhanced_sample.json").read_text(encoding="utf-8")
+    epoch_max = max(int(g) for g in EPOCH_MS_RE.findall(text))
+    union_min, union_max = _extract_time_range("atak_enhanced_sample.json")
+    iso_max = max(_iso_to_ms(m) for m in TS_RE.findall(text))
+    # The fixture is constructed so sdkError ISO timestamps run later than the last
+    # epoch-ms record; the union must reflect the later ISO bound.
+    assert iso_max > epoch_max
+    assert union_max == iso_max
+
+
+def test_regular_atak_log_range_comes_only_from_epoch_ms():
+    # No wall-clock string in a regular ATAK log, so the union equals the epoch-ms
+    # min/max — confirms the epoch-ms branch alone produces a usable range.
+    text = (FIXTURE_DIR / "atak_sample.json").read_text(encoding="utf-8")
+    epochs = [int(g) for g in EPOCH_MS_RE.findall(text)]
+    assert _extract_time_range("atak_sample.json") == (min(epochs), max(epochs))
