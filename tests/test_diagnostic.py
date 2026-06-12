@@ -52,8 +52,39 @@ def test_system_samples():
 
 
 def test_no_parse_errors():
+    # The sample fixture's Received Message blocks include originator callsign
+    # and GID, so the firmware-3.1.11 omission limitation must NOT fire here.
     result = parse_diagnostic_log(FIXTURE_DIR / "diagnostic_sample.txt")
     assert result.parse_errors == [], f"Unexpected errors: {result.parse_errors}"
+
+
+# ── Firmware 3.1.11 originator-identity omission (DATA LIMITATION) ─────────────
+# 3.1.11 is known to drop originator callsign + GID from Received Message blocks.
+# The limitation is surfaced only when it actually manifests (data-driven), so a
+# log that includes the identity fields stays clean (covered by test_no_parse_errors).
+
+def test_missing_identity_limitation_emitted():
+    result = parse_diagnostic_log(FIXTURE_DIR / "diagnostic_3111_no_identity_sample.txt")
+    limits = [e for e in result.parse_errors if e.startswith("DATA LIMITATION —")]
+    assert any("omits originator callsign and GID" in e for e in limits), result.parse_errors
+    # The affected messages still parse — identity fields are simply empty.
+    assert all(not m.originator_callsign and not m.originator_gid
+               for m in result.received_messages)
+
+
+def test_no_missing_identity_limitation_when_present():
+    result = parse_diagnostic_log(FIXTURE_DIR / "diagnostic_sample.txt")
+    assert not any("omits originator callsign and GID" in e for e in result.parse_errors)
+
+
+def test_partial_identity_limitation_reports_correct_count():
+    """Mixed session: 1 of 2 Received Messages omits identity. The limitation must
+    fire AND report the true affected count, not all-or-nothing."""
+    result = parse_diagnostic_log(FIXTURE_DIR / "diagnostic_3111_partial_identity_sample.txt")
+    limits = [e for e in result.parse_errors if e.startswith("DATA LIMITATION —")]
+    affected = [e for e in limits if "omits originator callsign and GID" in e]
+    assert len(affected) == 1, result.parse_errors
+    assert "1 of 2 received messages affected" in affected[0], affected[0]
 
 
 def test_avg_rssi_is_na_for_health_score():

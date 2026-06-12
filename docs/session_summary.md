@@ -1,5 +1,5 @@
 # QA Log Analyzer — Session Summary
-_Last updated: 2026-06-10_
+_Last updated: 2026-06-12_
 
 ---
 
@@ -218,6 +218,32 @@ pytest tests/test_atak.py -v  # single file verbose
 ---
 
 ## Most Recent Work (Last Few PRs)
+
+**2026-06-12 — parse_errors DATA LIMITATION gaps (3 fixes + test set):**
+- **Prefix normalization:** `atak.py` and `fw_log.py` (3 entries) now use the canonical
+  `DATA LIMITATION — ` (em-dash U+2014) prefix, matching CLAUDE.md, the compliance
+  checker, `docs-agent`, and `relay_manager.py`. All five parsers verified to emit
+  the exact same literal. **UI coupling:** `App.jsx` line 1638 (general/ATAK
+  limitations banner) stripped the old colon form `'DATA LIMITATION: '` — updated to
+  the em-dash form so the prefix is still stripped from the banner display. (The
+  relay banner at line 1881 already used em-dash.)
+- **diagnostic.py:** emits a DATA LIMITATION when a Received Message block omits the
+  originator callsign **and** GID (the known firmware-3.1.11 omission). Data-driven —
+  fires only when it actually manifests, so logs that include the fields stay clean.
+- **rsdk.py:** emits a DATA LIMITATION when no `GRIP_Receiver` incoming message-fields
+  lines are present (hop count / RSSI unavailable for the session).
+- **Tests:** new `tests/test_detect_format.py` (11 cases: per-format detection,
+  filename signals, fw-log-first and relay-before-rsdk ordering, fallback). New
+  fixture `diagnostic_3111_no_identity_sample.txt`. `test_rsdk.py` / `test_diagnostic.py`
+  gained positive+negative limitation tests; `test_no_parse_errors` repointed where
+  the new conditional limitation now legitimately fires. `test_atak.py` / `test_fw_log.py`
+  tightened to assert the em-dash prefix. After the vera coverage audit, added two
+  more cases + fixtures: rsdk **outgoing-only** GRIP (`rsdk_grip_outgoing_only.txt` —
+  grip_messages populated but all outgoing, limitation must still fire) and diagnostic
+  **partial** omission (`diagnostic_3111_partial_identity_sample.txt` — pins the
+  "1 of 2 affected" count). **Full suite: 157 passed, 2 skipped.**
+- Note: `parser-agent` and `vera` are read-only audit agents (no Edit/Write), so the
+  edits + tests were implemented directly to their standard rather than by the agents.
 
 **2026-06-10 — PRs #15–#17: agent governance docs in CLAUDE.md:**
 - **PR #16** (`4065d3c`) — added a "Quality gate sequence" section listing the mandatory per-feature agent order plus the optional code-quality-pragmatist pass.

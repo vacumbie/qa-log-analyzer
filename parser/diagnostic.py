@@ -277,4 +277,21 @@ def parse_diagnostic_log(path: Path) -> ParseResult:
             result.parse_errors.append(f"Error in block type '{btype}': {e}")
 
     _detect_session_gaps(result)
+
+    # DATA LIMITATION — firmware 3.1.11 is known to omit the originator callsign
+    # and GID from Received Message blocks, so the sender of those messages cannot
+    # be identified. Surface this only when it actually manifests: a received
+    # message carrying neither originator identity field. Logs that include the
+    # fields (later firmware, or 3.1.11 blocks that happen to have them) emit nothing.
+    missing_identity = sum(
+        1 for m in result.received_messages
+        if not m.originator_callsign and not m.originator_gid
+    )
+    if missing_identity:
+        result.parse_errors.append(
+            "DATA LIMITATION — Firmware 3.1.11 omits originator callsign and GID from "
+            f"Received Message blocks ({missing_identity} of {len(result.received_messages)} "
+            "received messages affected): the sender cannot be identified for those messages."
+        )
+
     return result

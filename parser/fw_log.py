@@ -294,17 +294,17 @@ def parse_fw_log(path: Path) -> ParseResult:
 
     # DATA LIMITATIONS
     result.parse_errors.append(
-        "DATA LIMITATION: Firmware log timestamps are relative ms from boot, "
-        "not wall clock UTC — session cannot be pinned to absolute time without "
+        "DATA LIMITATION — Firmware log timestamps are relative ms from boot, "
+        "not wall clock UTC: session cannot be pinned to absolute time without "
         "a reference point from a correlated Relay Manager log."
     )
     result.parse_errors.append(
-        "DATA LIMITATION: Device serial number and firmware version are in the "
-        "binary RHC response payload — not available as plaintext in this log. "
+        "DATA LIMITATION — Device serial number and firmware version are in the "
+        "binary RHC response payload, not available as plaintext in this log. "
         "Identity shown as origin hash only."
     )
     result.parse_errors.append(
-        "DATA LIMITATION: Battery stabilization errors "
+        "DATA LIMITATION — Battery stabilization errors "
         f"({fw.battery_error_count:,} occurrences) are a known firmware quirk "
         "where the stabilization routine fires even when battery is already stable. "
         "Not indicative of hardware failure — pending field validation to confirm."

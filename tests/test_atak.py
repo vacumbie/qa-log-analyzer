@@ -318,9 +318,10 @@ def test_sdk_error_sample_retained():
 
 
 def test_sdk_error_data_limitation_surfaced():
-    """Volume is informational; a DATA LIMITATION must be in parse_errors."""
+    """Volume is informational; a DATA LIMITATION must be in parse_errors, using
+    the canonical em-dash prefix the UI and compliance checks key off of."""
     result = parse_atak_log(ENHANCED)
-    limits = [e for e in result.parse_errors if e.startswith("DATA LIMITATION")]
+    limits = [e for e in result.parse_errors if e.startswith("DATA LIMITATION —")]
     assert any("sdkError" in e for e in limits)
 
 

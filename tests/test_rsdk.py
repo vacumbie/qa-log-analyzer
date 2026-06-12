@@ -42,8 +42,40 @@ def test_session_timestamps():
 
 
 def test_no_parse_errors():
-    result = parse_rsdk_log(FIXTURE_DIR / "rsdk_sample_ios.txt")
+    # The GRIP fixture carries incoming hop/rssi data, so no DATA LIMITATION is
+    # emitted — this asserts a genuinely clean parse with no spurious errors.
+    result = parse_rsdk_log(FIXTURE_DIR / "rsdk_grip_sample.txt")
     assert result.parse_errors == [], f"Unexpected errors: {result.parse_errors}"
+
+
+# ── GRIP hop count / RSSI availability (DATA LIMITATION) ──────────────────────
+# Hop count and RSSI only exist on GRIP_Receiver incoming message-fields lines.
+# When a session has none, the parser must surface that honestly in parse_errors.
+
+def test_grip_limitation_emitted_when_no_incoming_grip():
+    """No GRIP messages at all → limitation fires. This fixture also carries
+    ReceivedDataImpl(hopCount=0, rssi=0) lines; those SDK sentinel zeros must NOT
+    be mistaken for GRIP RF data and suppress the limitation."""
+    result = parse_rsdk_log(FIXTURE_DIR / "rsdk_sample_ios.txt")
+    assert result.grip_messages == []
+    limits = [e for e in result.parse_errors if e.startswith("DATA LIMITATION —")]
+    assert any("GRIP hop count and RSSI" in e for e in limits), result.parse_errors
+
+
+def test_grip_limitation_fires_with_outgoing_only_grip():
+    """The discrimination the fix exists for: outgoing GRIP (GRIP_SENDER) carries
+    no hop/RSSI, so a session with only outgoing GRIP messages must still surface
+    the limitation — having grip_messages is not enough; they must be incoming."""
+    result = parse_rsdk_log(FIXTURE_DIR / "rsdk_grip_outgoing_only.txt")
+    assert len(result.grip_messages) > 0
+    assert all(g.direction == "outgoing" for g in result.grip_messages)
+    assert all(g.hops is None and g.rssi is None for g in result.grip_messages)
+    assert any("GRIP hop count and RSSI" in e for e in result.parse_errors), result.parse_errors
+
+
+def test_no_grip_limitation_when_incoming_present():
+    result = parse_rsdk_log(FIXTURE_DIR / "rsdk_grip_sample.txt")
+    assert not any("GRIP hop count and RSSI" in e for e in result.parse_errors)
 
 
 # ── Health Score RSSI dimension input (summary.avg_rssi) ──────────────────────
