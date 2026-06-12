@@ -150,7 +150,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | rsdk GRIP-availability `parse_errors` emission | ✅ Done (PR #19) |
 | Quality-gate agent deduplication (single-owner responsibilities) | ✅ Done (PR #20) |
 | General DATA LIMITATION banner for diagnostic/rsdk/atak tabs | ⏳ Pending — jenny (PR #19 gate) found CLAUDE.md:299 promises a UI banner per limitation, but diagnostic 3.1.11 & atak sdkError entries reach `parse_errors` + the file-list ⚠ glyph only (rsdk shown via HopsTab note); CLAUDE.md qualified, banner deferred |
-| API route double-translates CRLF → diagnostic CRLF uploads parse to 0 blocks | ✅ Fixed (PR #21, open) — karen found during PR #19 gate; temp file now opened with `newline=""`, plus `tests/test_parse_route.py` API-path regression test |
+| API route double-translates CRLF → diagnostic CRLF uploads parse to 0 blocks | ✅ Fixed (PR #21, merged) — karen found during PR #19 gate; temp file now opened with `newline=""`, plus `tests/test_parse_route.py` API-path regression test |
 | FW Log — RHC payload decoding (hash→serial, FW version) | ⛔ Blocked — waiting on mapping tables from QA |
 | Session Persistence | ⏸ Deferred |
 | Relay Manager prod log support | ⛔ Blocked — waiting on prod samples |
@@ -224,6 +224,27 @@ pytest tests/test_atak.py -v  # single file verbose
 ---
 
 ## Most Recent Work (Last Few PRs)
+
+**2026-06-12 — Log analysis (web session): HOTLIPS + MESMER storedMessages buffer saturation:**
+- Analyzed HOTLIPS (GID `90296226464906`) and MESMER (GID `90397332557396`) diagnostic
+  logs from the **2026-06-04 test event**.
+- Confirmed a `storedMessages` **buffer saturation** pattern on **both** devices: a
+  **30-message hard ceiling** — the buffer fills while the device is CONNECTED, then PLI
+  **bursts on drain**.
+- **MESMER Episode 6**: buffer stuck at the ceiling for **2+ minutes while connected** — the
+  strongest observed instance, candidate for a bug report.
+- Both devices show an **anomalous second serial** at session start.
+- Finding is **systemic, not device-specific**.
+- Troubleshooting docs created (web session): `HotLips_Troubleshooting.md`, `MESMER_Troubleshooting.md`.
+- **NACK 204/205 interpretation flagged as a DATA LIMITATION** — meaning of these codes is
+  unconfirmed, pending a firmware error-code reference from the dev team.
+
+**2026-06-12 — PRs #19, #21, #20 merged to main:**
+- Merged in order #19 → #21 → #20 (merge commits `5cf4eb8`, `f5bfb32`, `e968068`); all three
+  feature branches deleted. Full suite on merged `main`: **159 passed, 2 skipped**.
+- On `main` now: canonical `DATA LIMITATION — ` (U+2014) prefix + conditional diagnostic-3.1.11
+  and rsdk-GRIP emissions (#19), the CRLF parse-route fix + first API-path test (#21), and the
+  quality-gate agent deduplication (#20).
 
 **2026-06-12 — PR #20: quality-gate agent deduplication:**
 - Refactored the 5 quality-gate agent definitions (`.claude/agents/`) so each overlapping
