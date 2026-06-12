@@ -165,7 +165,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | Network Topology tab (Section 14) | ⏳ Pending (design spec exists) |
 | Time-window disabled state for unparseable timestamps | ✅ Done — `range-unavailable` step in FileUpload.jsx replaces the silent skip |
 | Min battery windowed reduce returns 0 for single-sample sets (ATAK) | ✅ Done — IIFE pattern: `(batPcts => batPcts.length ? Math.min(...batPcts) : null)(filtered)` |
-| `extractTimeRange` doesn't detect ATAK epoch-ms timestamps (`timestampInMillis`) — ATAK logs lose the time-window slider | ⏳ Pending — **High**; extend client scanner to parse epoch-ms |
+| `extractTimeRange` doesn't detect ATAK epoch-ms timestamps (`timestampInMillis`) — ATAK logs lose the time-window slider | ✅ Done — scanner now unions wall-clock `TS_RE` with a key-anchored 13-digit `EPOCH_MS_RE`; ATAK regains the slider; client-side only |
 | Battery Chart — Multi-Radio False Recovery DataNote | ⏳ Pending dev team confirmation |
 
 ---
@@ -224,6 +224,24 @@ pytest tests/test_atak.py -v  # single file verbose
 ---
 
 ## Most Recent Work (Last Few PRs)
+
+**2026-06-12 — feat: ATAK epoch-ms time-window slider (`extractTimeRange`):**
+- ATAK logs store time as epoch ms (`timestampInMillis` etc.), not a wall-clock string,
+  so regular ATAK logs found no range and routed to `range-unavailable`, losing the slider.
+- `ui/src/components/FileUpload.jsx`: `extractTimeRange` now returns epoch ms
+  (`{ minMs, maxMs }`) and **unions** wall-clock `TS_RE` matches with a key-anchored
+  13-digit `EPOCH_MS_RE` (`timestampInMillis`/`launchTimeInMillis`/`messageTimestampInMillis`).
+  Duration keys (`deliveryTimeInMillis` 0/negative, `event.updateTimeInMillis`) are
+  excluded by key-anchoring + the exactly-13-digit guard. Caller in `onDrop` uses
+  `minMs`/`maxMs` directly (dropped the `normaliseTs` round-trip).
+- **Purely client-side** — confirmed by log-analyst + parser-agent: the slider window is a
+  browser-only filter in `App.jsx`, never sent to `/parse`; `atak.py` already parses these
+  timestamps. No models/parser/`_result_to_dict`/API change.
+- Verified in Node against fixtures: regular ATAK (`atak_sample.json`) now 15:20:00→15:20:30;
+  enhanced unions epoch-ms + sdkError ISO; diagnostic unchanged; `fw_log` still range-unavailable.
+- Tests: extended `tests/test_timewindow_trigger.py` (premise-pinned `EPOCH_MS_RE`, duration-key
+  exclusion, 13-digit guard, ATAK fixtures now detectable). Docs updated (ui-requirements ✅,
+  CLAUDE.md + this backlog flipped to Done).
 
 **2026-06-12 — Log analysis (web session): HOTLIPS + MESMER storedMessages buffer saturation:**
 - Analyzed HOTLIPS (GID `90296226464906`) and MESMER (GID `90397332557396`) diagnostic
