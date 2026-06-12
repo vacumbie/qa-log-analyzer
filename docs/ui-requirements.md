@@ -517,12 +517,27 @@ even though they carry perfectly good timestamps. Confirmed against
 `atak_enhanced_sample.json` happens to also carry wall-clock strings so it is
 unaffected, which makes the behavior inconsistent across ATAK logs.
 
-**Fix:** extend the client scanner to also parse epoch-ms values (e.g. 13-digit
-integers in a plausible recent range, or the `timestampInMillis` field
-specifically) and fold them into the min/max range so ATAK logs get the working
-slider. Mirror the same regex/logic change in `tests/test_timewindow_trigger.py`.
+**Fix:** extend the client scanner to also parse epoch-ms values and fold them
+into the min/max range so ATAK logs get the working slider. Mirror the same
+regex/logic change in `tests/test_timewindow_trigger.py`.
 
 **Priority:** High.
 
-**Status:** ⏳ Pending — not started. Surfaced 2026-06-10 while adding
-`tests/test_timewindow_trigger.py`; related to the disabled-state feature above.
+**Status:** ✅ Done. `extractTimeRange` now returns epoch ms (`{ minMs, maxMs }`)
+and unions two sources: the existing wall-clock `TS_RE` matches **and** a new
+key-anchored epoch-ms regex
+`EPOCH_MS_RE = /"(?:timestampInMillis|launchTimeInMillis|messageTimestampInMillis)"\s*:\s*(\d{13})\b/g`.
+Matching is anchored on those three exact session-timestamp keys with an exactly-13-digit
+guard, so duration fields (`deliveryTimeInMillis` — 0/negative; `event.updateTimeInMillis`)
+are never captured. The caller in `onDrop` consumes `minMs`/`maxMs` directly (no
+more `normaliseTs` round-trip). Enhanced logs union their sdkError ISO timestamps
+with epoch-ms records into one range. Regular ATAK logs
+(`atak_sample.json`, `atak_multiserial_sample.json`) regain the slider; `fw_log`
+remains the sole `range-unavailable` trigger. Premise pinned in
+`tests/test_timewindow_trigger.py`. Purely client-side — no parser/API change
+(the slider window is a browser-only filter applied in `App.jsx`, never sent to `/parse`).
+
+> Note: the scanner samples only the first + last 64 KB of each file, so a
+> mid-file timestamp outlier is not seen — acceptable because the slider snaps to
+> the hour. Do not widen `EPOCH_MS_RE` to bare 13-digit integers: it must stay
+> key-anchored or it will capture durations and corrupt the range.

@@ -71,11 +71,33 @@ export function ParsingOverlay({ fileCount }) {
 
 const TS_RE = /\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/g
 
+// ATAK logs store time as epoch milliseconds, not a wall-clock string, so they
+// never match TS_RE — regular ATAK logs (100% epoch-ms) would lose the slider.
+// Match only the keys that are genuine session timestamps; never duration keys
+// like deliveryTimeInMillis (0/negative) or event.updateTimeInMillis. Anchoring
+// on the exact key name plus exactly 13 digits keeps durations and sentinels out.
+const EPOCH_MS_RE = /"(?:timestampInMillis|launchTimeInMillis|messageTimestampInMillis)"\s*:\s*(\d{13})\b/g
+
+// Returns the min/max timestamp in the text as epoch ms, or null if none found.
+// Unions wall-clock matches (diagnostic/rsdk/relay_manager, and ATAK sdkError
+// ISO timestamps) with ATAK epoch-ms matches, so a mixed enhanced log uses both.
 function extractTimeRange(text) {
-  const hits = text.match(TS_RE)
-  if (!hits || !hits.length) return null
-  const sorted = hits.slice().sort()
-  return { min: sorted[0], max: sorted[sorted.length - 1] }
+  let minMs = Infinity
+  let maxMs = -Infinity
+  const consider = ms => {
+    if (Number.isNaN(ms)) return
+    if (ms < minMs) minMs = ms
+    if (ms > maxMs) maxMs = ms
+  }
+
+  const wallclock = text.match(TS_RE)
+  if (wallclock) {
+    for (const ts of wallclock) consider(normaliseTs(ts).getTime())
+  }
+  for (const m of text.matchAll(EPOCH_MS_RE)) consider(Number(m[1]))
+
+  if (minMs === Infinity) return null
+  return { minMs, maxMs }
 }
 
 function normaliseTs(ts) {
@@ -268,10 +290,8 @@ function UploadModal({ onFiles, loading, onClose }) {
         const combined = headText + tailText
         const range = extractTimeRange(combined)
         if (range) {
-          const minMs = normaliseTs(range.min).getTime()
-          const maxMs = normaliseTs(range.max).getTime()
-          if (minMs < absMin) absMin = minMs
-          if (maxMs > absMax) absMax = maxMs
+          if (range.minMs < absMin) absMin = range.minMs
+          if (range.maxMs > absMax) absMax = range.maxMs
         }
       } catch { /* unparseable timestamps in this file — skip it for range scan */ }
     }
