@@ -67,7 +67,8 @@ def test_data_limitations_surfaced():
     drops them — BLE payloads are captured but not decoded, and only one node is
     observed per session."""
     result = parse_relay_manager_log(FIXTURE)
-    limits = [e for e in result.parse_errors if e.startswith("DATA LIMITATION")]
+    # Canonical em-dash prefix, consistent with the other four parsers.
+    limits = [e for e in result.parse_errors if e.startswith("DATA LIMITATION —")]
     assert any("BLE payload not decoded" in e for e in limits)
     assert any("Single relay node observed" in e for e in limits)
 

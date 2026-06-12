@@ -448,4 +448,21 @@ def parse_rsdk_log(path: Path) -> ParseResult:
         ))
 
     _detect_session_gaps(result)
+
+    # DATA LIMITATION — GRIP hop count and RSSI are only carried on GRIP_Receiver
+    # incoming message-fields lines. The old SendMessageResponse hop count was an
+    # SDK sequence counter (not RF data) and is excluded. When a session has no
+    # incoming GRIP fields lines, hop count and RSSI are unavailable for the whole
+    # log — surface that honestly rather than implying the radio reported no hops.
+    has_grip_rf = any(
+        g.direction == "incoming" and (g.hops is not None or g.rssi is not None)
+        for g in result.grip_messages
+    )
+    if not has_grip_rf:
+        result.parse_errors.append(
+            "DATA LIMITATION — GRIP hop count and RSSI are only available from "
+            "GRIP_Receiver incoming message-fields lines; none are present in this "
+            "log, so hop count and RSSI are unavailable for this session."
+        )
+
     return result

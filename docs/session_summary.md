@@ -1,5 +1,5 @@
 # QA Log Analyzer — Session Summary
-_Last updated: 2026-06-10_
+_Last updated: 2026-06-12_
 
 ---
 
@@ -145,6 +145,12 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | PLI Settings section (pliSettingUpdated) | ✅ Done |
 | Battery chart real UTC timestamps + per-serial lines | ✅ Done |
 | PLI tab ATAK support + gap inference | ✅ Done |
+| DATA LIMITATION prefix normalization (em-dash) across all 5 parsers | ✅ Done (PR #19) |
+| diagnostic 3.1.11 `parse_errors` emission (callsign + GID omitted) | ✅ Done (PR #19) |
+| rsdk GRIP-availability `parse_errors` emission | ✅ Done (PR #19) |
+| Quality-gate agent deduplication (single-owner responsibilities) | ✅ Done (PR #20) |
+| General DATA LIMITATION banner for diagnostic/rsdk/atak tabs | ⏳ Pending — jenny (PR #19 gate) found CLAUDE.md:299 promises a UI banner per limitation, but diagnostic 3.1.11 & atak sdkError entries reach `parse_errors` + the file-list ⚠ glyph only (rsdk shown via HopsTab note); CLAUDE.md qualified, banner deferred |
+| API route double-translates CRLF → diagnostic CRLF uploads parse to 0 blocks | ✅ Fixed (PR #21, open) — karen found during PR #19 gate; temp file now opened with `newline=""`, plus `tests/test_parse_route.py` API-path regression test |
 | FW Log — RHC payload decoding (hash→serial, FW version) | ⛔ Blocked — waiting on mapping tables from QA |
 | Session Persistence | ⏸ Deferred |
 | Relay Manager prod log support | ⛔ Blocked — waiting on prod samples |
@@ -218,6 +224,62 @@ pytest tests/test_atak.py -v  # single file verbose
 ---
 
 ## Most Recent Work (Last Few PRs)
+
+**2026-06-12 — PR #20: quality-gate agent deduplication:**
+- Refactored the 5 quality-gate agent definitions (`.claude/agents/`) so each overlapping
+  responsibility has a single owner and the others defer: vera owns `parse_errors` DATA
+  LIMITATION auditing + test-coverage depth; claude-md-compliance-checker owns the
+  ParseResult chain; karen is the post-validation live-browser check only (no longer
+  re-runs pytest or re-traces the chain); jenny owns spec alignment. jenny / TCV /
+  code-quality-pragmatist dropped the checks they were duplicating.
+- Branch `refactor-agent-deduplication`, kept **separate** from PR #19 (these were the
+  5 long-pending uncommitted agent edits). Reviewer note in the PR: the `vera.md` edit
+  also *removes* the JS-premise-via-pytest guidance (`test_timewindow_trigger.py` pattern)
+  rather than relocating it — flagged for confirmation.
+
+**2026-06-12 — PR #19 quality gate complete + a follow-up bug found:**
+- All gate steps passed: claude-md-compliance-checker ✅, vera ✅ (after closing 2 coverage
+  gaps — partial-count diagnostic + outgoing-only-GRIP rsdk), task-completion-validator ✅,
+  karen ✅ (banner prefix strips cleanly at both UI sites, no leak), peer-reviewer ✅ (2 Low
+  nits fixed: relay test tightened to em-dash assertion, inline-content rationale documented),
+  jenny ✅ on parser scope — but found CLAUDE.md:299 ("a visible banner in the relevant UI tab"
+  per limitation) overstates reality: only fw_log/relay_manager render a parse_errors banner;
+  diagnostic 3.1.11 & atak sdkError reach `parse_errors` + the ⚠ glyph only (rsdk is shown via
+  the HopsTab note). Pre-existing overstatement, not a #19 regression. Resolved by qualifying
+  CLAUDE.md and backlogging a general diagnostic/rsdk/atak banner (see Backlog Status).
+- **karen surfaced a separate, pre-existing bug** (NOT introduced by PR #19): `api/routes/parse.py`
+  writes the uploaded text to a temp file in text mode, which on Windows double-translates
+  CRLF (`\r\n` → `\r\r\n`); `Path.read_text()` universal-newline reading then turns that into
+  `\n\n`, prematurely splitting diagnostic blocks → **0 received messages** for any CRLF
+  diagnostic upload through the API. The unit test misses it because it calls the parser
+  directly, bypassing the route. Decision: merge #19 on its (clean) scope, fix CRLF in a
+  separate `fix(api)` PR with an **API-path** regression test. See Backlog Status.
+
+**2026-06-12 — parse_errors DATA LIMITATION gaps (3 fixes + test set):**
+- **Prefix normalization:** `atak.py` and `fw_log.py` (3 entries) now use the canonical
+  `DATA LIMITATION — ` (em-dash U+2014) prefix, matching CLAUDE.md, the compliance
+  checker, `docs-agent`, and `relay_manager.py`. All five parsers verified to emit
+  the exact same literal. **UI coupling:** `App.jsx` line 1638 (general/ATAK
+  limitations banner) stripped the old colon form `'DATA LIMITATION: '` — updated to
+  the em-dash form so the prefix is still stripped from the banner display. (The
+  relay banner at line 1881 already used em-dash.)
+- **diagnostic.py:** emits a DATA LIMITATION when a Received Message block omits the
+  originator callsign **and** GID (the known firmware-3.1.11 omission). Data-driven —
+  fires only when it actually manifests, so logs that include the fields stay clean.
+- **rsdk.py:** emits a DATA LIMITATION when no `GRIP_Receiver` incoming message-fields
+  lines are present (hop count / RSSI unavailable for the session).
+- **Tests:** new `tests/test_detect_format.py` (11 cases: per-format detection,
+  filename signals, fw-log-first and relay-before-rsdk ordering, fallback). New
+  fixture `diagnostic_3111_no_identity_sample.txt`. `test_rsdk.py` / `test_diagnostic.py`
+  gained positive+negative limitation tests; `test_no_parse_errors` repointed where
+  the new conditional limitation now legitimately fires. `test_atak.py` / `test_fw_log.py`
+  tightened to assert the em-dash prefix. After the vera coverage audit, added two
+  more cases + fixtures: rsdk **outgoing-only** GRIP (`rsdk_grip_outgoing_only.txt` —
+  grip_messages populated but all outgoing, limitation must still fire) and diagnostic
+  **partial** omission (`diagnostic_3111_partial_identity_sample.txt` — pins the
+  "1 of 2 affected" count). **Full suite: 157 passed, 2 skipped.**
+- Note: `parser-agent` and `vera` are read-only audit agents (no Edit/Write), so the
+  edits + tests were implemented directly to their standard rather than by the agents.
 
 **2026-06-10 — PRs #15–#17: agent governance docs in CLAUDE.md:**
 - **PR #16** (`4065d3c`) — added a "Quality gate sequence" section listing the mandatory per-feature agent order plus the optional code-quality-pragmatist pass.

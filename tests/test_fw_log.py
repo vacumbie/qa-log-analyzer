@@ -245,7 +245,8 @@ def test_rhc_poll_count():
 
 def test_data_limitations_present():
     result = parse_fw_log(FIXTURE)
-    limits = [e for e in result.parse_errors if e.startswith("DATA LIMITATION")]
+    # All three use the canonical em-dash prefix (matches CLAUDE.md / UI / compliance).
+    limits = [e for e in result.parse_errors if e.startswith("DATA LIMITATION —")]
     assert len(limits) == 3
 
 

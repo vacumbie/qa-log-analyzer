@@ -461,8 +461,8 @@ def parse_atak_log(path: Path) -> ParseResult:
         # Volume baseline for a healthy session is unknown — the count is
         # informational, not a pass/fail signal. Surface this honestly.
         result.parse_errors.append(
-            "DATA LIMITATION: sdkError (SDK Logging 2.0) volume baseline unknown "
-            "— counts are aggregated and informational, not a pass/fail signal."
+            "DATA LIMITATION — sdkError (SDK Logging 2.0) volume baseline unknown: "
+            "counts are aggregated and informational, not a pass/fail signal."
         )
 
     _detect_session_gaps(result)

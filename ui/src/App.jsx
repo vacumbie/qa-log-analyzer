@@ -1635,7 +1635,7 @@ function FwLogTab({ results }) {
             {(r.parse_errors || []).some(e => e.startsWith('DATA LIMITATION')) && (
               <Note>
                 {r.parse_errors.filter(e => e.startsWith('DATA LIMITATION')).map((e, j) => (
-                  <div key={j} style={{ marginBottom: 4 }}>⚠ {e.replace('DATA LIMITATION: ', '')}</div>
+                  <div key={j} style={{ marginBottom: 4 }}>⚠ {e.replace('DATA LIMITATION — ', '')}</div>
                 ))}
               </Note>
             )}
