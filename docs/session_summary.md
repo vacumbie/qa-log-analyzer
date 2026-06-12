@@ -149,6 +149,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | diagnostic 3.1.11 `parse_errors` emission (callsign + GID omitted) | ✅ Done (PR #19) |
 | rsdk GRIP-availability `parse_errors` emission | ✅ Done (PR #19) |
 | Quality-gate agent deduplication (single-owner responsibilities) | ✅ Done (PR #20) |
+| General DATA LIMITATION banner for diagnostic/rsdk/atak tabs | ⏳ Pending — jenny (PR #19 gate) found CLAUDE.md:299 promises a UI banner per limitation, but diagnostic 3.1.11 & atak sdkError entries reach `parse_errors` + the file-list ⚠ glyph only (rsdk shown via HopsTab note); CLAUDE.md qualified, banner deferred |
 | API route double-translates CRLF → diagnostic CRLF uploads parse to 0 blocks | ✅ Fixed (PR #21, open) — karen found during PR #19 gate; temp file now opened with `newline=""`, plus `tests/test_parse_route.py` API-path regression test |
 | FW Log — RHC payload decoding (hash→serial, FW version) | ⛔ Blocked — waiting on mapping tables from QA |
 | Session Persistence | ⏸ Deferred |
@@ -240,8 +241,12 @@ pytest tests/test_atak.py -v  # single file verbose
 - All gate steps passed: claude-md-compliance-checker ✅, vera ✅ (after closing 2 coverage
   gaps — partial-count diagnostic + outgoing-only-GRIP rsdk), task-completion-validator ✅,
   karen ✅ (banner prefix strips cleanly at both UI sites, no leak), peer-reviewer ✅ (2 Low
-  nits fixed: relay test tightened to em-dash assertion, inline-content rationale documented).
-  `jenny` (spec compliance) was not run this round.
+  nits fixed: relay test tightened to em-dash assertion, inline-content rationale documented),
+  jenny ✅ on parser scope — but found CLAUDE.md:299 ("a visible banner in the relevant UI tab"
+  per limitation) overstates reality: only fw_log/relay_manager render a parse_errors banner;
+  diagnostic 3.1.11 & atak sdkError reach `parse_errors` + the ⚠ glyph only (rsdk is shown via
+  the HopsTab note). Pre-existing overstatement, not a #19 regression. Resolved by qualifying
+  CLAUDE.md and backlogging a general diagnostic/rsdk/atak banner (see Backlog Status).
 - **karen surfaced a separate, pre-existing bug** (NOT introduced by PR #19): `api/routes/parse.py`
   writes the uploaded text to a temp file in text mode, which on Windows double-translates
   CRLF (`\r\n` → `\r\r\n`); `Path.read_text()` universal-newline reading then turns that into

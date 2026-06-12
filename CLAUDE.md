@@ -296,8 +296,13 @@ the lean stack (see "Do not add npm packages").
 ## Known data limitations
 
 Surface these honestly — never paper over them with zeros or missing fields.
-Each active limitation has a `DATA LIMITATION` entry in `parse_errors` and
-a visible banner in the relevant UI tab.
+Each active limitation has a `DATA LIMITATION` entry in `parse_errors`. How that
+entry reaches the UI varies by format today: `fw_log` and `relay_manager` render
+the full text in a dedicated banner (`FwLogTab` and `RelayHealthTab` in
+`App.jsx`); the `rsdk` GRIP hop/RSSI gap is surfaced as a `HopsTab` note; the
+`diagnostic` 3.1.11 and `atak` `sdkError` entries currently reach `parse_errors`
+(and the file-list ⚠ glyph) but have no dedicated tab banner. A general
+diagnostic/rsdk/atak limitations banner is backlogged — see the Backlog section below.
 
 The parser is still learning. `log-field-definitions.md` is a living
 document — it grows as new log samples are introduced to the project and
@@ -377,7 +382,8 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | Time-window step disabled state for unparseable timestamps | ✅ Done — `range-unavailable` step in FileUpload.jsx replaces the silent skip |
 | Min battery windowed reduce returns 0 for single-sample sets (ATAK branch) | ✅ Done — IIFE pattern: `(batPcts => batPcts.length ? Math.min(...batPcts) : null)(filtered)` |
 | `extractTimeRange` doesn't detect ATAK epoch-ms timestamps (`timestampInMillis`) — ATAK logs route to `range-unavailable`, lose the slider | ⏳ Pending — **High**; extend the client scanner to parse epoch-ms values |
-| DATA LIMITATION prefix normalization (em-dash) across all 5 parsers | ✅ Done (PR #19) — canonical `DATA LIMITATION — ` (U+2014) in atak/fw_log/diagnostic/rsdk/relay_manager; both `App.jsx` banner strip sites updated |
+| DATA LIMITATION prefix normalization (em-dash) across all 5 parsers | ✅ Done (PR #19) — canonical `DATA LIMITATION — ` (U+2014) in atak/fw_log/diagnostic/rsdk/relay_manager; `App.jsx` FW Log banner strip site updated to match (relay banner was already em-dash) |
+| General DATA LIMITATION banner for diagnostic/rsdk/atak tabs | ⏳ Pending — diagnostic 3.1.11 & atak sdkError `parse_errors` entries reach the API + file-list ⚠ glyph but have no dedicated tab banner (rsdk is shown via the HopsTab note); CLAUDE.md "Known data limitations" qualified accordingly |
 | diagnostic 3.1.11 `parse_errors` emission (originator callsign + GID omitted) | ✅ Done (PR #19) — data-driven, fires only when a Received Message block omits both; reports "{n} of {total}" affected |
 | rsdk GRIP-availability `parse_errors` emission (no `GRIP_Receiver` incoming fields) | ✅ Done (PR #19) — hop count / RSSI unavailability surfaced honestly when no incoming GRIP fields lines are present |
 
