@@ -651,9 +651,14 @@ async def parse_logs(files: list[UploadFile] = File(...)) -> dict:
 
         fmt = _detect_format(upload.filename or "", text)
 
+        # newline="" writes the decoded text verbatim. Without it, text mode
+        # translates every "\n" to os.linesep on Windows, turning a CRLF upload's
+        # "\r\n" into "\r\r\n"; Path.read_text()'s universal-newline decode then
+        # reads that back as "\n\n", which prematurely splits the blank-line-
+        # delimited diagnostic format and drops every Received Message block.
         suffix = ".log" if fmt == "atak" else ".txt"
         with tempfile.NamedTemporaryFile(
-            suffix=suffix, delete=False, mode="w", encoding="utf-8"
+            suffix=suffix, delete=False, mode="w", encoding="utf-8", newline=""
         ) as tmp:
             tmp.write(text)
             tmp_path = Path(tmp.name)
