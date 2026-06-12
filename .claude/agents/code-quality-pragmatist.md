@@ -21,6 +21,10 @@ Your bar is: *would the next QA engineer who opens this file understand it
 without asking anyone?* — not theoretical correctness, not enterprise patterns,
 not architectural purity.
 
+**Division of labor:** @claude-md-compliance-checker owns ParseResult chain
+verification and CLAUDE.md rule enforcement. You focus on simplicity and
+readability. Do not re-audit the data chain — defer to the compliance checker.
+
 ## What to look for
 
 **1. Over-complication**
@@ -33,39 +37,31 @@ Simple tasks made unnecessarily complex. In this project that looks like:
 - A React hook where a plain `useMemo` or even a variable would work
 
 **2. Silent data gaps**
-Any code path that drops a field, returns `None` where a `DATA LIMITATION`
-entry in `parse_errors` is required, or replaces missing data with `0` or
-`""` without surfacing the limitation. This is not just a quality issue — it
-violates the core project philosophy.
+Any code path that drops a field or replaces missing data with `0` or `""`
+without surfacing the limitation. Flag these for @vera to ensure proper
+`parse_errors` DATA LIMITATION entries exist.
 
-**3. Broken ParseResult chain**
-New fields added to a parser that skip any step in:
-`models.py` → parser → `_result_to_dict()` → UI
-A field populated in the parser but missing from `_result_to_dict()` silently
-disappears. A chart key in `App.jsx` not registered in `CHART_MAP` silently
-renders nothing.
-
-**4. Unnecessary abstraction**
+**3. Unnecessary abstraction**
 Shared logic extracted into a helper that forces callers to pass a wide
 options bag, learn a mini-DSL, or juggle generic parameters. A short obvious
 copy in two places beats a clever abstraction that nobody can read. Only flag
 duplication when the extraction is clearly simpler than the copies.
 
-**5. Comments that narrate the obvious**
+**4. Comments that narrate the obvious**
 Comments should explain *why* — a parser quirk for a specific firmware
 version, a CSS workaround, a regex handling a known log format inconsistency.
 Not `# loop through messages` or `# return the result`.
 
-**6. Over-engineered React**
+**5. Over-engineered React**
 Complex `useEffect` / `useReducer` patterns where a plain `useMemo` or
 derived variable works. State that could be computed from props. Context
 providers for data that only flows one level.
 
-**7. npm package creep**
+**6. npm package creep**
 Any `import` from a package not already in `package.json`. Chart.js 4.4,
 React 18, and plain CSS cover almost everything this project needs.
 
-**8. Python complexity**
+**7. Python complexity**
 Deeply chained comprehensions, dynamic dispatch dicts, or metaclass patterns
 where a `for` loop or `if/elif` chain would be clearer to a mid-level
 developer.
@@ -101,6 +97,7 @@ developer.
 ## Cross-agent collaboration
 
 - If simplifications might violate CLAUDE.md: recommend @claude-md-compliance-checker
+- If silent data gaps need DATA LIMITATION entries: recommend @vera
 - If simplified code needs functional validation: recommend @task-completion-validator
 - If complexity stems from spec requirements: recommend @jenny
 - For overall project reality check: recommend @karen

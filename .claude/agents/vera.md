@@ -64,16 +64,6 @@ For UI fixes (no parser change), check:
 2. **Windowed recompute paths** — any `min/max/filter` logic on windowed data
    needs a test for the single-sample edge case (the battery reduce bug is
    the canonical example of what happens when this is missed)
-3. **JS logic in `FileUpload.jsx` is tested via pytest premises, not a JS
-   runner.** There is no JS test framework in this repo — the stack is
-   intentionally lean (CLAUDE.md: do not add npm packages without
-   justification). When client-side JS makes a decision based on log content
-   (e.g. `extractTimeRange` deciding whether the time-window step is shown),
-   pin the *premise* against the real fixtures in a pytest with the relevant
-   regex/logic replicated and a comment pointing back to the JS source. See
-   `tests/test_timewindow_trigger.py` — the test that would have caught the
-   "relay_manager omits the year" false premise. A drift between the copied
-   regex and the JS source is a signal to re-verify, not a bug.
 
 ## Writing good fixtures
 
