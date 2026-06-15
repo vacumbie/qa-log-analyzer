@@ -373,7 +373,7 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | P3: Cross-device delivery matrix using logId | ⏳ Pending |
 | P4: Relay copy/retransmission flag | ⏳ Pending |
 | P5: Battery critical threshold < 10% | ✅ Done — 🔴 ⚠ CRITICAL in Health Score |
-| P6: KNOT clock skew investigation | ⏳ Pending |
+| P6: KNOT clock skew investigation | ⏳ Investigated 2026-06-15 — confirmed constant ≈ −2h host-clock skew (uniform across all 50 senders, hop-independent, no buffer lag); not delivery lag. Pending QA: which clock was correct + the GID `90296226464906` KNOT-vs-HOTLIPS label conflict. See `docs/parsing-requirements.md` P6 |
 | P7: Poseidon log format | ⏳ Deferred |
 | PLI tab ATAK support + gap inference | ✅ Done — all 14 devices shown |
 | Battery chart real UTC timestamps + per-serial lines | ✅ Done |
@@ -463,6 +463,6 @@ re-check:
   e.g. `feat(parser): add relay_manager` or `fix(ui): modal z-index via createPortal`.
 - **Update docs alongside code.** Parser rule changed → update
   `parsing-requirements.md`. UI component changed → update `ui-requirements.md`.
-- **Parser requirements P1–P7** are in `docs/parsing-requirements.md`. P1 (BLE tag) and P5 (battery critical) are done. P2–P4, P6 pending. P7 deferred. Protocol architecture (BROADCAST/PRIVATE/UNICAST normalization, GRIP, logId) also documented there.
+- **Parser requirements P1–P7** are in `docs/parsing-requirements.md`. P1 (BLE tag) and P5 (battery critical) are done. P2–P4 pending. P6 investigated 2026-06-15 (KNOT constant ≈ −2h host-clock skew; pending QA + GID label conflict). P7 deferred. Protocol architecture (BROADCAST/PRIVATE/UNICAST normalization, GRIP, logId) also documented there.
 - **Do not add npm packages without justification.** Check Chart.js 4.4,
   React 18, and plain CSS first.

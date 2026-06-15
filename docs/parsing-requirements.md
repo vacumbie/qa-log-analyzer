@@ -534,7 +534,7 @@ are general structured log events, not error-only records.
 ### Known Limitations — ATAK Enhanced Log
 
 - **Callsign and UUID fields are always empty** in the enhanced log format — identity can only be determined from GID (`originatorUUID` does carry an `ANDROID-*` UUID, but `senderUUID`/`receiverUUID`/all callsigns are empty)
-- **Negative `deliveryTimeInMillis`** (767 records, 18%) indicates clock skew between originator and receiver devices; most common at hop counts 3–4
+- **Negative `deliveryTimeInMillis`** (767 records, 18%) indicates clock skew between originator and receiver devices; most common at hop counts 3–4. **Distinguish two patterns:** *sporadic* negatives (varying per message/hop, ~18% here) are normal inter-device skew; a *constant whole-session* offset uniform across all senders and hop counts is **host-clock skew** on the receiving device (see P6 — KNOT showed a fixed ≈ −2 h offset across all 50 senders). The parser captures both honestly; interpretation differs.
 - **`transmitPowerDifferential`** meaning is not fully documented — observed values 1–3 during normal operation and 255 during connecting state
 - **Regular user log format** not yet confirmed — need example to compare against enhanced format
 - **`PARTIALLY_RECEIVED` records** all appear to be `fileTransfer` type — may indicate file transfers are unreliable over mesh; needs further investigation
@@ -1201,7 +1201,16 @@ data limitation and consider adding a per-device clock offset indicator to
 the Sessions tab when a device's timestamps are inconsistent with the session
 window established by other devices.
 
-**Status:** ⏳ Pending — requires cross-device timestamp comparison
+**Status:** ⏳ Investigated 2026-06-15 — confirmed **host-clock skew**, pending QA resolution of the GID conflict and which clock was correct.
+
+**Investigation finding (2026-06-15, `log-analyst` on `diagnostic_KNOT_90296226464906_2026-06-04 16_42_33.829.log`):**
+- KNOT's own clock is internally clean: block timestamps are monotonic genuine UTC over 2026-06-04 12:15→20:42 (~8.5 h); no jumps or resets (only sub-second health-poll reordering).
+- Against the mesh, `timestampInMillis − messageTimestampInMillis` (i.e. `deliveryTimeInMillis`) is a **constant ≈ −7232 s (−2 h 0 m 32 s)** — KNOT receives ~2 h *before* senders sent. The offset is **uniform across all 50 senders** (per-sender medians within a ~10 s band) and **flat across hop counts** (hop 1→8 varies only ~4 s), so it is one wrong clock, not 50 independent skews or relay latency. It does not drift over the 8.5 h session.
+- **Not delivery lag:** `storedMessages` never exceeds 3 (0 in 465 of 507 health samples) — no buffer build-up to drain, so the offset cannot be buffering. Conclusion: **genuine host-clock skew** on KNOT's Android phone (magnitude ~2 h suggests a timezone/NTP misconfiguration; the +32 s argues for a clock set wrong rather than a clean tz label).
+- **Limitation:** KNOT's log alone proves only that KNOT differs from all peers by a fixed offset — not that KNOT (vs. the rest of the mesh) holds the wrong time. Confirming which side is correct needs a correlated peer log from the same window.
+- **Format note:** despite the `diagnostic_` filename, this log is **ATAK format** (`atakVersion` present → `_detect_format` routes to `parser/atak.py`). The `diagnostic_` prefix is a filename convention, not a format indicator.
+
+**GID conflict (surface until QA resolves):** this log's own identity fields say GID `90296226464906` = **KNOT** (serial `PNE234200704`); a prior 2026-06-12 web-session analysis (see `session_summary.md`) attributed the *same* GID to **HOTLIPS** for the same 2026-06-04 event, and in this log HOTLIPS is a different originator (GID `90389599969003`). Likely a mislabel or callsign reassignment, not a true GID collision. Matters because the earlier `storedMessages` buffer-saturation finding was attributed to "HOTLIPS GID 90296226464906" — but that GID is KNOT here, and KNOT shows **no** buffer saturation (max 3).
 
 ---
 

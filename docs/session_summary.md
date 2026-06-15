@@ -1,5 +1,5 @@
 # QA Log Analyzer — Session Summary
-_Last updated: 2026-06-12_
+_Last updated: 2026-06-15_
 
 ---
 
@@ -160,7 +160,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | P2: Protocol separation (BROADCAST/PRIVATE) in TX/RX | ⏳ Pending |
 | P3: Cross-device delivery matrix using logId | ⏳ Pending |
 | P4: Relay copy/retransmission flag | ⏳ Pending |
-| P6: KNOT clock skew investigation | ⏳ Pending |
+| P6: KNOT clock skew investigation | ⏳ Investigated 2026-06-15 — constant ≈ −2h host-clock skew (uniform across all 50 senders, hop-independent, no buffer lag). Pending QA: which clock + GID `90296226464906` KNOT-vs-HOTLIPS label conflict |
 | P7: Poseidon log format | ⏳ Deferred |
 | Network Topology tab (Section 14) | ⏳ Pending (design spec exists) |
 | Time-window disabled state for unparseable timestamps | ✅ Done — `range-unavailable` step in FileUpload.jsx replaces the silent skip |
@@ -225,6 +225,24 @@ pytest tests/test_atak.py -v  # single file verbose
 
 ## Most Recent Work (Last Few PRs)
 
+**2026-06-15 — P6 KNOT clock-skew investigation (log-analyst, docs only):**
+- Analyzed `docs/diagnostic_KNOT_90296226464906_2026-06-04 16_42_33.829.log` (~12 MB, 18,959 lines).
+  Despite the `diagnostic_` filename it is **ATAK format** (`atakVersion` present → `parser/atak.py`);
+  the `diagnostic_` prefix is not a format indicator.
+- **Finding: genuine host-clock skew, not delivery lag.** KNOT's own clock is monotonic/clean, but
+  `deliveryTimeInMillis` (receive − send) is a **constant ≈ −7232 s (−2h 0m 32s)**, uniform across
+  **all 50 senders** and **flat across hop counts**, non-drifting over 8.5 h. `storedMessages` never
+  exceeds 3 → no buffering to cause lag. KNOT's Android host clock was ~2 h behind the mesh (smells
+  like a timezone/NTP misconfig). KNOT's log alone can't say which side held correct time — needs a
+  correlated peer log.
+- **GID conflict surfaced:** GID `90296226464906` = KNOT here (serial `PNE234200704`), but the
+  2026-06-12 web-session entry below attributed it to HOTLIPS. The earlier buffer-saturation finding
+  was pinned to "HOTLIPS GID 90296226464906" — that GID is KNOT, which shows no saturation. Pending QA.
+- Verified the format + offset directly before recording (first received line carries
+  `deliveryTimeInMillis: -7232006`; median delta −7232.0 s across 5,724 received messages).
+- Docs updated: `parsing-requirements.md` P6 section + ATAK known-limitation note, CLAUDE.md backlog +
+  P1–P7 summary, this summary. No code change — `atak.py` already captures negative deltas honestly.
+
 **2026-06-12 — feat: ATAK epoch-ms time-window slider (`extractTimeRange`):**
 - ATAK logs store time as epoch ms (`timestampInMillis` etc.), not a wall-clock string,
   so regular ATAK logs found no range and routed to `range-unavailable`, losing the slider.
@@ -244,6 +262,12 @@ pytest tests/test_atak.py -v  # single file verbose
   CLAUDE.md + this backlog flipped to Done).
 
 **2026-06-12 — Log analysis (web session): HOTLIPS + MESMER storedMessages buffer saturation:**
+- ⚠️ **GID label conflict (found 2026-06-15, see P6 entry above):** this entry attributes GID
+  `90296226464906` to HOTLIPS, but the KNOT diagnostic log's own identity fields say that GID is
+  **KNOT** (serial `PNE234200704`), with HOTLIPS appearing there as a separate originator (GID
+  `90389599969003`). The buffer-saturation finding below was attributed to "HOTLIPS GID
+  90296226464906" — but that GID is KNOT, and KNOT shows **no** buffer saturation (max 3). Unresolved:
+  mislabel vs. callsign reassignment vs. same physical device under two labels — pending QA.
 - Analyzed HOTLIPS (GID `90296226464906`) and MESMER (GID `90397332557396`) diagnostic
   logs from the **2026-06-04 test event**.
 - Confirmed a `storedMessages` **buffer saturation** pattern on **both** devices: a
