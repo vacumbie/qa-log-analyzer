@@ -240,6 +240,8 @@ pytest tests/test_atak.py -v  # single file verbose
   "pending/unresolved" to resolved.
 - Verified by `docs-agent`: PR changes accurate, anchor links resolve, cross-docs consistent. No code
   change.
+- Follow-up (PR #28): bumped the stale `_Last updated:_` footer in `parsing-requirements.md`
+  (2026-06-12 → 2026-06-16). All three doc dates now consistent at 2026-06-16.
 
 **2026-06-15 — P6 KNOT clock-skew investigation (log-analyst, docs only):**
 - Analyzed `docs/diagnostic_KNOT_90296226464906_2026-06-04 16_42_33.829.log` (~12 MB, 18,959 lines).
