@@ -1201,7 +1201,7 @@ data limitation and consider adding a per-device clock offset indicator to
 the Sessions tab when a device's timestamps are inconsistent with the session
 window established by other devices.
 
-**Status:** ⏳ Investigated 2026-06-15 — confirmed **host-clock skew**, pending QA resolution of the GID conflict and which clock was correct.
+**Status:** ⏳ Investigated 2026-06-15 — confirmed **host-clock skew**, pending QA resolution of which clock was correct. The GID attribution question is **resolved** (2026-06-16): the same physical radio was used by both HOTLIPS and KNOT on different test days — see GID conflict note below.
 
 **Investigation finding (2026-06-15, `log-analyst` on `diagnostic_KNOT_90296226464906_2026-06-04 16_42_33.829.log`):**
 - KNOT's own clock is internally clean: block timestamps are monotonic genuine UTC over 2026-06-04 12:15→20:42 (~8.5 h); no jumps or resets (only sub-second health-poll reordering).
@@ -1210,7 +1210,7 @@ window established by other devices.
 - **Limitation:** KNOT's log alone proves only that KNOT differs from all peers by a fixed offset — not that KNOT (vs. the rest of the mesh) holds the wrong time. Confirming which side is correct needs a correlated peer log from the same window.
 - **Format note:** despite the `diagnostic_` filename, this log is **ATAK format** (`atakVersion` present → `_detect_format` routes to `parser/atak.py`). The `diagnostic_` prefix is a filename convention, not a format indicator.
 
-**GID conflict (surface until QA resolves):** this log's own identity fields say GID `90296226464906` = **KNOT** (serial `PNE234200704`); a prior 2026-06-12 web-session analysis (see `session_summary.md`) attributed the *same* GID to **HOTLIPS** for the same 2026-06-04 event, and in this log HOTLIPS is a different originator (GID `90389599969003`). Likely a mislabel or callsign reassignment, not a true GID collision. Matters because the earlier `storedMessages` buffer-saturation finding was attributed to "HOTLIPS GID 90296226464906" — but that GID is KNOT here, and KNOT shows **no** buffer saturation (max 3).
+**GID conflict (RESOLVED 2026-06-16):** this log's own identity fields say GID `90296226464906` = **KNOT** (serial `PNE234200704`); a prior 2026-06-12 web-session analysis (see `session_summary.md`) attributed the *same* GID to **HOTLIPS** for the same 2026-06-04 event, and in this log HOTLIPS is a different originator (GID `90389599969003`). This is **not** a mislabel or GID collision: the GID in a diagnostic log reflects the radio paired at the time of export, not a permanent operator identity. The same physical radio (`PNE234200704`) was used by both HOTLIPS and KNOT on different test days, so GID `90296226464906` legitimately appears under both callsigns. See [GID, Callsign, and Serial Number — Identity Model](#gid-callsign-and-serial-number--identity-model) below. The reliable identity pair is **callsign + serial number**, not GID alone. Matters because the earlier `storedMessages` buffer-saturation finding was attributed to "HOTLIPS GID 90296226464906" — but that GID is KNOT here, and KNOT shows **no** buffer saturation (max 3).
 
 ---
 
@@ -1239,6 +1239,48 @@ callsign fronthauling throughout the 2026-06-04 field session.
 > (09:32–09:46 and 09:48–09:59 MNT, 150 and 122 segments) were likely a
 > tester warming up before the official session — not a parser issue requiring
 > detection. No warning heuristic is warranted.
+
+---
+
+## GID, Callsign, and Serial Number — Identity Model
+
+### The three identifiers are not interchangeable
+
+A diagnostic (and ATAK) log carries three identifiers that are often conflated
+but mean different things:
+
+| Identifier | Identifies | Stable across? |
+|-----------|-----------|----------------|
+| **GID** | The radio **paired at the time of log export** | Changes when the operator pairs a different radio |
+| **Callsign** | The **operator / app instance** | Stable for a given person/device running the app |
+| **Serial number** | The **physical radio hardware** | Stable for the life of that radio |
+
+The GID in a diagnostic log filename reflects the radio that happened to be
+paired when the log was exported — it is **not** a permanent operator identity.
+The callsign identifies the operator (or app instance); the serial number
+identifies the physical radio.
+
+### What this means in practice
+
+- **GID alone is not a reliable unique identifier for an operator.** The same
+  GID can appear under different callsigns over time, and an operator's GID can
+  change between sessions.
+- **Callsign + serial number together are the reliable identity pair.** Use
+  both when correlating activity to an operator or a piece of hardware.
+- **A GID appearing under two different callsigns means the same physical radio
+  was used by both operators at different times** — not a mislabel and not a
+  GID collision. (Confirmed example: GID `90296226464906` appears as HOTLIPS on
+  one test day and KNOT on another — the same radio `PNE234200704` was paired by
+  both operators. See [P6 — KNOT Clock Skew Investigation](#p6--knot-clock-skew-investigation-low--data-quality).)
+
+### Relationship to the existing GID collision fix
+
+The PLI `nodeMap` keying fix (CL_B + gt_Sassy_B_Net, which share GID
+`90194071247761` and serial `PNE233200347`) uses `gid|source_filename` as the
+key. **That fix remains correct under this identity model** — keying on GID
+alone would still merge distinct entries, so the per-file disambiguation is the
+right approach regardless of whether the underlying cause is a shared radio or
+a true collision.
 
 ---
 
