@@ -292,10 +292,6 @@ FW-log-only tab (`fwOnly`) — appears in the tab bar only when a relay firmware
 
 ---
 
-_Last updated: 2026-06-09_
-
----
-
 ### 14. Network Topology (`topology`) — ⚠️ ALPHA/BETA · NOT YET IMPLEMENTED
 
 > **Not implemented.** There is no `topology` entry in the `TABS` array in `App.jsx` and no topology tab renders today. This section is a forward-looking design spec / backlog item, retained for when the feature is built.
@@ -333,10 +329,6 @@ _Last updated: 2026-06-09_
 - Tooltip on each node: callsign, GID, messages sent/received, avg RSSI
 - Tooltip on each edge: hop count, message count, avg RSSI
 - Honest disclaimer visible on the tab: "Topology is inferred from log data. Intermediate relay nodes are not visible. Multi-hop paths are approximate."
-
----
-
-_Last updated: 2026-06-05_
 
 ---
 
@@ -554,3 +546,7 @@ stays `fw_log` (the format key, parser filename, detection branch, tab key, etc.
 are all unchanged). This is a label/wording pass, not a refactor.
 
 **Status:** ⏳ Pending — not started.
+
+---
+
+_Last updated: 2026-06-09_
