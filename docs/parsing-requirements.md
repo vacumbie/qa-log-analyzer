@@ -319,7 +319,7 @@ misleading 5/5. See the Health Score spec in `ui-requirements.md` (section 10).
 
 ---
 
-_Last updated: 2026-06-12_
+_Last updated: 2026-06-16_
 
 ---
 
