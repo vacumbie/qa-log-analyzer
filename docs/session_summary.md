@@ -1,5 +1,5 @@
 # QA Log Analyzer — Session Summary
-_Last updated: 2026-06-15_
+_Last updated: 2026-06-16_
 
 ---
 
@@ -160,7 +160,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | P2: Protocol separation (BROADCAST/PRIVATE) in TX/RX | ⏳ Pending |
 | P3: Cross-device delivery matrix using logId | ⏳ Pending |
 | P4: Relay copy/retransmission flag | ⏳ Pending |
-| P6: KNOT clock skew investigation | ⏳ Investigated 2026-06-15 — constant ≈ −2h host-clock skew (uniform across all 50 senders, hop-independent, no buffer lag). Pending QA: which clock + GID `90296226464906` KNOT-vs-HOTLIPS label conflict |
+| P6: KNOT clock skew investigation | ⏳ Investigated 2026-06-15 — constant ≈ −2h host-clock skew (uniform across all 50 senders, hop-independent, no buffer lag). Pending QA: which clock was correct. GID `90296226464906` KNOT-vs-HOTLIPS conflict **resolved** 2026-06-16 — same physical radio (`PNE234200704`) used by both operators on different test days, not a mislabel |
 | P7: Poseidon log format | ⏳ Deferred |
 | Network Topology tab (Section 14) | ⏳ Pending (design spec exists) |
 | Time-window disabled state for unparseable timestamps | ✅ Done — `range-unavailable` step in FileUpload.jsx replaces the silent skip |
@@ -225,6 +225,22 @@ pytest tests/test_atak.py -v  # single file verbose
 
 ## Most Recent Work (Last Few PRs)
 
+**2026-06-16 — docs: clarify GID-as-radio-identity (PR #27, docs only):**
+- Documented the architectural clarification that **GID reflects the radio paired at log-export time,
+  not a permanent operator identity**: callsign = operator/app instance, serial = physical radio
+  hardware. A GID under two callsigns = same physical radio used by both operators at different times,
+  not a mislabel or collision. GID alone is not a reliable unique operator id — callsign + serial is.
+- `parsing-requirements.md`: new section "GID, Callsign, and Serial Number — Identity Model"; P6 KNOT
+  GID-attribution question marked **resolved** (same radio `PNE234200704` used by HOTLIPS and KNOT on
+  different test days). The existing CL_B + gt_Sassy_B_Net `gid|source_filename` nodeMap fix confirmed
+  still correct under this model.
+- `CLAUDE.md`: new agent note on GID-as-radio-identity; P6 backlog row + P1–P7 summary updated;
+  CL_B/gt_Sassy_B_Net collision note annotated.
+- `session_summary.md` (this file): P6 backlog row + the two GID-conflict entries below updated from
+  "pending/unresolved" to resolved.
+- Verified by `docs-agent`: PR changes accurate, anchor links resolve, cross-docs consistent. No code
+  change.
+
 **2026-06-15 — P6 KNOT clock-skew investigation (log-analyst, docs only):**
 - Analyzed `docs/diagnostic_KNOT_90296226464906_2026-06-04 16_42_33.829.log` (~12 MB, 18,959 lines).
   Despite the `diagnostic_` filename it is **ATAK format** (`atakVersion` present → `parser/atak.py`);
@@ -235,9 +251,13 @@ pytest tests/test_atak.py -v  # single file verbose
   exceeds 3 → no buffering to cause lag. KNOT's Android host clock was ~2 h behind the mesh (smells
   like a timezone/NTP misconfig). KNOT's log alone can't say which side held correct time — needs a
   correlated peer log.
-- **GID conflict surfaced:** GID `90296226464906` = KNOT here (serial `PNE234200704`), but the
-  2026-06-12 web-session entry below attributed it to HOTLIPS. The earlier buffer-saturation finding
-  was pinned to "HOTLIPS GID 90296226464906" — that GID is KNOT, which shows no saturation. Pending QA.
+- **GID conflict surfaced (RESOLVED 2026-06-16):** GID `90296226464906` = KNOT here (serial
+  `PNE234200704`), but the 2026-06-12 web-session entry below attributed it to HOTLIPS. The earlier
+  buffer-saturation finding was pinned to "HOTLIPS GID 90296226464906" — that GID is KNOT, which shows
+  no saturation. **Resolution:** not a mislabel or collision — GID reflects the radio paired at export
+  time, not operator identity, so the same physical radio (`PNE234200704`) legitimately appears under
+  both callsigns on different test days. Reliable identity = callsign + serial, not GID alone. See
+  `parsing-requirements.md` → "GID, Callsign, and Serial Number — Identity Model".
 - Verified the format + offset directly before recording (first received line carries
   `deliveryTimeInMillis: -7232006`; median delta −7232.0 s across 5,724 received messages).
 - Docs updated: `parsing-requirements.md` P6 section + ATAK known-limitation note, CLAUDE.md backlog +
@@ -262,12 +282,15 @@ pytest tests/test_atak.py -v  # single file verbose
   CLAUDE.md + this backlog flipped to Done).
 
 **2026-06-12 — Log analysis (web session): HOTLIPS + MESMER storedMessages buffer saturation:**
-- ⚠️ **GID label conflict (found 2026-06-15, see P6 entry above):** this entry attributes GID
-  `90296226464906` to HOTLIPS, but the KNOT diagnostic log's own identity fields say that GID is
-  **KNOT** (serial `PNE234200704`), with HOTLIPS appearing there as a separate originator (GID
-  `90389599969003`). The buffer-saturation finding below was attributed to "HOTLIPS GID
-  90296226464906" — but that GID is KNOT, and KNOT shows **no** buffer saturation (max 3). Unresolved:
-  mislabel vs. callsign reassignment vs. same physical device under two labels — pending QA.
+- ⚠️ **GID label conflict (found 2026-06-15, RESOLVED 2026-06-16, see P6 entry above):** this entry
+  attributes GID `90296226464906` to HOTLIPS, but the KNOT diagnostic log's own identity fields say
+  that GID is **KNOT** (serial `PNE234200704`), with HOTLIPS appearing there as a separate originator
+  (GID `90389599969003`). The buffer-saturation finding below was attributed to "HOTLIPS GID
+  90296226464906" — but that GID is KNOT, and KNOT shows **no** buffer saturation (max 3).
+  **Resolution:** the same physical radio (`PNE234200704`) was used by both operators on different
+  test days — GID reflects the radio paired at export time, not a permanent operator identity, so this
+  is neither a mislabel nor a collision. The reliable identity pair is callsign + serial, not GID
+  alone. See `parsing-requirements.md` → "GID, Callsign, and Serial Number — Identity Model".
 - Analyzed HOTLIPS (GID `90296226464906`) and MESMER (GID `90397332557396`) diagnostic
   logs from the **2026-06-04 test event**.
 - Confirmed a `storedMessages` **buffer saturation** pattern on **both** devices: a
