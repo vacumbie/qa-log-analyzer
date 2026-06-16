@@ -373,7 +373,7 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | P3: Cross-device delivery matrix using logId | ⏳ Pending |
 | P4: Relay copy/retransmission flag | ⏳ Pending |
 | P5: Battery critical threshold < 10% | ✅ Done — 🔴 ⚠ CRITICAL in Health Score |
-| P6: KNOT clock skew investigation | ⏳ Investigated 2026-06-15 — confirmed constant ≈ −2h host-clock skew (uniform across all 50 senders, hop-independent, no buffer lag); not delivery lag. Pending QA: which clock was correct + the GID `90296226464906` KNOT-vs-HOTLIPS label conflict. See `docs/parsing-requirements.md` P6 |
+| P6: KNOT clock skew investigation | ⏳ Investigated 2026-06-15 — confirmed constant ≈ −2h host-clock skew (uniform across all 50 senders, hop-independent, no buffer lag); not delivery lag. Pending QA: which clock was correct. GID `90296226464906` KNOT-vs-HOTLIPS conflict **resolved** (2026-06-16) — same physical radio used by both operators on different test days, not a mislabel. See `docs/parsing-requirements.md` P6 |
 | P7: Poseidon log format | ⏳ Deferred |
 | PLI tab ATAK support + gap inference | ✅ Done — all 14 devices shown |
 | Battery chart real UTC timestamps + per-serial lines | ✅ Done |
@@ -456,13 +456,14 @@ re-check:
   Commit it alongside the code change: `docs(session): update session summary`.
   See "Update the session summary" under Common Tasks for the update checklist.
 - **deviceDisconnected LIFO assumption:** Serial is omitted on disconnect events. Attribution uses LIFO (most recent connect = first to disconnect). Documented in `docs/parsing-requirements.md`. Pending dev team confirmation.
-- **GID collision (CL_B + gt_Sassy_B_Net):** Share GID `90194071247761` and serial `PNE233200347`. PLI `nodeMap` uses `gid|source_filename` as key. Dev team notified.
+- **GID is radio identity, not operator identity:** The GID in a diagnostic/ATAK log reflects the radio paired at the time of export — not a permanent operator identity. The **callsign** identifies the operator/app instance; the **serial number** identifies the physical radio hardware. A GID appearing under two different callsigns means the same physical radio was used by both operators at different times — not a mislabel or collision. GID alone is not a reliable unique identifier; callsign + serial together are the reliable identity pair. See `docs/parsing-requirements.md` → "GID, Callsign, and Serial Number — Identity Model".
+- **GID collision (CL_B + gt_Sassy_B_Net):** Share GID `90194071247761` and serial `PNE233200347`. PLI `nodeMap` uses `gid|source_filename` as key — this remains correct under the identity model above. Dev team notified.
 - **Check `docs/` before adding anything non-trivial.** The specs there
   describe intended behavior. If the code disagrees with the docs, flag it.
 - **One commit per logical change.** Format: `type(scope): description` —
   e.g. `feat(parser): add relay_manager` or `fix(ui): modal z-index via createPortal`.
 - **Update docs alongside code.** Parser rule changed → update
   `parsing-requirements.md`. UI component changed → update `ui-requirements.md`.
-- **Parser requirements P1–P7** are in `docs/parsing-requirements.md`. P1 (BLE tag) and P5 (battery critical) are done. P2–P4 pending. P6 investigated 2026-06-15 (KNOT constant ≈ −2h host-clock skew; pending QA + GID label conflict). P7 deferred. Protocol architecture (BROADCAST/PRIVATE/UNICAST normalization, GRIP, logId) also documented there.
+- **Parser requirements P1–P7** are in `docs/parsing-requirements.md`. P1 (BLE tag) and P5 (battery critical) are done. P2–P4 pending. P6 investigated 2026-06-15 (KNOT constant ≈ −2h host-clock skew; pending QA on which clock was correct — GID label conflict resolved 2026-06-16 as same-radio reuse, see identity-model note above). P7 deferred. Protocol architecture (BROADCAST/PRIVATE/UNICAST normalization, GRIP, logId) also documented there.
 - **Do not add npm packages without justification.** Check Chart.js 4.4,
   React 18, and plain CSS first.
