@@ -246,9 +246,9 @@ pytest tests/test_atak.py -v  # single file verbose
 - **HOTLIPS + MESMER `storedMessages` buffer saturation:** analysis confirmed **systemic** — a
   **30-message hard ceiling**; the buffer fills while the device is CONNECTED, then PLI **bursts on drain**.
   (Detail in the 2026-06-12 web-session entry below.)
-- **Troubleshooting docs — drafted, NOT yet committed:** `HotLips_Troubleshooting.md` and
-  `MESMER_Troubleshooting.md` are **not present in the repo** (`docs/`) as of this entry — recorded here
-  as pending commit, not as shipped artifacts.
+- **Troubleshooting docs — created in a web session, NOT yet committed to this repo:**
+  `HotLips_Troubleshooting.md` and `MESMER_Troubleshooting.md` (see the 2026-06-12 entry below) are
+  **not present in `docs/`** as of this entry — pending commit, not shipped artifacts.
 
 **2026-06-16 — docs: clarify GID-as-radio-identity (PR #27, docs only):**
 - Documented the architectural clarification that **GID reflects the radio paired at log-export time,
