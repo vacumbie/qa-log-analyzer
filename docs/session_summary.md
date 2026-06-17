@@ -160,7 +160,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | P2: Protocol separation (BROADCAST/PRIVATE) in TX/RX | ⏳ Pending |
 | P3: Cross-device delivery matrix using logId | ⏳ Pending |
 | P4: Relay copy/retransmission flag | ⏳ Pending |
-| P6: KNOT clock skew investigation | ⏳ Investigated 2026-06-15 — constant ≈ −2h host-clock skew (uniform across all 50 senders, hop-independent, no buffer lag). Pending QA: which clock was correct. GID `90296226464906` KNOT-vs-HOTLIPS conflict **resolved** 2026-06-16 — same physical radio (`PNE234200704`) used by both operators on different test days, not a mislabel |
+| P6: KNOT clock skew investigation | ⏳ Pending — investigated 2026-06-15 (constant ≈ −2h host-clock skew; uniform across all 50 senders, hop-independent, no buffer lag). **Two QA questions documented as blockers** (see `parsing-requirements.md` P6). GID `90296226464906` KNOT-vs-HOTLIPS **attribution resolved** — same physical radio (`PNE234200704`) used by both operators on different test days, not a mislabel |
 | P7: Poseidon log format | ⏳ Deferred |
 | Network Topology tab (Section 14) | ⏳ Pending (design spec exists) |
 | Time-window disabled state for unparseable timestamps | ✅ Done — `range-unavailable` step in FileUpload.jsx replaces the silent skip |
@@ -224,6 +224,31 @@ pytest tests/test_atak.py -v  # single file verbose
 ---
 
 ## Most Recent Work (Last Few PRs)
+
+**2026-06-16 — Afternoon session wrap (parser-honesty PRs #19–#21, GID identity #27, P6 + buffer-saturation analysis):**
+- **PR #19 — `parse_errors` honesty pass (157 tests passing):** canonical `DATA LIMITATION — ` (em-dash)
+  prefix normalized across all 5 parsers; diagnostic 3.1.11 callsign+GID-omission emission (data-driven,
+  fires only when a Received Message block omits both, reports "{n} of {total}"); rsdk GRIP-availability
+  emission (no `GRIP_Receiver` incoming fields → hop/RSSI unavailability surfaced honestly).
+- **vera first run (quality gate):** found **3 real coverage gaps**; all fixed by `parser-agent` before merge.
+- **PR #20 — agent suite deduplication (✅ merged):** single-owner responsibilities; revised karen,
+  task-completion-validator, jenny; code-quality-pragmatist drafted. No further agent-dedup PR pending.
+- **PR #21 — CRLF route bug (✅ merged):** API route double-translated CRLF, so diagnostic CRLF uploads
+  parsed to 0 blocks; temp file now opened with `newline=""`, plus `tests/test_parse_route.py` API-path
+  regression test. Surfaced by karen during the PR #19 gate.
+- **P6 KNOT clock skew — investigated:** constant ≈ −2h host-clock skew (uniform across all 50 senders,
+  hop-independent, no buffer lag; not delivery lag). **Two QA questions documented as blockers** (see
+  `parsing-requirements.md` P6). **GID attribution resolved** — shared physical radio.
+- **PR #27 — GID-as-radio-identity clarification (✅ merged):** GID reflects the radio paired at
+  log-export time, **not** a permanent operator identity; **callsign + serial number together are the
+  reliable identity pair.** New "GID, Callsign, and Serial Number — Identity Model" section in
+  `parsing-requirements.md`.
+- **HOTLIPS + MESMER `storedMessages` buffer saturation:** analysis confirmed **systemic** — a
+  **30-message hard ceiling**; the buffer fills while the device is CONNECTED, then PLI **bursts on drain**.
+  (Detail in the 2026-06-12 web-session entry below.)
+- **Troubleshooting docs — drafted, NOT yet committed:** `HotLips_Troubleshooting.md` and
+  `MESMER_Troubleshooting.md` are **not present in the repo** (`docs/`) as of this entry — recorded here
+  as pending commit, not as shipped artifacts.
 
 **2026-06-16 — docs: clarify GID-as-radio-identity (PR #27, docs only):**
 - Documented the architectural clarification that **GID reflects the radio paired at log-export time,

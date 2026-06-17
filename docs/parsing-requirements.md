@@ -1201,7 +1201,7 @@ data limitation and consider adding a per-device clock offset indicator to
 the Sessions tab when a device's timestamps are inconsistent with the session
 window established by other devices.
 
-**Status:** ⏳ Investigated 2026-06-15 — confirmed **host-clock skew**, pending QA resolution of which clock was correct. The GID attribution question is **resolved** (2026-06-16): the same physical radio was used by both HOTLIPS and KNOT on different test days — see GID conflict note below.
+**Status:** ⏳ Investigated 2026-06-15 — confirmed **host-clock skew**, pending QA resolution of **two open questions** (see **Open QA questions** below). The GID attribution question is **resolved** (2026-06-16): the same physical radio was used by both HOTLIPS and KNOT on different test days — see GID conflict note below.
 
 **Investigation finding (2026-06-15, `log-analyst` on `diagnostic_KNOT_90296226464906_2026-06-04 16_42_33.829.log`):**
 - KNOT's own clock is internally clean: block timestamps are monotonic genuine UTC over 2026-06-04 12:15→20:42 (~8.5 h); no jumps or resets (only sub-second health-poll reordering).
@@ -1209,6 +1209,10 @@ window established by other devices.
 - **Not delivery lag:** `storedMessages` never exceeds 3 (0 in 465 of 507 health samples) — no buffer build-up to drain, so the offset cannot be buffering. Conclusion: **genuine host-clock skew** on KNOT's Android phone (magnitude ~2 h suggests a timezone/NTP misconfiguration; the +32 s argues for a clock set wrong rather than a clean tz label).
 - **Limitation:** KNOT's log alone proves only that KNOT differs from all peers by a fixed offset — not that KNOT (vs. the rest of the mesh) holds the wrong time. Confirming which side is correct needs a correlated peer log from the same window.
 - **Format note:** despite the `diagnostic_` filename, this log is **ATAK format** (`atakVersion` present → `_detect_format` routes to `parser/atak.py`). The `diagnostic_` prefix is a filename convention, not a format indicator.
+
+**Open QA questions (blockers — pending QA, as of 2026-06-16):**
+1. **Which clock was correct — KNOT's host clock or the rest of the mesh?** KNOT's log alone proves only a fixed offset from all peers, not which side held correct time. Confirming this needs a correlated peer log from the same window.
+2. **Root cause of the ≈ −2 h offset — timezone/NTP misconfiguration or a manually-wrong clock?** The ~2 h magnitude points to a tz/NTP issue, but the extra +32 s argues for a clock set wrong rather than a clean timezone label. QA to confirm.
 
 **GID conflict (RESOLVED 2026-06-16):** this log's own identity fields say GID `90296226464906` = **KNOT** (serial `PNE234200704`); a prior 2026-06-12 web-session analysis (see `session_summary.md`) attributed the *same* GID to **HOTLIPS** for the same 2026-06-04 event, and in this log HOTLIPS is a different originator (GID `90389599969003`). This is **not** a mislabel or GID collision: the GID in a diagnostic log reflects the radio paired at the time of export, not a permanent operator identity. The same physical radio (`PNE234200704`) was used by both HOTLIPS and KNOT on different test days, so GID `90296226464906` legitimately appears under both callsigns. See [GID, Callsign, and Serial Number — Identity Model](#gid-callsign-and-serial-number--identity-model) below. The reliable identity pair is **callsign + serial number**, not GID alone. Matters because the earlier `storedMessages` buffer-saturation finding was attributed to "HOTLIPS GID 90296226464906" — but that GID is KNOT here, and KNOT shows **no** buffer saturation (max 3).
 
