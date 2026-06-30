@@ -315,11 +315,12 @@ misleading 5/5. See the Health Score spec in `ui-requirements.md` (section 10).
 - **Pro+ Application:** 1 log type per platform confirmed. iOS: rsdk_log_JonathaniOS.txt analyzed. Android: rsdk_log_wendell_and.txt analyzed.
 - **Relay Health Manager — iOS:** Not yet confirmed whether an iOS version exists.
 - **Pro+ diagnostic (block format) — firmware 3.1.11 omits originator identity:** Some firmware-3.1.11 diagnostic logs omit the originator callsign and GID from Received Message blocks, so the sender of those messages cannot be identified. `parser/diagnostic.py` now surfaces this in `parse_errors` with a `DATA LIMITATION —` entry, emitted **only when it actually manifests** (a Received Message block carrying neither originator identity field) and reporting the affected count (`{n} of {total}`). Logs that include the fields emit nothing.
+- **DATA LIMITATION — host-clock skew is not auto-detected or corrected (ATAK/diagnostic):** A device whose host (phone) clock is wrong produces `timestampInMillis` values that are uniformly offset from the rest of the mesh, making `deliveryTimeInMillis` (received − sent) appear as a large constant — even negative (received "before" sent). A single log cannot prove which side held correct time; confirming that needs a correlated peer log from the same window. The parser stores all timestamps and deltas **verbatim and honestly** — it does not silently re-base them — but it has no per-device clock-offset indicator, so a skewed device's timing must be interpreted manually. Confirmed example: KNOT (GID `90296226464906`, serial `PNE234200704`) showed a constant ≈ −2 h 0 m 32 s offset across all 50 senders, flat across hop counts 1–8, with `storedMessages` ≤ 3 (no buffer lag) — genuine host-clock skew, not delivery lag. See [P6 — KNOT Clock Skew Investigation](#p6--knot-clock-skew-investigation-low--data-quality). Distinguish from *sporadic* per-message negative `deliveryTimeInMillis`, which is normal inter-device skew (see the Negative `deliveryTimeInMillis` note in the ATAK Enhanced Log section).
 - All temperatures stored internally in Celsius and must be converted to Fahrenheit for display.
 
 ---
 
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-30_
 
 ---
 
@@ -1201,7 +1202,7 @@ data limitation and consider adding a per-device clock offset indicator to
 the Sessions tab when a device's timestamps are inconsistent with the session
 window established by other devices.
 
-**Status:** ⏳ Investigated 2026-06-15 — confirmed **host-clock skew**, pending QA resolution of **two open questions** (see **Open QA questions** below). The GID attribution question is **resolved** (2026-06-16): the same physical radio was used by both HOTLIPS and KNOT on different test days — see GID conflict note below.
+**Status:** ✅ Done (tool-side, 2026-06-30) — investigation concluded (**host-clock skew**) and documented as a [DATA LIMITATION](#known-limitations); no further parser/UI work is required, because a single log cannot detect or correct the offset. **Two QA questions remain open as external (non-blocking) follow-ups** — they are QA field actions, not codebase work (see **Open QA questions** below). The GID attribution question is **resolved** (2026-06-16): the same physical radio was used by both HOTLIPS and KNOT on different test days — see GID conflict note below.
 
 **Investigation finding (2026-06-15, `log-analyst` on `diagnostic_KNOT_90296226464906_2026-06-04 16_42_33.829.log`):**
 - KNOT's own clock is internally clean: block timestamps are monotonic genuine UTC over 2026-06-04 12:15→20:42 (~8.5 h); no jumps or resets (only sub-second health-poll reordering).
@@ -1210,7 +1211,7 @@ window established by other devices.
 - **Limitation:** KNOT's log alone proves only that KNOT differs from all peers by a fixed offset — not that KNOT (vs. the rest of the mesh) holds the wrong time. Confirming which side is correct needs a correlated peer log from the same window.
 - **Format note:** despite the `diagnostic_` filename, this log is **ATAK format** (`atakVersion` present → `_detect_format` routes to `parser/atak.py`). The `diagnostic_` prefix is a filename convention, not a format indicator.
 
-**Open QA questions (blockers — pending QA, as of 2026-06-16):**
+**Open QA questions (external follow-ups — non-blocking; P6 is closed tool-side):**
 1. **Which clock was correct — KNOT's host clock or the rest of the mesh?** KNOT's log alone proves only a fixed offset from all peers, not which side held correct time. Confirming this needs a correlated peer log from the same window.
 2. **Root cause of the ≈ −2 h offset — timezone/NTP misconfiguration or a manually-wrong clock?** The ~2 h magnitude points to a tz/NTP issue, but the extra +32 s argues for a clock set wrong rather than a clean timezone label. QA to confirm.
 

@@ -1,5 +1,5 @@
 # QA Log Analyzer — Session Summary
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-30_
 
 ---
 
@@ -126,6 +126,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | `fw_log` | Battery stabilization errors are a known FW quirk — counted separately |
 | `fw_log` | `RSSI[]` samples are DEBUG-level and skipped — channel energy is the RSSI proxy |
 | `atak` | `deviceDisconnected` omits serial — attribution uses LIFO assumption (pending dev team confirmation) |
+| `atak`/`diagnostic` | Host-clock skew not auto-detected/corrected — a wrong phone clock offsets all `timestampInMillis` uniformly (makes `deliveryTimeInMillis` a large constant, even negative); timestamps stored verbatim, interpret manually. Confirmed: KNOT ≈ −2h. See P6 |
 
 ---
 
@@ -160,7 +161,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | P2: Protocol separation (BROADCAST/PRIVATE) in TX/RX | ⏳ Pending |
 | P3: Cross-device delivery matrix using logId | ⏳ Pending |
 | P4: Relay copy/retransmission flag | ⏳ Pending |
-| P6: KNOT clock skew investigation | ⏳ Pending — investigated 2026-06-15 (constant ≈ −2h host-clock skew; uniform across all 50 senders, hop-independent, no buffer lag). **Two QA questions documented as blockers** (see `parsing-requirements.md` P6). GID `90296226464906` KNOT-vs-HOTLIPS **attribution resolved** — same physical radio (`PNE234200704`) used by both operators on different test days, not a mislabel |
+| P6: KNOT clock skew investigation | ✅ Done (tool-side, 2026-06-30) — constant ≈ −2h host-clock skew (uniform across all 50 senders, hop-independent, no buffer lag), documented as a `DATA LIMITATION` in `parsing-requirements.md`; no parser/UI work possible. **Two QA questions remain open as external, non-blocking follow-ups** (which clock was correct; tz/NTP-vs-manually-wrong root cause — see `parsing-requirements.md` P6). GID `90296226464906` KNOT-vs-HOTLIPS **attribution resolved** — same physical radio (`PNE234200704`) used by both operators on different test days, not a mislabel |
 | P7: Poseidon log format | ⏳ Deferred |
 | Network Topology tab (Section 14) | ⏳ Pending (design spec exists) |
 | Time-window disabled state for unparseable timestamps | ✅ Done — `range-unavailable` step in FileUpload.jsx replaces the silent skip |
@@ -225,6 +226,19 @@ pytest tests/test_atak.py -v  # single file verbose
 
 ## Most Recent Work (Last Few PRs)
 
+**2026-06-30 — docs(p6): close P6 KNOT clock skew tool-side:**
+- The P6 investigation (2026-06-15) had already concluded: constant ≈ −2h **host-clock skew** on KNOT,
+  uniform across all 50 senders, hop-independent, no buffer lag — genuine clock skew, not delivery lag.
+  A single log cannot detect or correct the offset, so there is **no parser/UI work to do**.
+- Documented the conclusion as a **`DATA LIMITATION`** in `parsing-requirements.md` (`## Known Limitations`):
+  host-clock skew is not auto-detected/corrected; timestamps are stored verbatim and must be interpreted
+  manually; distinguished from normal *sporadic* per-message negative `deliveryTimeInMillis`.
+- Marked **P6 ✅ Done (tool-side)** in `CLAUDE.md` (backlog row + P1–P7 summary) and this file (backlog row
+  + Known Data Limitations table). The **two QA questions** (which clock was correct; tz/NTP-vs-manually-wrong
+  root cause) are reframed from "blockers" to **external, non-blocking follow-ups** — they are QA field
+  actions, not codebase work. GID attribution remains resolved (2026-06-16, shared radio `PNE234200704`).
+- Docs-only change; no code, tests, parsers, or `_result_to_dict` touched.
+
 **2026-06-16 — Afternoon session wrap (parser-honesty PRs #19–#21, GID identity #27, P6 + buffer-saturation analysis):**
 - **PR #19 — `parse_errors` honesty pass (157 tests passing):** canonical `DATA LIMITATION — ` (em-dash)
   prefix normalized across all 5 parsers; diagnostic 3.1.11 callsign+GID-omission emission (data-driven,
@@ -238,7 +252,8 @@ pytest tests/test_atak.py -v  # single file verbose
   regression test. Surfaced by karen during the PR #19 gate.
 - **P6 KNOT clock skew — investigated:** constant ≈ −2h host-clock skew (uniform across all 50 senders,
   hop-independent, no buffer lag; not delivery lag). **Two QA questions documented as blockers** (see
-  `parsing-requirements.md` P6). **GID attribution resolved** — shared physical radio.
+  `parsing-requirements.md` P6). **GID attribution resolved** — shared physical radio. *(Closed tool-side
+  2026-06-30 — see entry below.)*
 - **PR #27 — GID-as-radio-identity clarification (✅ merged):** GID reflects the radio paired at
   log-export time, **not** a permanent operator identity; **callsign + serial number together are the
   reliable identity pair.** New "GID, Callsign, and Serial Number — Identity Model" section in
