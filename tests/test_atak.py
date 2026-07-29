@@ -47,6 +47,14 @@ V3_NAMED_FIXTURE = FIXTURE_DIR / "diagnostic_KESTREL_11223_2026-07-28_09_00_00_0
 # LIMITATION.
 V3_NO_HEALTH_FIXTURE = FIXTURE_DIR / "atak_v3_no_health_sample.json"
 
+# Synthetic fixture with a genuine 5s PLI cadence, self-reported via
+# message.interval. Pins the data contract the Originator PLI UI fix depends
+# on: sub-15s cadences must round-trip through message.pli_interval, since
+# the old frontend gap-inference bucket list ([15,30,60,120,180,300,600])
+# had no slot for 5s and silently discarded it as noise — see
+# docs/atak_v3_early_integration_notes.md.
+V3_5S_PLI_FIXTURE = FIXTURE_DIR / "atak_v3_5s_pli_sample.json"
+
 
 # ── Fixture availability ──────────────────────────────────────────────────────
 
@@ -306,6 +314,17 @@ def test_no_health_data_limitation_absent_when_samples_present():
     assert len(result.atak_health_samples) > 0
     limits = [e for e in result.parse_errors if "device-health" in e]
     assert limits == []
+
+
+def test_sub_15s_pli_interval_preserved():
+    """A genuine 5s PLI cadence, self-reported via message.interval, must
+    come through as pli_interval == '5' — not silently dropped. This is the
+    data contract the Originator PLI frontend fix depends on to represent
+    cadences the old gap-inference bucket list couldn't."""
+    result = parse_atak_log(V3_5S_PLI_FIXTURE)
+    sent_pli = [m for m in result.atak_messages if m.message_type == "pli" and m.is_sender]
+    assert len(sent_pli) == 3
+    assert all(m.pli_interval == "5" for m in sent_pli)
 
 
 # ── Error handling ────────────────────────────────────────────────────────────

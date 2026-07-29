@@ -351,7 +351,20 @@ function PliSettingsSection({ results }) {
     const initial = toSetting(events[0])
     const changes = events.slice(1).map(toSetting)
 
-    return { callsign, initial, changes }
+    // pliSettingUpdated only fires on a change — it does NOT log the
+    // starting configuration at session start. If the first event happens
+    // well after the session began, the setting for that earlier stretch
+    // is genuinely unknown, not "whatever this card shows."
+    let gapMinutes = null
+    if (r.session_start && events[0].timestamp) {
+      const startMs = new Date(r.session_start.replace(' ', 'T') + 'Z').getTime()
+      const firstMs = new Date(events[0].timestamp.replace(' ', 'T') + 'Z').getTime()
+      if (!isNaN(startMs) && !isNaN(firstMs) && firstMs > startMs) {
+        gapMinutes = Math.round((firstMs - startMs) / 60000)
+      }
+    }
+
+    return { callsign, initial, changes, gapMinutes }
   }).filter(d => d.initial !== null)
 
   if (!deviceSettings.length) return null
@@ -375,7 +388,7 @@ function PliSettingsSection({ results }) {
       <SectionHeader
         icon="📡"
         title="PLI Settings per Device"
-        sub="Session-start setting and mid-session changes · intervals < 60s highlighted red"
+        sub="First observed setting-change event, plus mid-session changes · pliSettingUpdated only fires on a change, so the setting before the first event is unknown · intervals < 60s highlighted red"
       />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 10, marginBottom: 16 }}>
         {deviceSettings.map((d, i) => {
@@ -389,7 +402,7 @@ function PliSettingsSection({ results }) {
                 {d.callsign}
               </div>
 
-              {/* Session-start setting */}
+              {/* First observed setting-change event (not necessarily the session-start config) */}
               <div style={{ display: 'flex', gap: 12, marginBottom: hasChanges ? 8 : 0, flexWrap: 'wrap' }}>
                 <div>
                   <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginBottom: 2 }}>INTERVAL</div>
@@ -406,10 +419,15 @@ function PliSettingsSection({ results }) {
                   </div>
                 </div>
                 <div>
-                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginBottom: 2 }}>FIRST SEEN</div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginBottom: 2 }}>FIRST CHANGE EVENT</div>
                   <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#94a3b8' }}>{iv.ts}</div>
                 </div>
               </div>
+              {d.gapMinutes !== null && d.gapMinutes >= 2 && (
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.yellow, marginTop: 6 }}>
+                  ⚠ {d.gapMinutes}m into the session before this — setting for that stretch is unknown
+                </div>
+              )}
 
               {/* Mid-session changes */}
               {hasChanges && (
@@ -483,7 +501,34 @@ function PliTab({ results }) {
         const sentPli = (r.atak_messages || [])
           .filter(m => m.message_type === 'pli' && m.is_sender && m.timestamp)
           .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
-        if (sentPli.length >= 2) {
+
+        // Prefer the self-reported interval carried on each message
+        // (message.interval — populated starting with ATAK plugin v3.0; see
+        // docs/atak_v3_early_integration_notes.md). It's ground truth, not a
+        // guess, and it captures cadences the gap-inference bucket list below
+        // can't represent at all (e.g. a genuine 5s cadence — nearest bucket
+        // is 15s, which is outside the ±25% tolerance, so gap inference
+        // silently discards it as noise). Only fall back to gap inference
+        // when NO sent PLI message on this node reports a usable interval
+        // (pre-v3.0 logs never populate this field).
+        const reported = {}
+        sentPli.forEach(m => {
+          const sec = parseInt(m.pli_interval, 10)
+          if (!isNaN(sec) && sec > 0) {
+            const iv = `${sec} seconds`
+            reported[iv] = (reported[iv] || 0) + 1
+          }
+        })
+
+        if (Object.keys(reported).length > 0) {
+          // Same noise filter as gap inference, applied for consistency:
+          // drop intervals with < 1 min estimated total duration.
+          Object.keys(reported).forEach(iv => {
+            const sec = parseInt(iv, 10)
+            if (sec * reported[iv] < 60) delete reported[iv]
+          })
+          Object.assign(nodeMap[nodeKey].intervalCounts, reported)
+        } else if (sentPli.length >= 2) {
           const gaps = []
           for (let i = 1; i < sentPli.length; i++) {
             const ms = new Date(sentPli[i].timestamp.replace(' ','T')+'Z').getTime()
@@ -540,7 +585,7 @@ function PliTab({ results }) {
               const c = pliColor(s)
               return <span key={iv} style={{ fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700, color: c }}>{iv.replace(' seconds', 's')}</span>
             })}
-            {!has5s && <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginLeft: 8 }}>· no 5s data in loaded files — load RSO_HagenM or Steven logs to see 5s nodes</span>}
+            {!has5s && <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginLeft: 8 }}>· no 5s data in loaded files</span>}
           </div>
         )
       })()}
