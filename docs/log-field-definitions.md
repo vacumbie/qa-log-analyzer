@@ -427,6 +427,8 @@ Written approximately every 30 seconds. Provides radio health data.
 > - `transmitPowerDifferential = 255` → stored as `null` (not yet valid)
 >
 > ⚠️ **Device Health records also populate `system_samples`** for cross-format compatibility, but only when both `battery_pct` and `pa_temp_c` are non-null.
+>
+> ⚠️ **Some early ATAK plugin v3.0 builds omit Device Health records entirely** — zero `connectionState` records for the whole session, meaning no battery/thermal/firmware/radio-health data at all. `parser/atak.py` surfaces this as a `DATA LIMITATION —` entry in `parse_errors` rather than silently rendering empty Thermal/Battery tabs. See `docs/atak_v3_early_integration_notes.md`.
 
 ---
 
@@ -458,7 +460,7 @@ One record per RF message sent or received. The majority of records in a typical
 | `originatorUUID` | string | `message.originator_uuid` | `ANDROID-*` UUID of the originator. `""` when missing. |
 | `loggingUserLocation` | object | `message.logging_user_location` | `{lat, long, alt}` — the logging device's own GPS at log time. Present on every message record. Used as the **receiver dot position** in the Hop Count Map. |
 | `transmittedLocation` | object | `message.transmitted_location` | `{lat, long, alt}` — location embedded in the message payload. Present on `pli`/`fileTransfer`/`mapObject`; **absent on `textChat`** (stored as `null`). Used as the **sender endpoint of RF link lines** in the Hop Count Map. |
-| `senderCallsign` | string | *(not used)* | **Always empty string** in this log format. |
+| `senderCallsign` | string | `message.sender_callsign` | **Populated starting with ATAK plugin v3.0** (was always empty string in earlier plugin versions/samples). Used as a fallback for `device.callsign` when the filename doesn't yield one — see `docs/atak_v3_early_integration_notes.md`. |
 | `senderUUID` | string | *(not used)* | **Always empty string** in this log format. |
 | `receiverCallsign` | string | *(not used)* | **Always empty string** in this log format. |
 

@@ -1,5 +1,5 @@
 # QA Log Analyzer — Session Summary
-_Last updated: 2026-06-30_
+_Last updated: 2026-07-29_
 
 ---
 
@@ -116,7 +116,9 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | `relay_manager` | Prod logs not analyzed — stage/prod behavioral differences unknown |
 | `rsdk` | GRIP hop count and RSSI only when `GRIP_Receiver` incoming fields lines are present |
 | `diagnostic` | Firmware 3.1.11 omits callsign and GID from Received Message blocks |
-| `atak` | Callsign always empty — identity is GID-only (filename is only callsign source) |
+| `atak` | `originatorCallsign`/`receiverCallsign`/UUIDs always empty — identity for those is GID-only. `senderCallsign` IS populated in ATAK plugin v3.0+ (was always empty before) and is now the `device.callsign` fallback when filename parsing doesn't yield one |
+| `atak` | ATAK v3.0 filenames drop the `ATAK_` segment (`diagnostic_<CALLSIGN>_<GID>_...`) — both conventions now accepted by the filename regex |
+| `atak` | Some early ATAK v3.0 builds emit **zero device-health (`connectionState`) records** for a session — no battery/thermal/firmware/radio-health data at all. Flagged via `DATA LIMITATION —` in `parse_errors`, fires only when it actually happens. RSSI also observed as always `0` in early v3.0 captures. See `docs/atak_v3_early_integration_notes.md` |
 | `atak` | `sdkError` (SDK Logging 2.0) volume baseline unknown — count is informational, not pass/fail |
 | `atak` | `numberOfOpenSegments = -99` is a sentinel → stored as null |
 | `atak` | Receiver-side `deliveryTimeInMillis = 0` on fileTransfer is a placeholder |
@@ -168,6 +170,9 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | Min battery windowed reduce returns 0 for single-sample sets (ATAK) | ✅ Done — IIFE pattern: `(batPcts => batPcts.length ? Math.min(...batPcts) : null)(filtered)` |
 | `extractTimeRange` doesn't detect ATAK epoch-ms timestamps (`timestampInMillis`) — ATAK logs lose the time-window slider | ✅ Done — scanner now unions wall-clock `TS_RE` with a key-anchored 13-digit `EPOCH_MS_RE`; ATAK regains the slider; client-side only |
 | Battery Chart — Multi-Radio False Recovery DataNote | ⏳ Pending dev team confirmation |
+| ATAK v3.0 filename convention support (`ATAK_` segment optional) + `device.callsign` fallback via `senderCallsign` | ✅ Done (2026-07-29) — `_FILENAME_RE` accepts both conventions; new `sender_callsign` field on `AtakMessage`; callsign falls back to it when filename doesn't match |
+| ATAK v3.0 missing-health-telemetry `DATA LIMITATION` | ✅ Done (2026-07-29) — `parser/atak.py` flags it in `parse_errors` when a log has zero `connectionState` records |
+| ATAK v3.0 test fixtures + coverage | ✅ Done (2026-07-29) — 2 new synthetic fixtures, 8 new tests in `test_atak.py`; suite at 183 passed, 2 skipped |
 
 ---
 
@@ -225,6 +230,41 @@ pytest tests/test_atak.py -v  # single file verbose
 ---
 
 ## Most Recent Work (Last Few PRs)
+
+**2026-07-29 — ATAK plugin v3.0 early-integration support (filename, callsign fallback, missing-health DATA LIMITATION):**
+- Two real field logs introduced (`diagnostic_BARK_65043_2026-07-28_15_09_17_944.log`,
+  `diagnostic_EUD-009_54498_2026-07-29_04_02_14_14.log`) — first logs seen from the new
+  ATAK plugin v3.0 build (app version `3.0.0 (dae7d160) - [5.6.0]`, ATAK `5.6.0.21`,
+  Samsung SM-S931U1). Both parsed clean as `atak` format (format detection unaffected —
+  content sniffing on `logId`/`atakVersion` still matches), but surfaced two real gaps:
+- **Filename convention changed:** v3.0 drops the `ATAK_` segment
+  (`diagnostic_<CALLSIGN>_<GID>_<DATE>_<TIME>.log` vs the old
+  `diagnostic_ATAK_<CALLSIGN>_<GID>_...`). `_FILENAME_RE` in `parser/atak.py` now accepts
+  both. Added a `senderCallsign` fallback for `device.callsign` (new `sender_callsign` field
+  on `AtakMessage`, mirroring the existing GID fallback pattern) for cases where neither
+  filename convention matches at all.
+- **Missing device-health telemetry:** both new logs contained **zero `connectionState`
+  records** — no battery/thermal/firmware/radio-health data for the whole session. Confirmed
+  expected — brand new FW/radio combo, early integration. Added a `DATA LIMITATION —` entry
+  in `parse_errors` when this happens, rather than silently rendering empty Thermal/Battery
+  tabs. Also noted (not yet acted on): RSSI is always `0` in these logs, and PLI interval
+  shows inconsistent values within one session.
+- **New doc:** `docs/atak_v3_early_integration_notes.md` — running baseline of what's
+  actually available in v3.0 logs as the plugin/FW matures (present/absent/inconsistent
+  data categories, source log table to extend as more samples come in).
+- **Docs synced to reflect the fix** (were stating things now factually wrong):
+  `CLAUDE.md` (Known Data Limitations table), `docs/parsing-requirements.md` (Filename
+  Convention sections ×2, "Callsign/UUID fields always empty" claims ×3, Known Limitations),
+  `docs/log-field-definitions.md` (`senderCallsign` field row, Device Health record note).
+- **Tests:** 2 new synthetic fixtures (`diagnostic_KESTREL_11223_2026-07-28_09_00_00_000.log`
+  for the new filename convention, `atak_v3_no_health_sample.json` for the callsign fallback
+  + missing-health-limitation path) and 8 new tests in `test_atak.py`, including a regression
+  guard that the new DATA LIMITATION does NOT fire when health samples are present. Full
+  suite: **183 passed, 2 skipped** (the 2 skips are the pre-existing real-field-data tests
+  gated on `NAMED_FIXTURE`, unrelated to this work).
+- Delivered as a zip (parser/atak.py, parser/models.py, tests/test_atak.py, 2 fixtures,
+  docs/atak_v3_early_integration_notes.md) for manual drop-in rather than a PR from this
+  session — not yet run through jenny/karen/vera in Claude Code.
 
 **2026-06-30 — docs(p6): close P6 KNOT clock skew tool-side:**
 - The P6 investigation (2026-06-15) had already concluded: constant ≈ −2h **host-clock skew** on KNOT,
@@ -471,6 +511,9 @@ pytest tests/test_atak.py -v  # single file verbose
 ## What to Work On Next
 
 Based on the backlog, the most actionable items (not blocked):
+
+0. **Run today's ATAK v3.0 changes through jenny/karen/vera** in Claude Code — done in the
+   web chat interface this session, not yet through the usual quality-gate sequence
 
 1. **P2: Protocol separation (BROADCAST/PRIVATE)** in TX/RX analysis — `messageProtocol` is already parsed, just needs UI lanes
 

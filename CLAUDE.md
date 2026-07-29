@@ -319,7 +319,9 @@ project's lifecycle, not a sign something is broken.
 | `relay_manager` | Prod logs not analyzed — stage/prod behavioral differences unknown |
 | `rsdk` | GRIP hop count and RSSI only available when `GRIP_Receiver` incoming fields lines are present |
 | `diagnostic` | Firmware 3.1.11 omits callsign and GID from Received Message blocks |
-| `atak` | Callsign always empty in this format — identity is GID-only |
+| `atak` | `originatorCallsign`/`originatorUUID`/`receiverCallsign` always empty in observed samples — identity for those is GID-only. `senderCallsign` IS populated starting with ATAK plugin v3.0 (was always empty in earlier plugin versions/samples) — see `docs/atak_v3_early_integration_notes.md` |
+| `atak` | ATAK plugin v3.0 filenames drop the `ATAK_` segment (`diagnostic_<CALLSIGN>_<GID>_<DATE>_<TIME>.log`); the filename regex accepts both conventions, and `device.callsign` falls back to `senderCallsign` on the device's own sent message when the filename doesn't match either |
+| `atak` | Some early ATAK v3.0 builds emit zero `connectionState` (device-health) records for a session — no battery %, thermal, firmware version, or radio-health data available. Flagged via `DATA LIMITATION —` in `parse_errors`, fires only when a log actually has zero health records |
 | `atak` | `sdkError` (SDK Logging 2.0) total volume baseline unknown — `sdk_error_count` is aggregated and informational, not a pass/fail signal. Exception: the `ERROR\|BLE` subset of `counts_by_tag` (falling back to `deviceDisconnected` event count) feeds the BLE Health Score dimension as `ble_fail_count`; its `> 0 = fail` threshold is an initial estimate pending field validation, like the other Health Score thresholds |
 | `atak` | `numberOfOpenSegments = -99` is a sentinel (transfer cancelled before count known) — stored as null, never -99 |
 | `atak` | Receiver-side `deliveryTimeInMillis = 0` on fileTransfer is a placeholder — only meaningful when `isSender=true` and status `SUCCESS` |
@@ -373,7 +375,7 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | P3: Cross-device delivery matrix using logId | ⏳ Pending |
 | P4: Relay copy/retransmission flag | ⏳ Pending |
 | P5: Battery critical threshold < 10% | ✅ Done — 🔴 ⚠ CRITICAL in Health Score |
-| P6: KNOT clock skew investigation | ✅ Done (tool-side, 2026-06-30) — confirmed constant ≈ −2h host-clock skew (uniform across all 50 senders, hop-independent, no buffer lag), documented as a `DATA LIMITATION` in `parsing-requirements.md`; no parser/UI work possible (a single log can't detect/correct the offset). **Two QA questions remain open as external, non-blocking follow-ups** (which clock was correct; tz/NTP-vs-manually-wrong root cause). GID `90296226464906` KNOT-vs-HOTLIPS conflict **resolved** (2026-06-16) — same physical radio used by both operators on different test days, not a mislabel. See `docs/parsing-requirements.md` P6 |
+| P6: KNOT clock skew investigation | ⏳ Investigated 2026-06-15 — confirmed constant ≈ −2h host-clock skew (uniform across all 50 senders, hop-independent, no buffer lag); not delivery lag. **Two open QA questions blocking closure** (which clock was correct; tz/NTP-vs-manually-wrong root cause). GID `90296226464906` KNOT-vs-HOTLIPS conflict **resolved** (2026-06-16) — same physical radio used by both operators on different test days, not a mislabel. See `docs/parsing-requirements.md` P6 |
 | P7: Poseidon log format | ⏳ Deferred |
 | PLI tab ATAK support + gap inference | ✅ Done — all 14 devices shown |
 | Battery chart real UTC timestamps + per-serial lines | ✅ Done |
@@ -464,6 +466,6 @@ re-check:
   e.g. `feat(parser): add relay_manager` or `fix(ui): modal z-index via createPortal`.
 - **Update docs alongside code.** Parser rule changed → update
   `parsing-requirements.md`. UI component changed → update `ui-requirements.md`.
-- **Parser requirements P1–P7** are in `docs/parsing-requirements.md`. P1 (BLE tag) and P5 (battery critical) are done. P2–P4 pending. P6 done tool-side 2026-06-30 (KNOT constant ≈ −2h host-clock skew, documented as a `DATA LIMITATION`; two QA questions remain open as external non-blocking follow-ups — which clock was correct + tz/NTP-vs-manually-wrong root cause; GID label conflict resolved 2026-06-16 as same-radio reuse, see identity-model note above). P7 deferred. Protocol architecture (BROADCAST/PRIVATE/UNICAST normalization, GRIP, logId) also documented there.
+- **Parser requirements P1–P7** are in `docs/parsing-requirements.md`. P1 (BLE tag) and P5 (battery critical) are done. P2–P4 pending. P6 investigated 2026-06-15 (KNOT constant ≈ −2h host-clock skew; two open QA questions blocking closure — which clock was correct + tz/NTP-vs-manually-wrong root cause; GID label conflict resolved 2026-06-16 as same-radio reuse, see identity-model note above). P7 deferred. Protocol architecture (BROADCAST/PRIVATE/UNICAST normalization, GRIP, logId) also documented there.
 - **Do not add npm packages without justification.** Check Chart.js 4.4,
   React 18, and plain CSS first.

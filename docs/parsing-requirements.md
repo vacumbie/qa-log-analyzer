@@ -66,7 +66,7 @@ Both log types share the **same JSON format and record structure**. The differen
 |---------|---------|----------|
 | Format | Newline-delimited JSON | Newline-delimited JSON |
 | Record types | Same 5 types | Same 5 types |
-| Callsign/UUID fields | Always empty strings | Always empty strings |
+| Callsign/UUID fields | `senderCallsign` populated in v3.0+ plugin logs (was always empty before); `originatorCallsign`/`originatorUUID`/`receiverCallsign` still always empty | Same |
 | `frequencyUpdated` event | ✅ Present (full channel list) | ❌ Not observed |
 | `powerLevelUpdated` event | ❌ Not observed | ✅ Present |
 | `pliSettingUpdated` event | ✅ Present | ✅ Present |
@@ -84,10 +84,15 @@ The regular user log accumulates data across multiple app launches without being
 
 ### Filename Convention
 
-Same as enhanced log:
 ```
-diagnostic_ATAK_<CALLSIGN>_<GID>_<YYYY-MM-DD>_<HH_MM_SS_mmm>.log
+diagnostic_[ATAK_]<CALLSIGN>_<GID>_<YYYY-MM-DD>_<HH_MM_SS_mmm>.log
 ```
+
+The `ATAK_` segment is optional — older captures include it, ATAK plugin
+v3.0 (2026-07+) drops it. Both are accepted. If neither the callsign nor GID
+can be extracted from the filename (unrecognized name, or GID missing),
+`device.callsign` falls back to `senderCallsign` on the device's own first
+sent message, and `device.gid` falls back to `senderGid` the same way.
 
 ### Fields to Parse
 
@@ -142,7 +147,7 @@ All rules from the enhanced log apply. Additional rules for the regular log:
 
 ### Known Limitations — ATAK Regular Log
 
-- **Callsign and UUID fields are always empty** in both log types — same as enhanced log
+- **Callsign/UUID fields:** `senderCallsign` is populated in v3.0+ plugin logs (was always empty before); `originatorCallsign`/`originatorUUID`/`receiverCallsign`/other UUIDs remain always empty — same as enhanced log
 - **`transmitPowerDifferential`** real values (5–16) observed in regular log vs (1–3) in enhanced; meaning remains undocumented
 - **Multi-session accumulation** means the log may contain data from very different dates/contexts — always segment by App Info `launchTimeInMillis`
 - **`frequencyUpdated` vs `powerLevelUpdated`** — these appear to be different event types for overlapping purposes; relationship not yet fully documented
@@ -315,12 +320,12 @@ misleading 5/5. See the Health Score spec in `ui-requirements.md` (section 10).
 - **Pro+ Application:** 1 log type per platform confirmed. iOS: rsdk_log_JonathaniOS.txt analyzed. Android: rsdk_log_wendell_and.txt analyzed.
 - **Relay Health Manager — iOS:** Not yet confirmed whether an iOS version exists.
 - **Pro+ diagnostic (block format) — firmware 3.1.11 omits originator identity:** Some firmware-3.1.11 diagnostic logs omit the originator callsign and GID from Received Message blocks, so the sender of those messages cannot be identified. `parser/diagnostic.py` now surfaces this in `parse_errors` with a `DATA LIMITATION —` entry, emitted **only when it actually manifests** (a Received Message block carrying neither originator identity field) and reporting the affected count (`{n} of {total}`). Logs that include the fields emit nothing.
-- **DATA LIMITATION — host-clock skew is not auto-detected or corrected (ATAK/diagnostic):** A device whose host (phone) clock is wrong produces `timestampInMillis` values that are uniformly offset from the rest of the mesh, making `deliveryTimeInMillis` (received − sent) appear as a large constant — even negative (received "before" sent). A single log cannot prove which side held correct time; confirming that needs a correlated peer log from the same window. The parser stores all timestamps and deltas **verbatim and honestly** — it does not silently re-base them — but it has no per-device clock-offset indicator, so a skewed device's timing must be interpreted manually. Confirmed example: KNOT (GID `90296226464906`, serial `PNE234200704`) showed a constant ≈ −2 h 0 m 32 s offset across all 50 senders, flat across hop counts 1–8, with `storedMessages` ≤ 3 (no buffer lag) — genuine host-clock skew, not delivery lag. See [P6 — KNOT Clock Skew Investigation](#p6--knot-clock-skew-investigation-low--data-quality). Distinguish from *sporadic* per-message negative `deliveryTimeInMillis`, which is normal inter-device skew (see the Negative `deliveryTimeInMillis` note in the ATAK Enhanced Log section).
+- **Android ATAK Plug-in v3.0 — early integration (brand new FW/radio, expect churn):** Filenames drop the `ATAK_` segment (both conventions now accepted). `senderCallsign` is populated for the first time (was always empty pre-v3.0) and is used as a `device.callsign` fallback. Some early builds emit **zero device-health (`connectionState`) records** for a session — no battery/thermal/firmware/radio-health data at all; `parser/atak.py` surfaces this via a `DATA LIMITATION —` entry when it happens. RSSI has also been observed as always `0` in early v3.0 captures. See `docs/atak_v3_early_integration_notes.md` for the running baseline of what's actually available as the plugin/FW matures.
 - All temperatures stored internally in Celsius and must be converted to Fahrenheit for display.
 
 ---
 
-_Last updated: 2026-06-30_
+_Last updated: 2026-07-29_
 
 ---
 
@@ -336,14 +341,15 @@ A goTenna plugin that integrates with ATAK (Android Team Awareness Kit).
 
 ### Filename Convention
 ```
-diagnostic_ATAK_<CALLSIGN>_<GID>_<YYYY-MM-DD>_<HH_MM_SS_mmm>.log
+diagnostic_[ATAK_]<CALLSIGN>_<GID>_<YYYY-MM-DD>_<HH_MM_SS_mmm>.log
 ```
-Example: `diagnostic_ATAK_HOTEL_90215634664458_2026-03-04_16_42_04_775.log`
+Example (pre-v3.0): `diagnostic_ATAK_HOTEL_90215634664458_2026-03-04_16_42_04_775.log`
+Example (v3.0+, ATAK_ segment dropped): `diagnostic_BARK_65043_2026-07-28_15_09_17_944.log`
 
 | Filename Segment | Meaning |
 |-----------------|---------|
-| `HOTEL` | Device callsign |
-| `90215634664458` | Device GID |
+| `HOTEL` / `BARK` | Device callsign |
+| `90215634664458` / `65043` | Device GID |
 | `2026-03-04_16_42_04_775` | Log export timestamp |
 
 ### Log Format
@@ -534,7 +540,7 @@ are general structured log events, not error-only records.
 
 ### Known Limitations — ATAK Enhanced Log
 
-- **Callsign and UUID fields are always empty** in the enhanced log format — identity can only be determined from GID (`originatorUUID` does carry an `ANDROID-*` UUID, but `senderUUID`/`receiverUUID`/all callsigns are empty)
+- **`senderCallsign` is populated starting with ATAK plugin v3.0** (was always empty in earlier plugin versions/samples) — used as the `device.callsign` fallback when the filename doesn't yield one. `originatorCallsign`/`receiverCallsign`/`senderUUID`/`receiverUUID` remain always empty; identity for those is GID-only (`originatorUUID` does carry an `ANDROID-*` UUID)
 - **Negative `deliveryTimeInMillis`** (767 records, 18%) indicates clock skew between originator and receiver devices; most common at hop counts 3–4. **Distinguish two patterns:** *sporadic* negatives (varying per message/hop, ~18% here) are normal inter-device skew; a *constant whole-session* offset uniform across all senders and hop counts is **host-clock skew** on the receiving device (see P6 — KNOT showed a fixed ≈ −2 h offset across all 50 senders). The parser captures both honestly; interpretation differs.
 - **`transmitPowerDifferential`** meaning is not fully documented — observed values 1–3 during normal operation and 255 during connecting state
 - **Regular user log format** not yet confirmed — need example to compare against enhanced format
@@ -1202,7 +1208,7 @@ data limitation and consider adding a per-device clock offset indicator to
 the Sessions tab when a device's timestamps are inconsistent with the session
 window established by other devices.
 
-**Status:** ✅ Done (tool-side, 2026-06-30) — investigation concluded (**host-clock skew**) and documented as a [DATA LIMITATION](#known-limitations); no further parser/UI work is required, because a single log cannot detect or correct the offset. **Two QA questions remain open as external (non-blocking) follow-ups** — they are QA field actions, not codebase work (see **Open QA questions** below). The GID attribution question is **resolved** (2026-06-16): the same physical radio was used by both HOTLIPS and KNOT on different test days — see GID conflict note below.
+**Status:** ⏳ Investigated 2026-06-15 — confirmed **host-clock skew**, pending QA resolution of **two open questions** (see **Open QA questions** below). The GID attribution question is **resolved** (2026-06-16): the same physical radio was used by both HOTLIPS and KNOT on different test days — see GID conflict note below.
 
 **Investigation finding (2026-06-15, `log-analyst` on `diagnostic_KNOT_90296226464906_2026-06-04 16_42_33.829.log`):**
 - KNOT's own clock is internally clean: block timestamps are monotonic genuine UTC over 2026-06-04 12:15→20:42 (~8.5 h); no jumps or resets (only sub-second health-poll reordering).
@@ -1211,7 +1217,7 @@ window established by other devices.
 - **Limitation:** KNOT's log alone proves only that KNOT differs from all peers by a fixed offset — not that KNOT (vs. the rest of the mesh) holds the wrong time. Confirming which side is correct needs a correlated peer log from the same window.
 - **Format note:** despite the `diagnostic_` filename, this log is **ATAK format** (`atakVersion` present → `_detect_format` routes to `parser/atak.py`). The `diagnostic_` prefix is a filename convention, not a format indicator.
 
-**Open QA questions (external follow-ups — non-blocking; P6 is closed tool-side):**
+**Open QA questions (blockers — pending QA, as of 2026-06-16):**
 1. **Which clock was correct — KNOT's host clock or the rest of the mesh?** KNOT's log alone proves only a fixed offset from all peers, not which side held correct time. Confirming this needs a correlated peer log from the same window.
 2. **Root cause of the ≈ −2 h offset — timezone/NTP misconfiguration or a manually-wrong clock?** The ~2 h magnitude points to a tz/NTP issue, but the extra +32 s argues for a clock set wrong rather than a clean timezone label. QA to confirm.
 
