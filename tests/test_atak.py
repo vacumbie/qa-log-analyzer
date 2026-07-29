@@ -34,6 +34,19 @@ MULTISERIAL = FIXTURE_DIR / "atak_multiserial_sample.json"
 # Named ATAK log fixture for filename parsing tests
 NAMED_FIXTURE = FIXTURE_DIR / "diagnostic_ATAK_HOTEL_90215634664458_2026-03-04_16_42_04_775.log"
 
+# Synthetic v3.0-naming-convention fixture — no "ATAK_" segment in the filename
+# (diagnostic_<CALLSIGN>_<GID>_<DATE>_<TIME>.log), matching the plugin v3.0
+# field naming observed 2026-07-28/29. Pins that the filename regex still
+# extracts callsign/GID without the old ATAK_ literal.
+V3_NAMED_FIXTURE = FIXTURE_DIR / "diagnostic_KESTREL_11223_2026-07-28_09_00_00_000.log"
+
+# Synthetic fixture with a filename that matches neither the old nor new ATAK
+# naming convention, and zero connectionState (health) records — the pattern
+# observed in early ATAK v3.0 plugin/FW builds. Pins the senderCallsign
+# fallback for device.callsign and the missing-health-telemetry DATA
+# LIMITATION.
+V3_NO_HEALTH_FIXTURE = FIXTURE_DIR / "atak_v3_no_health_sample.json"
+
 
 # ── Fixture availability ──────────────────────────────────────────────────────
 
@@ -247,6 +260,52 @@ def test_gid_from_filename():
         pytest.skip("Named fixture not available")
     result = parse_atak_log(NAMED_FIXTURE)
     assert result.device.gid == "90215634664458"
+
+
+def test_callsign_from_v3_filename_without_atak_segment():
+    """v3.0 plugin filenames drop the ATAK_ segment; callsign must still
+    extract from diagnostic_<CALLSIGN>_<GID>_<DATE>_<TIME>.log."""
+    result = parse_atak_log(V3_NAMED_FIXTURE)
+    assert result.device.callsign == "KESTREL"
+
+
+def test_gid_from_v3_filename_without_atak_segment():
+    result = parse_atak_log(V3_NAMED_FIXTURE)
+    assert result.device.gid == "11223"
+
+
+def test_callsign_fallback_from_sender_callsign():
+    """When the filename matches neither naming convention, callsign should
+    fall back to the device's own senderCallsign on a sent message — same
+    pattern as the existing GID fallback."""
+    result = parse_atak_log(V3_NO_HEALTH_FIXTURE)
+    assert result.device.callsign == "OSPREY"
+
+
+def test_sender_callsign_captured_on_message():
+    result = parse_atak_log(V3_NO_HEALTH_FIXTURE)
+    sent = [m for m in result.atak_messages if m.is_sender]
+    received = [m for m in result.atak_messages if not m.is_sender]
+    assert sent[0].sender_callsign == "OSPREY"
+    assert received[0].sender_callsign == "MERLIN"
+
+
+def test_no_health_data_limitation_fires():
+    """A log with zero connectionState records — the pattern seen in early
+    ATAK v3.0 builds — must surface a DATA LIMITATION, not fail silently."""
+    result = parse_atak_log(V3_NO_HEALTH_FIXTURE)
+    assert result.atak_health_samples == []
+    limits = [e for e in result.parse_errors if e.startswith("DATA LIMITATION —")]
+    assert any("device-health" in e for e in limits)
+
+
+def test_no_health_data_limitation_absent_when_samples_present():
+    """Regression guard: the missing-health-telemetry DATA LIMITATION must
+    NOT fire for a log that actually has health samples."""
+    result = parse_atak_log(FIXTURE)
+    assert len(result.atak_health_samples) > 0
+    limits = [e for e in result.parse_errors if "device-health" in e]
+    assert limits == []
 
 
 # ── Error handling ────────────────────────────────────────────────────────────

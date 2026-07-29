@@ -30,8 +30,11 @@ from .models import (
 _TS_FMT_OUT = "%Y-%m-%d %H:%M:%S.%f"
 
 # Filename pattern: diagnostic_ATAK_<CALLSIGN>_<GID>_<YYYY-MM-DD>_<HH_MM_SS_mmm>.log
+# The ATAK_ segment is optional: plugin v3.0 dropped it from the naming
+# convention (e.g. diagnostic_BARK_65043_2026-07-28_15_09_17_944.log), while
+# older captures still include it. Accept both.
 _FILENAME_RE = re.compile(
-    r"diagnostic_ATAK_(?P<callsign>[^_]+)_(?P<gid>\d+)_"
+    r"diagnostic_(?:ATAK_)?(?P<callsign>[^_]+)_(?P<gid>\d+)_"
     r"(?P<date>\d{4}-\d{2}-\d{2})_(?P<time>\d{2}_\d{2}_\d{2}_\d+)\.log"
 )
 
@@ -167,12 +170,15 @@ def _handle_message(record: dict, result: ParseResult) -> None:
     raw_open = record.get("numberOfOpenSegments")
     open_segments = None if raw_open == -99 else raw_open
 
+    sender_callsign = record.get("senderCallsign", "")
+
     atak_msg = AtakMessage(
         timestamp=_ms_to_str(ts),
         log_id=record.get("logId"),
         message_timestamp=_ms_to_str(msg_ts) if msg_ts else "",
         is_sender=record.get("isSender", False),
         sender_gid=record.get("senderGid"),
+        sender_callsign=sender_callsign,
         delivery_status=record.get("deliveryStatus", ""),
         segment_count=record.get("segmentCount", 1),
         open_segments=open_segments,
@@ -196,6 +202,13 @@ def _handle_message(record: dict, result: ParseResult) -> None:
     # Capture device GID from first sent message
     if not result.device.gid and atak_msg.is_sender and atak_msg.sender_gid:
         result.device.gid = str(atak_msg.sender_gid)
+
+    # Callsign fallback: filename parsing is the primary source (_parse_filename),
+    # but the v3.0 plugin naming convention doesn't always yield a match (or the
+    # filename may be missing/renamed entirely). Fall back to the device's own
+    # senderCallsign on a sent message — same pattern as the GID fallback above.
+    if not result.device.callsign and atak_msg.is_sender and sender_callsign:
+        result.device.callsign = sender_callsign
 
 
 def _handle_event(record: dict, result: ParseResult) -> None:
@@ -463,6 +476,18 @@ def parse_atak_log(path: Path) -> ParseResult:
         result.parse_errors.append(
             "DATA LIMITATION — sdkError (SDK Logging 2.0) volume baseline unknown: "
             "counts are aggregated and informational, not a pass/fail signal."
+        )
+
+    # Data-driven — fires only when it actually manifests. Observed in early
+    # ATAK plugin v3.0 builds (no connectionState records at all in some
+    # sessions); see docs/atak_v3_early_integration_notes.md. A log with zero
+    # health records still parses fully otherwise — this only flags that
+    # Thermal/Battery/radio-health data is unavailable for this session.
+    if records and not result.atak_health_samples:
+        result.parse_errors.append(
+            "DATA LIMITATION — no device-health (connectionState) records in "
+            "this log: battery %, thermal, firmware version, and radio-health "
+            "are unavailable for this session."
         )
 
     _detect_session_gaps(result)

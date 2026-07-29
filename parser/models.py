@@ -159,14 +159,17 @@ class AtakMessage:
     A single RF message record from an ATAK plug-in log.
 
     RSSI here is real dBm (already signed, not an unsigned byte like
-    the diagnostic format). Callsign/UUID fields are always empty strings
-    in the current log format — identity is GID-only.
+    the diagnostic format). originator_callsign/originator_uuid are always
+    empty strings in observed samples — identity for those is GID-only.
+    sender_callsign, however, IS populated starting with ATAK plugin v3.0
+    (was always "" in earlier plugin versions/samples).
     """
     timestamp: str                          # ISO 8601 converted to _TS_FMT_OUT
     log_id: Optional[int] = None           # Can be negative (signed 32-bit int)
     message_timestamp: str = ""            # Originator send time
     is_sender: bool = False
     sender_gid: Optional[int] = None
+    sender_callsign: str = ""              # "" in pre-v3.0 plugin logs; populated in v3.0+
     delivery_status: str = ""              # FULLY_RECEIVED | SENT | DELIVERED |
                                            # PARTIALLY_RECEIVED
     segment_count: int = 1
