@@ -270,6 +270,25 @@ def test_gid_from_filename():
     assert result.device.gid == "90215634664458"
 
 
+def test_v3_named_fixture_exists():
+    """Unlike NAMED_FIXTURE (real data, intentionally uncommitted), the v3
+    fixture is synthetic and must be present — otherwise the two filename
+    tests below would pass on filename-string parsing of a missing file,
+    never actually reading the log."""
+    assert V3_NAMED_FIXTURE.exists(), f"Fixture missing: {V3_NAMED_FIXTURE}"
+
+
+def test_v3_named_fixture_actually_parses():
+    """Guard against the false-positive path: _parse_filename runs on the
+    path name before the file is read, so a missing fixture would still yield
+    a callsign/GID while the read silently errors. Confirm the file was really
+    read — no 'Could not read file' entry — so the filename assertions below
+    reflect a genuine parse."""
+    result = parse_atak_log(V3_NAMED_FIXTURE)
+    assert not any("Could not read file" in e for e in result.parse_errors)
+    assert len(result.atak_messages) > 0
+
+
 def test_callsign_from_v3_filename_without_atak_segment():
     """v3.0 plugin filenames drop the ATAK_ segment; callsign must still
     extract from diagnostic_<CALLSIGN>_<GID>_<DATE>_<TIME>.log."""
@@ -280,6 +299,18 @@ def test_callsign_from_v3_filename_without_atak_segment():
 def test_gid_from_v3_filename_without_atak_segment():
     result = parse_atak_log(V3_NAMED_FIXTURE)
     assert result.device.gid == "11223"
+
+
+def test_v3_filename_callsign_wins_over_sender_callsign():
+    """Filename is the primary callsign source; the senderCallsign fallback
+    must NOT override it. The KESTREL fixture's own sent message reports
+    senderCallsign=KESTREL, but a matching filename is what sets device.callsign
+    — proven here because a received message carries a different callsign
+    (TALON) yet device.callsign stays the filename-derived KESTREL."""
+    result = parse_atak_log(V3_NAMED_FIXTURE)
+    received = [m for m in result.atak_messages if not m.is_sender]
+    assert received[0].sender_callsign == "TALON"
+    assert result.device.callsign == "KESTREL"
 
 
 def test_callsign_fallback_from_sender_callsign():
@@ -325,6 +356,17 @@ def test_sub_15s_pli_interval_preserved():
     sent_pli = [m for m in result.atak_messages if m.message_type == "pli" and m.is_sender]
     assert len(sent_pli) == 3
     assert all(m.pli_interval == "5" for m in sent_pli)
+
+
+def test_pli_interval_serialized_for_ui():
+    """UI-data-path guard: the Originator PLI fix reads m.pli_interval from the
+    serialized atak_messages, not the dataclass. Confirm the 5s cadence
+    survives _result_to_dict() — a serialization drop would silently revert the
+    fix to gap inference, which has no 5s bucket."""
+    msgs = _result_to_dict(parse_atak_log(V3_5S_PLI_FIXTURE))["atak_messages"]
+    sent_pli = [m for m in msgs if m["message_type"] == "pli" and m["is_sender"]]
+    assert len(sent_pli) == 3
+    assert all(m["pli_interval"] == "5" for m in sent_pli)
 
 
 # ── Error handling ────────────────────────────────────────────────────────────
