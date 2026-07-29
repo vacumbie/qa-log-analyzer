@@ -173,6 +173,9 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | ATAK v3.0 filename convention support (`ATAK_` segment optional) + `device.callsign` fallback via `senderCallsign` | ✅ Done (2026-07-29) — `_FILENAME_RE` accepts both conventions; new `sender_callsign` field on `AtakMessage`; callsign falls back to it when filename doesn't match |
 | ATAK v3.0 missing-health-telemetry `DATA LIMITATION` | ✅ Done (2026-07-29) — `parser/atak.py` flags it in `parse_errors` when a log has zero `connectionState` records |
 | ATAK v3.0 test fixtures + coverage | ✅ Done (2026-07-29) — 2 new synthetic fixtures, 8 new tests in `test_atak.py`; suite at 183 passed, 2 skipped |
+| Originator PLI 5s-bucket bug (dropped dominant traffic) | ✅ Done + field-verified (2026-07-29) — prefer self-reported `message.interval` over gap inference |
+| PLI Settings "session-start" mislabeling | ✅ Done + field-verified (2026-07-29) — relabeled + gap-caveat added |
+| UI header/dropdown stacking-context bug | ✅ Done + field-verified (2026-07-29) — `overscroll-behavior: none` + header `zIndex: 100` |
 
 ---
 
@@ -231,31 +234,62 @@ pytest tests/test_atak.py -v  # single file verbose
 
 ## Most Recent Work (Last Few PRs)
 
-**2026-07-29 — Quality-gate pass on the ATAK v3.0 + Originator PLI 5s branch (`fix-atak-v3-filename-and-health-limitation`):**
-Ran the full 6-agent gate sequence (vera → task-completion-validator → jenny → karen →
-peer-reviewer → claude-md-compliance-checker). The gates confirmed the ATAK v3.0 parser
-half (filename regex, `senderCallsign`→`device.callsign` fallback, zero-health `DATA
-LIMITATION —`) is solid, and surfaced/fixed three issues:
-- **Untracked fixture (critical):** `tests/fixtures/diagnostic_KESTREL_11223_2026-07-28_09_00_00_000.log`
-  was referenced by two committed tests but never `git add`ed — the tests passed for the
-  wrong reason (`_parse_filename` runs on the filename string before the file read, so a
-  missing file still yields callsign/GID; CI would show a false green). Now committed, plus
-  vera's guard tests (`test_v3_named_fixture_exists`, `test_v3_named_fixture_actually_parses`,
-  `test_v3_filename_callsign_wins_over_sender_callsign`, `test_pli_interval_serialized_for_ui`).
-- **Originator PLI 5s cadence didn't render (critical):** the fix read the self-reported
-  `pli_interval` (ground truth) but then re-applied the gap-inference `count × interval < 60s`
-  noise floor to it, deleting the `5s` bucket (`5×3 = 15 < 60`) → blank card. karen confirmed
-  the blank card in-browser. Fixed in `ui/src/App.jsx`: the noise floor no longer applies to
-  the self-reported path (it remains only on the gap-inference fallback branch).
-- **`sender_callsign` not serialized:** ruled (by claude-md-compliance-checker) as acceptable
-  parser-internal state — it is the fallback source for `device.callsign` (which IS
-  serialized), no UI consumer, and `log-field-definitions.md` frames it that way. Added a
-  one-line "intentionally NOT serialized" comment at `parse.py:296` rather than serializing it.
-- **Docs:** synced `docs/ui-requirements.md` PLI section (§2) — it still described gap
-  inference as the sole ATAK source and "session-start / first-seen"; now reflects
-  self-reported-interval-preferred and the `FIRST CHANGE EVENT` relabel.
-- Full suite green: **188 passed, 2 skipped**. Pre-existing out-of-scope nit noted (not fixed):
-  `_detect_format()` docstring at `parse.py:35` still says only `diagnostic_ATAK_`.
+**2026-07-29 — Originator PLI 5s-bucket bug, PLI Settings mislabeling, and a two-layer UI header/dropdown bug (all field-verified):**
+- **Originator PLI silently dropped 5s-cadence traffic:** BARK's log showed a real ~5s PLI
+  cadence for 534 of 702 sent messages (the single largest chunk of the session, ~44
+  minutes), but the UI's Originator PLI card only showed `60s`/`15s` buckets and claimed
+  "no 5s data in loaded files." Root cause: the frontend inferred intervals purely from
+  timing gaps between sent messages, bucketed into a fixed list
+  (`15/30/60/120/180/300/600s`) with ±25% tolerance — a 5s gap is nowhere near 15s±25%, so
+  it was silently discarded as noise. Fix (`ui/src/App.jsx`): prefer the self-reported
+  `message.interval` field (populated per-message starting with ATAK plugin v3.0, already
+  captured by the parser as `pli_interval` but previously unused by this card) over gap
+  inference; fall back to gap inference only for older logs that never populate the field.
+  **Field-verified**: BARK now correctly shows all three buckets (60s/39m, 5s/44m, 15s/32m)
+  against the real log.
+- **PLI Settings card mislabeled its first entry as "session-start setting":**
+  `pliSettingUpdated` only fires on a *change*, not at launch — BARK's first logged change
+  didn't fire until 92–93 minutes into the session, so the card had zero real visibility
+  into that earlier stretch while implying otherwise. Relabeled "FIRST SEEN" →
+  "FIRST CHANGE EVENT", added an explicit `⚠ {n}m into the session before this — setting
+  for that stretch is unknown` caveat when the gap is ≥ 2 minutes. **Field-verified**: BARK
+  now shows "93m into the session before this."
+- **New test/fixture:** `tests/fixtures/atak_v3_5s_pli_sample.json` +
+  `test_sub_15s_pli_interval_preserved` pins that sub-15s intervals round-trip through
+  `pli_interval` — the data contract the frontend fix depends on. Suite at 184 passed, 2
+  skipped.
+- **Doc updated:** `docs/atak_v3_early_integration_notes.md` — new "Bugs found and fixed
+  along the way" section, plus a "Key takeaway" note on why Originator PLI and PLI Settings
+  can legitimately disagree.
+- **Separate UI bug, reported live:** the log-selector dropdown appeared visually
+  overlapped/hidden. Took two passes to fully fix — recorded here so the same mistake isn't
+  repeated:
+  1. First hypothesis (wrong): an external "Forterra portal" banner. Actual cause,
+     confirmed from a screen recording: Chrome's overscroll/rubber-band bounce on a
+     trackpad gesture briefly scrolls the whole page, exposing the decorative
+     `forterra_backdrop.jpg` body background above the app and displacing the header.
+     Fixed with `overscroll-behavior: none` on `html, body, #root` in `ui/src/index.css`.
+  2. Bumping the dropdown's own z-index (50 → 9999) did NOT fully fix a second, related
+     symptom — the dropdown list still showed a sliver hidden behind the tab row
+     (OVERVIEW/PLI FREQUENCY/etc). Root cause: `<header>` has `backdropFilter:
+     'blur(12px)'`, which creates its own stacking context and traps the dropdown inside
+     it — no z-index value on the dropdown itself can escape that trap. Real fix: added
+     `position: 'relative', zIndex: 100` to the `<header>` style in `ui/src/App.jsx` so
+     the whole header (and everything trapped inside it) stacks above the tab row.
+  **Both field-verified fixed** in the browser after applying.
+- **Environment troubleshooting, for future reference:**
+  - Claude Code's `/login` OAuth flow failed with "Invalid OAuth Request — Missing scope
+    parameter" when run from VS Code's built-in terminal — a known upstream bug (GitHub
+    issue #70506) where certain terminal environments trigger a buggy manual-code-paste
+    OAuth flow instead of the normal silent one. Fixed by running `claude` from a
+    standalone Windows Terminal/PowerShell window instead of VS Code's integrated terminal.
+  - `npm install` in `ui/` reported 6 vulnerabilities (babel, brace-expansion, esbuild,
+    js-yaml, postcss) — all dev-tooling/build-chain only, none shipped to end users.
+    Tested `npm audit fix`: made it *worse* (6 → 12) by downgrading `eslint`. Do **not**
+    run `npm audit fix` or `npm audit fix --force` on this project — leave the 6 warnings
+    as-is. `--force` was tried once by accident and bumped Vite 5→8 (breaking) plus left
+    `node_modules` half-updated; recovered via `git checkout -- package.json
+    package-lock.json` + full `node_modules` reinstall.
 
 **2026-07-29 — ATAK plugin v3.0 early-integration support (filename, callsign fallback, missing-health DATA LIMITATION):**
 - Two real field logs introduced (`diagnostic_BARK_65043_2026-07-28_15_09_17_944.log`,
@@ -538,8 +572,13 @@ LIMITATION —`) is solid, and surfaced/fixed three issues:
 
 Based on the backlog, the most actionable items (not blocked):
 
-0. **Run today's ATAK v3.0 changes through jenny/karen/vera** in Claude Code — done in the
-   web chat interface this session, not yet through the usual quality-gate sequence
+0. **Confirm the quality-gate sequence finished cleanly** — kicked off in Claude Code
+   this session (vera → task-completion-validator → jenny → karen → peer-reviewer →
+   claude-md-compliance-checker) on `fix-atak-v3-filename-and-health-limitation`, covering
+   both the filename/callsign/health-limitation fix AND the later PLI/header-stacking
+   fixes (all pushed to the same branch). Was still running (peer-reviewer in progress)
+   as of end of this session — check results and address anything flagged before merging
+   the PR.
 
 1. **P2: Protocol separation (BROADCAST/PRIVATE)** in TX/RX analysis — `messageProtocol` is already parsed, just needs UI lanes
 
