@@ -32,8 +32,11 @@ def _detect_format(filename: str, content: str) -> str:
 
     Detection order:
       1. FW Log        — bracket pattern [digits-digits, MODULE, LEVEL] with TRX/RELAY/TPORT
-      2. ATAK          — filename starts with 'diagnostic_ATAK_' or content is JSON
-                         with ATAK-specific fields (logId, connectionState, appVersion)
+      2. ATAK          — filename starts with 'diagnostic_ATAK_' (legacy), or
+                         content is JSON with ATAK-specific fields (logId,
+                         connectionState, atakVersion, deliveryStatus). ATAK
+                         plugin v3.0 filenames drop the 'ATAK_' segment, so
+                         those are detected by content here, not by filename.
       3. Relay Manager — filename or content signals the goTenna Relay Manager app
       4. RSDK          — filename contains 'rsdk' or content has RSDK line markers
       5. Diagnostic    — fallback (goTenna Pro+ block format)
@@ -46,7 +49,8 @@ def _detect_format(filename: str, content: str) -> str:
         return "fw_log"
 
     # ── ATAK detection ────────────────────────────────────────────────────────
-    # Filename convention: diagnostic_ATAK_<CALLSIGN>_<GID>_<DATE>.log
+    # Filename convention (legacy): diagnostic_ATAK_<CALLSIGN>_<GID>_<DATE>.log
+    # v3.0 drops the ATAK_ segment — those files match the content check below.
     if "diagnostic_atak_" in name:
         return "atak"
     # Content: ATAK logs are JSON arrays/objects with these distinctive fields
