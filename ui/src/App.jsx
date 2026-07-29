@@ -521,12 +521,11 @@ function PliTab({ results }) {
         })
 
         if (Object.keys(reported).length > 0) {
-          // Same noise filter as gap inference, applied for consistency:
-          // drop intervals with < 1 min estimated total duration.
-          Object.keys(reported).forEach(iv => {
-            const sec = parseInt(iv, 10)
-            if (sec * reported[iv] < 60) delete reported[iv]
-          })
+          // Self-reported intervals are ground truth — the device states its own
+          // cadence — NOT inferred from send-time gaps, so the < 1-min noise floor
+          // used by gap inference below does NOT apply here. Even a short 5s
+          // session with only a few PLIs is a real cadence and must render;
+          // applying that floor here is exactly what dropped the 5s cadence.
           Object.assign(nodeMap[nodeKey].intervalCounts, reported)
         } else if (sentPli.length >= 2) {
           const gaps = []

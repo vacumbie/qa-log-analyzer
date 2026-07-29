@@ -293,6 +293,9 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
                 "log_id":              m.log_id,
                 "message_timestamp":   m.message_timestamp,
                 "is_sender":           m.is_sender,
+                # sender_callsign intentionally NOT serialized — it is an internal
+                # fallback source for device.callsign only (see log-field-definitions.md);
+                # no UI consumer. device.callsign carries the resolved identity to the UI.
                 "sender_gid":          m.sender_gid,
                 "delivery_status":     m.delivery_status,
                 "segment_count":       m.segment_count,

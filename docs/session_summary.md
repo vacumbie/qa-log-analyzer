@@ -231,6 +231,32 @@ pytest tests/test_atak.py -v  # single file verbose
 
 ## Most Recent Work (Last Few PRs)
 
+**2026-07-29 — Quality-gate pass on the ATAK v3.0 + Originator PLI 5s branch (`fix-atak-v3-filename-and-health-limitation`):**
+Ran the full 6-agent gate sequence (vera → task-completion-validator → jenny → karen →
+peer-reviewer → claude-md-compliance-checker). The gates confirmed the ATAK v3.0 parser
+half (filename regex, `senderCallsign`→`device.callsign` fallback, zero-health `DATA
+LIMITATION —`) is solid, and surfaced/fixed three issues:
+- **Untracked fixture (critical):** `tests/fixtures/diagnostic_KESTREL_11223_2026-07-28_09_00_00_000.log`
+  was referenced by two committed tests but never `git add`ed — the tests passed for the
+  wrong reason (`_parse_filename` runs on the filename string before the file read, so a
+  missing file still yields callsign/GID; CI would show a false green). Now committed, plus
+  vera's guard tests (`test_v3_named_fixture_exists`, `test_v3_named_fixture_actually_parses`,
+  `test_v3_filename_callsign_wins_over_sender_callsign`, `test_pli_interval_serialized_for_ui`).
+- **Originator PLI 5s cadence didn't render (critical):** the fix read the self-reported
+  `pli_interval` (ground truth) but then re-applied the gap-inference `count × interval < 60s`
+  noise floor to it, deleting the `5s` bucket (`5×3 = 15 < 60`) → blank card. karen confirmed
+  the blank card in-browser. Fixed in `ui/src/App.jsx`: the noise floor no longer applies to
+  the self-reported path (it remains only on the gap-inference fallback branch).
+- **`sender_callsign` not serialized:** ruled (by claude-md-compliance-checker) as acceptable
+  parser-internal state — it is the fallback source for `device.callsign` (which IS
+  serialized), no UI consumer, and `log-field-definitions.md` frames it that way. Added a
+  one-line "intentionally NOT serialized" comment at `parse.py:296` rather than serializing it.
+- **Docs:** synced `docs/ui-requirements.md` PLI section (§2) — it still described gap
+  inference as the sole ATAK source and "session-start / first-seen"; now reflects
+  self-reported-interval-preferred and the `FIRST CHANGE EVENT` relabel.
+- Full suite green: **188 passed, 2 skipped**. Pre-existing out-of-scope nit noted (not fixed):
+  `_detect_format()` docstring at `parse.py:35` still says only `diagnostic_ATAK_`.
+
 **2026-07-29 — ATAK plugin v3.0 early-integration support (filename, callsign fallback, missing-health DATA LIMITATION):**
 - Two real field logs introduced (`diagnostic_BARK_65043_2026-07-28_15_09_17_944.log`,
   `diagnostic_EUD-009_54498_2026-07-29_04_02_14_14.log`) — first logs seen from the new

@@ -113,11 +113,13 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
 
 - **Originator PLI — All Network Nodes** — one card per loaded log (GID collisions handled via `gid|source_filename` key). Shows callsign, GID, `⚠ MIXED` badge for mixed-rate devices, flat list of intervals with estimated duration (`count × interval_sec` → h/m), `⚠ accelerated` label for < 60s intervals.
 
-  **Data sources:** `diagnostic`: `originator_pli_interval` from received messages. `atak`: gap inference from sent PLI messages. `pliSettingUpdated` events are config-only — NOT used for frequency cards.
+  **Data sources:** `diagnostic`: `originator_pli_interval` from received messages. `atak`: **prefers the self-reported interval** (`pli_interval` on each sent PLI message — ground truth, populated starting with ATAK plugin v3.0), and only falls back to gap inference when no sent PLI on the node reports a usable interval (pre-v3.0 logs never populate it). `pliSettingUpdated` events are config-only — NOT used for frequency cards.
 
-  **Gap inference filters (ATAK):** ±25% tolerance, 1-min minimum duration, buckets 15/30/60/120/180/300/600s. Inference works purely on send-time gaps and does not inspect `pli_is_distance`, so distance-based ATAK sends are still time-bucketed. (Distance-based intervals are only filtered out of the `diagnostic` display, where the raw `originator_pli_interval` string contains "meters".)
+  **Self-reported intervals are ground truth** — the < 1-min noise floor below is NOT applied to them, so a genuine short 5s cadence renders even from only a few PLIs (and captures cadences like 5s that gap inference's bucket list can't represent at all).
 
-- **PLI Settings per Device (ATAK only)** — below frequency cards. Session-start interval, auto-send, first-seen timestamp, mid-session changes. Source: `pliSettingUpdated` events only.
+  **Gap inference filters (ATAK fallback only):** ±25% tolerance, 1-min minimum duration, buckets 15/30/60/120/180/300/600s. Inference works purely on send-time gaps and does not inspect `pli_is_distance`, so distance-based ATAK sends are still time-bucketed. (Distance-based intervals are only filtered out of the `diagnostic` display, where the raw `originator_pli_interval` string contains "meters".)
+
+- **PLI Settings per Device (ATAK only)** — below frequency cards. Interval, auto-send, and **first observed setting-change event** (labeled `FIRST CHANGE EVENT`, not session-start — the interval before the first `pliSettingUpdated` event is unknown; a >2-min gap between session start and the first event surfaces a caveat), plus mid-session changes. Source: `pliSettingUpdated` events only.
 
 **PLI interval color thresholds (applied to dominant interval and all ALSO OBSERVED chips):**
 
