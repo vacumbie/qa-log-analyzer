@@ -598,13 +598,16 @@ function PliTab({ results }) {
               const color    = pliColor(domSec)
               const hasChanges = realIntervals.length > 1
 
-              // Duration: count × interval_sec → h/m
+              // Duration: count × interval_sec → h/m, or seconds when under a
+              // minute (a short 5s cadence totals e.g. 15s — "0m" reads oddly)
               const fmtDur = (iv, count) => {
                 const sec = parsePliSeconds(iv)
                 if (!sec || !count) return '—'
                 const t = sec * count
                 const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60)
-                return h > 0 ? `${h}h ${m}m` : `${m}m`
+                if (h > 0) return `${h}h ${m}m`
+                if (m > 0) return `${m}m`
+                return `${t}s`
               }
               return (
                 <div key={i} style={{
