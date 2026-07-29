@@ -21,6 +21,7 @@ html, body, #root {
   color: var(--text);
   font-family: 'Rajdhani', 'Segoe UI', sans-serif;
   font-size: 14px;
+  overscroll-behavior: none;
 }
 
 /* Backdrop applied to body */

@@ -2406,6 +2406,7 @@ export default function App() {
         WebkitBackdropFilter: 'blur(12px)',
         borderBottom: '1px solid var(--border2)',
         display: 'flex', alignItems: 'center', gap: 20,
+        position: 'relative', zIndex: 100,
       }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
           <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 18, fontWeight: 700, letterSpacing: '0.06em', color: '#c8ddf4' }}>
