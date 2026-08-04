@@ -182,7 +182,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | Originator PLI 5s-bucket bug (dropped dominant traffic) | ✅ Done + field-verified (2026-07-29) — prefer self-reported `message.interval` over gap inference |
 | PLI Settings "session-start" mislabeling | ✅ Done + field-verified (2026-07-29) — relabeled + gap-caveat added |
 | UI header/dropdown stacking-context bug | ✅ Done + field-verified (2026-07-29) — `overscroll-behavior: none` + header `zIndex: 100` |
-| ATAK radio-command layer — Frequency SET attempts + NetworkMode/TetherMode queries + `relayModeUpdated` | ✅ Done (2026-08-04) — 8 commits on `fix-atak-v3-filename-and-health-limitation`, not yet pushed; parser→API→UI chain verified, new Modes tab, RSSI→Freq/RSSI, field-verified by karen |
+| ATAK radio-command layer — Frequency commands + NetworkMode/TetherMode queries + `relayModeUpdated` | ✅ Done (2026-08-04) — **PR #33 merged** (`ffadd0b`), branch deleted; parser→API→UI chain verified, new Modes tab, RSSI→Freq/RSSI, field-verified by karen across 4 browser rounds |
 | Status-chip **and per-action row** render order shifts as the time window changes | ✅ Done (2026-08-04) — module-scope `sortedEntries(obj, order)` plus `ACTION_ORDER` / `STATUS_ORDER` / `MODE_TYPE_ORDER` give a stable render order in both card sections. Unrecognised values sort last (alphabetically among themselves) and are never dropped, preserving the open-vocabulary property |
 | `hasFailedAttempts` is not action-scoped — a FAILED **GET** would paint the card red | ✅ Done (2026-08-04) — now `a.action === 'SET' && a.status === 'FAILED'`; `setAttempts` renamed `freqCommands` since it holds both actions. This was the last place a GET was still read as a change attempt |
 | COMPLETED SET treated as confirmed frequency | ✅ Resolved (2026-08-04) — **reverted**; confirmed frequency is `frequencyUpdated` only. Enhanced logs honestly show "unknown" + attempt counts |
@@ -253,10 +253,12 @@ pytest tests/test_atak.py -v  # single file verbose
 
 ## Most Recent Work (Last Few PRs)
 
-**2026-08-04 — ATAK radio-command layer (Frequency SET attempts, NetworkMode/TetherMode
-queries, `relayModeUpdated`) + full quality-gate pass on
-`fix-atak-v3-filename-and-health-limitation`. Committed as 8 logical commits; not yet
-pushed / no PR opened.**
+**2026-08-04 — ATAK radio-command layer (Frequency commands, NetworkMode/TetherMode
+queries, `relayModeUpdated`) + full quality-gate pass. → PR #33 MERGED (`ffadd0b`),
+branch deleted. CI green: 215 passed, 2 skipped.**
+
+Merged with a **merge commit**, not a squash, so the logical split survives on `main`;
+`git log --first-parent` still reads one line per PR. 22 commits:
 
 ```
 feat(parser): extract ATAK frequency SET attempts and radio mode queries
@@ -267,9 +269,13 @@ style(ui):    darken page gradient behind content
 fix(ui):      raise LogSelector dropdown above sibling content
 docs:         document ATAK radio-command layer and confirmation model
 docs(session): update session summary
+fix(ui):      split ATAK radio commands by action so GETs aren't change attempts
+test(atak):   cover mixed action=SET/GET radio commands
+fix(ui):      scope failed-command alarm to SETs and stabilize command row order
 ```
+(plus the 11 pre-existing v3.0/PLI commits already on the branch)
 
-The last four are unrelated to the ATAK feature — they had accumulated in the same working
+Commits 3–6 are unrelated to the ATAK feature — they had accumulated in the same working
 tree and were split out rather than riding along in the parser commit.
 
 *What was built (parser → API → UI, chain verified):*
@@ -371,8 +377,14 @@ unrecognised values still render (sorted last) rather than being dropped. And
 `hasFailedAttempts` is action-scoped, so a failed *query* no longer paints the card red as
 though a change attempt had failed — the last place a GET was still read as a change.
 
-*Still open on this branch:* model names lag the data (`AtakFrequencySetAttempt` holds GETs);
-`export.py` `_CSV_TYPES` decision; neither `toMs` site is exercised on screen.
+*Post-merge housekeeping (2026-08-04):* `main` is now the only branch, local and remote.
+The feature branch and two merged doc branches (`docs-atak-v3-early-integration`,
+`docs-p6-knot-clock-skew-limitation`) were deleted; five other `docs-*` refs turned out to
+be **stale local tracking refs** for branches GitHub had already removed when PRs #27–#31
+merged — `git fetch --prune` cleared them. Worth remembering: `git branch -r` alone
+overstates what exists on the remote. Dev servers on :8000 and :5173 were stopped.
+
+*Follow-ups now live on `main`, not a branch* — see What to Work On Next item 0.
 
 **2026-07-29 — Originator PLI 5s-bucket bug, PLI Settings mislabeling, and a two-layer UI header/dropdown bug (all field-verified):**
 - **Originator PLI silently dropped 5s-cadence traffic:** BARK's log showed a real ~5s PLI
@@ -653,7 +665,7 @@ though a change attempt had failed — the last place a GET was still read as a 
 - **PR #16** (`4065d3c`) — added a "Quality gate sequence" section listing the mandatory per-feature agent order plus the optional code-quality-pragmatist pass.
 - **PR #17** (`a474f57`) — consolidated the whole agents area into one authoritative **Quality Gate Sequence** block: mandatory step table (with "What It Checks" / "Invoke With" columns), optional pass, an agent division-of-labor table, the available-agents roster, and the unique project-rule notes (LIFO, GID collision, P1–P7, etc.) preserved as a subsection. Removed the duplicate Available-agents table (PR #14) and the simpler quality-gate list (PR #16) — exactly one of each now remains.
 - **PR #15** (`bcb40f3`) — session-summary housekeeping (recorded the #10–#14 verification chain).
-- Note: 5 `.claude/agents/*.md` files have uncommitted working-tree edits (appeared outside the PR work) — deferred for a later commit.
+- ~~Note: 5 `.claude/agents/*.md` files have uncommitted working-tree edits — deferred for a later commit.~~ **Resolved** — committed 2026-06-12 on `refactor-agent-deduplication` (`9ad32c6`), PR #20.
 
 **2026-06-10 — PRs #10–#14: verification follow-ups (jenny/karen/vera) on the two time-window fixes:**
 - **PR #11** (`6d776e9`) — karen's end-to-end check found the `range-unavailable` step never fires for relay_manager (its `System.out` lines carry a year-bearing ISO timestamp the scanner parses). Corrected the trigger to **fw_log** (relative-ms, no wall clock) in `ui-requirements.md`, `session_summary.md`, and the user-facing banner copy in `FileUpload.jsx` (made format-neutral). jenny had passed it at the spec level; karen caught the false premise.
@@ -712,26 +724,29 @@ though a change attempt had failed — the last place a GET was still read as a 
 
 Based on the backlog, the most actionable items (not blocked):
 
-0. **Finish `fix-atak-v3-filename-and-health-limitation` — nothing is committed yet.**
-   The full gate ran 2026-08-04 (see Most Recent Work). Stale-base reverts, the `toMs`
-   NaN bug, the hardcoded status list, and the blank Modes tab are all fixed; the
-   COMPLETED-SET decision is made and implemented. Remaining before merge:
-   - **Push the `action`-split commit** — PR #33 is open and has the first 8 commits; the
-     9th (the GET/SET split) is committed locally but not pushed.
-   - **Review vera's additions** — she wrote 16 tests and 2 fixtures into the tree
-     (`test_atak.py` now 97 tests) beyond auditing; they haven't been reviewed.
-   - **Status-chip render order** (cosmetic) — chips reorder between slider positions; see
-     the backlog row.
-   - Note both `toMs` sites (`App.jsx:1391`, `:1564`) are now correct but **unexercised** —
-     `confirmedChanges` is `frequencyUpdated`-only, so no on-screen value feeds them an
-     SDK-2.0 `…Z` timestamp any more. There is no live coverage if the correct form drifts
-     back; consolidating the two copies into one helper would remove the risk.
-   - Smaller, from the gate: `export.py` `_CSV_TYPES` decision for the two new flat tables;
-     `_load_records` skips any non-`{` line with no `parse_errors` entry while its
-     docstring still claims it logs them; `relay_mode_enabled` null renders as confirmed
-     OFF in `ChartPanel.jsx`/`App.jsx`; `key={node.gid}` in the Modes section ignores the
-     documented GID-reuse pattern; off-palette `#3b82f6` for `relayModeUpdated`; duplicated
-     `toMs`/`fmtDur`/`rssiColor`/`fnCallsign` helpers worth hoisting to module scope.
+0. **Leftovers from PR #33 (merged — these are follow-ups on `main`, not blockers).**
+   The whole ATAK radio-command feature shipped; nothing about it is half-finished. What
+   the gate raised and we consciously deferred:
+   - **`export.py` `_CSV_TYPES` decision** — still unrecorded for the two new tables.
+     `atak_radio_mode_queries` is flat and CSV-ready; `atak_frequency_set_attempts` nests
+     `channels`, so a JSON-only note is defensible. CLAUDE.md wants one or the other.
+   - **Model names lag the data** — `AtakFrequencySetAttempt` holds GETs and
+     `AtakRadioModeQuery` holds SETs. Renaming them plus the two serialized keys is ~69
+     references for zero behavior change. Do it as a standalone mechanical PR if at all.
+   - **Both `toMs` sites (`App.jsx`) are correct but unexercised** — `confirmedChanges` is
+     `frequencyUpdated`-only, so nothing on screen feeds them an SDK-2.0 `…Z` timestamp
+     any more. No live coverage if the correct form drifts back; consolidating the two
+     copies into one helper would remove the risk. Same for the duplicated
+     `fmtDur`/`rssiColor`/`fnCallsign` helpers — worth hoisting to module scope.
+   - **`_load_records` docstring is wrong** — it still claims malformed lines are logged as
+     parse errors, but the loader now `continue`s past any line not starting with `{`. The
+     behavior is covered by a test; the docstring is the stale part.
+   - **`relay_mode_enabled` null renders as confirmed OFF** in `ChartPanel.jsx` and
+     `App.jsx` — an unknown relay state should not look like a confirmed off.
+   - **`key={node.gid}`** in the Modes section ignores the documented GID-reuse pattern
+     (PLI uses `gid|source_filename`); duplicate keys if two logs share a GID.
+   - **Off-palette `#3b82f6`** for `relayModeUpdated` in `ChartPanel.jsx` — `#4a90e2` is
+     the palette blue and is unused there.
 
 1. **P2: Protocol separation (BROADCAST/PRIVATE)** in TX/RX analysis — `messageProtocol` is already parsed, just needs UI lanes
 
