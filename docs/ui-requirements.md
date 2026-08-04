@@ -178,7 +178,7 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
 
 > ⚠️ **RSDK hop count source changed.** Previously excluded entirely as unreliable (SDK sequence counter). Now included when sourced from `GRIP_Receiver` incoming message fields — these are genuine RF mesh hop counts. The old `SendMessageResponse` hop count is still excluded.
 
-- **Hop Count Map** — rendered at the bottom of the Hop Count tab for ATAK logs that have `logging_user_location` data. Interactive Leaflet.js map (OpenStreetMap tiles, loaded from unpkg CDN). Each dot is the receiver's GPS position (`logging_user_location`) colored by hop count (green=1, yellow=2, orange=3, red=4+). Dashed RF link lines connect each receiver dot to the sender's `transmitted_location`; line color encodes RSSI quality (green ≥ −70 dBm · yellow −70 to −85 · orange −85 to −100 · red < −100). Lines capped at 80 per render for readability. One diamond marker (◆) per unique hop count (max 4) sits at the midpoint of its RF link line; clicking opens a popup showing distance (miles or feet via Haversine), RSSI + quality label, hop count, sender callsign, and timestamp. Controls: device selector, sender filter (All or specific callsign), RF links toggle. Map auto-fits bounds to visible points. Only renders when ATAK messages with `logging_user_location` are present.
+- **Hop Count Map** — rendered at the bottom of the Hop Count tab for ATAK logs that have `logging_user_location` data. Interactive Leaflet.js map (OpenStreetMap tiles, loaded from unpkg CDN). Each dot is the receiver's GPS position (`logging_user_location`) colored by hop count via `MAP_HOP_COLORS` — a higher-contrast palette chosen to stay legible against OSM basemap tiles (1 = `#0080ff` blue · 2 = `#ffb400` amber · 3 = `#ff5500` orange · 4+ = `#c400ff` magenta), not the standard `PALETTE` tokens. Only `pli` messages are mapped. Sender positions get their own markers. Dashed RF link lines connect each receiver dot to the sender's `transmitted_location`; line color encodes RSSI quality via `mapRssiColor` (green ≥ −70 dBm · yellow −70 to −85 · orange −85 to −100 · red < −100). RF lines are **stride-sampled to a maximum of 150** across the whole set rather than truncated at the first 80, so the sample stays spatially representative instead of clustering wherever the log happened to start. One diamond marker (◆) per unique hop count (max 4) sits at the midpoint of its RF link line; clicking opens a popup showing distance (miles or feet via Haversine), RSSI + quality label, hop count, sender callsign, and timestamp. Controls: device selector, sender filter (All or specific callsign), RF links toggle. Map auto-fits bounds to visible points. Only renders when ATAK messages with `logging_user_location` are present.
 
   **RSSI thresholds** grounded in 2026-06-03 KOPEK field session data (range −19 to −118 dBm, median −86 dBm):
   | Band | Range | Color |
@@ -188,7 +188,18 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
   | Weak | −85 to −100 dBm | `#ff6b35` orange |
   | Poor | < −100 dBm | `#ff4757` red |
 
-### 8. RSSI (`rssi`)
+### 8. Freq/RSSI (`rssi`)
+
+> Tab label is `Freq/RSSI` (was `RSSI`) — renamed when the Originator Frequency section
+> was added below. The tab `id` stays `rssi`.
+
+- **Originator Frequency — All Network Nodes** — one card per ATAK network node (`OriginatorFrequencySection`). Renders for ATAK logs only; nodes with no frequency events, no SET attempts, and no RSSI are omitted entirely.
+  - **Confirmed config timeline** — one row per distinct channel plan, from `frequencyUpdated` events **only**, with duration per config. Rows are ordered by **first appearance**; durations aggregate every stretch on that config. The `current` marker and accent highlight go to the config of the **chronologically last** confirmed change, which is not necessarily the last row — a radio that returns to an earlier config ends the session on it (VALERIE: 5 events, ends on `445.5` which is row 1, while `450` is the last row). `⚠ MIXED` badge when more than one config was confirmed. Channel label shows the two lowest frequencies with `★` on the control channel and `+N` for the remainder.
+  - **`⚠ first Xm of session — config unknown (no event yet)`** — the stretch before the first confirmed change, so the card never implies we know the starting config.
+  - **Empty state** — when there are no `frequencyUpdated` events the card says so explicitly, and when COMPLETED SET commands exist it names the count and states that a command ack is not confirmation of radio state. Enhanced logs always land here (see the parsing spec's "Radio Command Layer vs Confirmed State"); the attempt counts below carry the data.
+  - **SET attempts (raw cmd)** — counts by status, colored (FAILED red · COMPLETED green · everything else muted). **Status list is built dynamically** from the data — the vocabulary is an open set (`QUEUED`/`COMPLETED`/`FAILED`/`CANCELLED`/`TIMEOUT` observed) and a hardcoded list silently drops real attempts. Card left border turns red when any attempt FAILED.
+  - **avg / median dBm** — from ATAK received-message RSSI.
+
 - **RSSI Distribution by Hop Count** — `rssi_by_hop` chart grouped by hop count; diagnostic format: convert unsigned byte (value − 256); ATAK and RSDK GRIP: already signed dBm, no conversion needed
 - **RSSI Distribution per Logging Device** — `rssi_avg_device` chart showing average RSSI per device; RSDK uses `grip_messages` incoming `rssi` field where available
 - **GRIP RSSI Over Time** — shown only when RSDK GRIP RSSI data exists. Per-device summary cards (avg / min / max dBm, message count, and retransmit count when > 0) above the `grip_rssi_over_time` line chart. X-axis is normalized session progress (0–100%); each point is the bucketed average RSSI of incoming GRIP messages; ▲ markers flag buckets containing a retransmission (`rep_counter > 0`); dashed reference lines at −70 dBm (good) and −85 dBm (caution).
@@ -272,6 +283,21 @@ FW-log-only tab (`fwOnly`) — appears in the tab bar only when a relay firmware
 
 > Identity is the **origin hash only** — serial number and firmware version are in the binary RHC payload. Channel RSSI (`RSSI[]`) is DEBUG-level and skipped, so the tab shows **channel energy** as the signal proxy, not per-channel RSSI. Timestamps are relative ms from boot, so the upload Time Window step is skipped for this format.
 
+### 15. Modes (`modes`) — ATAK only
+
+> Numbered 15 because §14 (Network Topology, below) is a forward-looking spec that
+> has never been implemented. Modes ships; Topology does not.
+
+`{ id:'modes', label:'Modes', atakOnly: true }` in `TABS` — hidden by the `visibleTabs`
+filter unless an ATAK log is loaded. Carries the `α` alpha badge.
+
+- **Radio Mode — All Network Nodes** — one card per ATAK node (`OriginatorRadioModeSection`), covering three distinct data sources that must not be conflated:
+  - **Confirmed listen-only / normal mode** — from the Device Health record's own `mode` field. This is continuous periodic telemetry, so segment duration is the time between consecutive samples whose `mode` differs. `LISTEN_ONLY` yellow · `NORMAL` cyan.
+  - **Confirmed relay mode** — from `relayModeUpdated` events (`isRelayModeEnabled`). A discrete event, so duration runs to the next event or session end, and the stretch before the first event is an explicit unknown lead. `RELAY ON` green · `OFF` muted.
+  - **NetworkMode / TetherMode poll history** — from `atak_radio_mode_queries`, grouped by `mode_type` then status. These are the app *asking* the radio its mode, **not** a change and **not** confirmation. Status list is built dynamically for the same open-set reason as the frequency card.
+- `⚠ MIXED` badge when more than one confirmed mode or relay state occurred in the session.
+- **Empty state** — the tab is `atakOnly`, so "no ATAK log" is unreachable. The real empty case is an ATAK log carrying none of the three sources, which happens on the v3.0 builds that emit zero `connectionState` records. The note names that limitation explicitly rather than rendering a blank page.
+
 ---
 
 ## Known Limitations & Open Questions
@@ -289,7 +315,8 @@ FW-log-only tab (`fwOnly`) — appears in the tab bar only when a relay firmware
 - **Multi-log upload** — supported; drag-and-drop or file picker; multiple files processed simultaneously
 - **Duplicate log detection** — files with matching `radio_serial + session_start + session_end` are deduplicated automatically; only first occurrence used.
 - **GID collision** — two devices can share the same GID (observed: CL_B and gt_Sassy_B_Net share `90194071247761`, 2026-06-04). PLI `nodeMap` uses `gid|source_filename` key so both get separate cards. Dev team notified.
-- **Time window filtering** — client-side; filters all time-series arrays (`received_messages`, `system_samples`, `ble_fail_events`, `tx_events`, `atak_messages`, `atak_health_samples`). Computable summary fields recomputed from filtered arrays; static fields retain parse-time values.
+- **Time window filtering** — client-side; filters these time-series arrays: `received_messages`, `system_samples`, `ble_fail_events`, `tx_events`, `atak_messages`, `atak_health_samples`, `grip_messages`, `grip_transfers`, `atak_events`, `atak_frequency_set_attempts`, `atak_radio_mode_queries`. Computable summary fields recomputed from filtered arrays; static fields retain parse-time values.
+  > `atak_events` and the two radio-command arrays were added 2026-08-04. Before that, the Freq/RSSI and Modes cards mixed two time ranges in one card — health-derived mode segments and RSSI responded to the slider while SET-attempt counts, poll counts, and relay segments did not. `summary.ble_fail_count` is deliberately **not** recomputed from filtered `atak_events`: it derives from the SDK-error aggregate, which is not time-windowable, and is carried over whole.
 - **Chart time axis** — most line charts use per-device normalized session-progress axis (0–100%). **Exception: Battery % Over Time** uses real wall-clock UTC time on the X axis.
 
 ---
@@ -343,7 +370,23 @@ Two-step upload flow: drop files → app scans timestamps client-side → dual-h
 Per-device GRIP RSSI line chart in the RSSI tab (`grip_rssi_over_time`), with summary cards and retransmit (▲) markers on a normalized 0–100% session-progress axis. See RSSI tab spec (section 8).
 
 ### Hop Count Map — ✅ Implemented
-Interactive Leaflet.js map in the Hop Count tab showing receiver GPS position colored by hop count, with RSSI-colored RF link lines to sender positions, midpoint diamond markers with distance/signal popups, device + sender filters, and RF links toggle. Capped at 80 RF lines and 4 diamond markers per render. Only shown for ATAK logs with `logging_user_location` data. See Hop Count tab spec (section 7).
+Interactive Leaflet.js map in the Hop Count tab showing receiver GPS position colored by hop count, with RSSI-colored RF link lines to sender positions, midpoint diamond markers with distance/signal popups, device + sender filters, and RF links toggle. RF lines stride-sampled to a maximum of 150 (was a hard cap at the first 80); 4 diamond markers per render; `pli` messages only; higher-contrast `MAP_HOP_COLORS` palette for basemap legibility. Only shown for ATAK logs with `logging_user_location` data. See Hop Count tab spec (section 7).
+
+### ATAK Radio Command Layer + Modes Tab — ✅ Implemented (2026-08-04, uncommitted)
+Frequency SET attempts and NetworkMode/TetherMode queries parsed from `clientRequest`-shaped
+`sdkError` records, plus `relayModeUpdated` relay state. Adds the **Modes** tab (section 15)
+and the Originator Frequency section on the renamed **Freq/RSSI** tab (section 8).
+
+The governing rule is that these are the **raw radio-command layer, never confirmed state** —
+confirmed frequency comes from `frequencyUpdated` only, confirmed mode from Device Health
+`mode`, confirmed relay from `relayModeUpdated`. A `COMPLETED` SET was briefly treated as
+confirmation and that was reverted on 2026-08-04; see `parsing-requirements.md` →
+"Radio Command Layer vs Confirmed State" for the reasoning and its consequence (enhanced
+logs show "confirmed frequency unknown" plus attempt counts).
+
+**Still pending on this feature:** `action` GET/SET is parsed but not acted on, so some GETs
+display as SET attempts and some mode SETs display as polls. (Time-window coverage and the
+`current`-badge misattribution were both fixed 2026-08-04.)
 
 ### ATAK Enhanced Log (SDK Logging 2.0) — ✅ Implemented
 Full support for the enhanced ATAK log format. The `SdkLogSummaryCard` renders the aggregated `atak_sdk_error_summary` (counts by tag and by `additionalInfo`, distinct radio types, and a retained sample) — high-volume `sdkError` records are aggregated, never rendered per-record, with the volume-baseline `DATA LIMITATION` surfaced in the banner. Also covers the enhanced message/event fields: `loggingUserLocation` / `transmittedLocation`, `originatorUUID`, the `-99` open-segments sentinel shown as `unknown`, `firmwareUpdate` events, and `deviceDisconnected` location. See ATAK tab spec (section 12).

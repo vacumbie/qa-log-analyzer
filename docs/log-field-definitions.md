@@ -410,7 +410,7 @@ Written approximately every 30 seconds. Provides radio health data.
 | `batteryLevel` | integer | `health.battery_pct` | Percent (0–100). Negative values skipped. |
 | `isCharging` | bool | `health.is_charging` | |
 | `connectionType` | string | `health.connection_type` | e.g. `BLE` |
-| `mode` | string | `health.mode` | e.g. `NORMAL` |
+| `mode` | string | `health.mode` | `NORMAL` most common; `LISTEN_ONLY` also confirmed (HOTLIPS, GATOR — 2026-06-04). This is the **confirmed** mode state, distinct from the `NetworkMode`/`TetherMode` SDK Error polls of it (see clientRequest section below) |
 | `firmwareVersion` | string | `health.firmware_version` | e.g. `3.2.10` |
 | `storedMessages` | integer | `health.stored_messages` | Messages stored on radio |
 | `powerAmpTemperature` | integer | `health.pa_temp_c` | **Celsius.** Negative values skipped. Convert to °F for display. |
@@ -505,6 +505,7 @@ Lifecycle and configuration events.
 | `event.location` | object | `event.location` | `{lat, long, alt}` at disconnect time. Present on `deviceDisconnected` only. |
 | `event.updateStatus` | string | `event.update_status` | e.g. `"STARTED"`. Present on `firmwareUpdate` only. |
 | `event.updateTimeInMillis` | int | `event.update_time_ms` | Present on `firmwareUpdate` only. |
+| `event.isRelayModeEnabled` | bool | `event.relay_mode_enabled` | Present on `relayModeUpdated` only. Observed 2026-06-04 (DARE log). |
 
 **Event types:**
 
@@ -516,6 +517,18 @@ Lifecycle and configuration events.
 | `pliSettingUpdated` | PLI interval or mode changed |
 | `frequencyUpdated` | Frequency set changed (regular log only — not observed in enhanced log) |
 | `firmwareUpdate` | Radio firmware update lifecycle (e.g. `updateStatus="STARTED"`). A significant QA event — an update mid-session can explain degraded behavior. |
+| `relayModeUpdated` | Relay mode toggled (`isRelayModeEnabled`). Relay mode extends a goTenna network via a relay node. Observed 2026-06-04. |
+
+> ⚠️ **Other known radio modes not yet observed as app-level events:** goTenna
+> radios also support **Limited Mode** (device physically off, connected to
+> external power — microcontroller monitors hardware/battery only) and
+> **Tether Mode** (phone tethered to the radio via USB rather than BLE, with
+> its own power-management logic). Neither has been observed as an
+> `event.type` in any log reviewed so far. Limited Mode is plausibly never
+> loggable this way at all, since the device isn't meaningfully "on" from
+> the plugin's perspective. Tether Mode's *polled* state (not a change
+> event) has been observed via SDK Logging 2.0 `clientRequest` records — see
+> the `TetherMode` row in the SDK Error / clientRequest section below.
 
 ---
 
@@ -542,7 +555,7 @@ error-only records; the name reflects the `"ERROR"` entry in `tags`.
 | `message.deviceState.radioType` | string | `sdk_error.radio_type` / `radio_types` | e.g. `"PRO_X_2"` — **surfaced nowhere else in the format**; used for device classification |
 | `message.deviceState.mcuuuid` | string | `sdk_error.mcuuuid` | MCU UUID |
 | `message.deviceState.endorsements` | string | `sdk_error.endorsements` | e.g. `"PREMIUM"` |
-| `message.event.additionalInfo` | string | `sdk_error.additional_info` / `counts_by_info` | Human-readable event description |
+| `message.event.additionalInfo` | string | `sdk_error.additional_info` / `counts_by_info` | Human-readable event description. **Also checked at `message.clientRequest.additionalInfo` when `.event` doesn't have it** — clientRequest-shaped records (below) carry their own additionalInfo there. |
 
 > ⚠️ **DATA LIMITATION — aggregated, never stored per-record.** Because of the
 > extreme volume, the parser does **not** keep one object per `sdkError` record.
@@ -559,6 +572,62 @@ error-only records; the name reflects the `"ERROR"` entry in `tags`.
 > zero `ERROR|BLE` entries is a genuine `0`, not a fallback trigger) to feed the BLE
 > Health Score dimension. The `> 0 = fail` threshold is an initial estimate pending
 > field validation, consistent with the other Health Score thresholds.
+
+---
+
+### Record Type: SDK Error — `clientRequest` shape (raw radio commands)
+
+A second shape of SDK Error record, observed 2026-06-04 across 9 of 10 field
+logs reviewed. Instead of `message.event`, these carry `message.clientRequest`
+— a **raw BLE command attempt** sent to the radio (frequency changes, mode
+queries, etc.), with its own lifecycle and outcome. This is the raw
+radio-command layer, distinct from (and more granular than) app-level
+`event` records: a command can be `QUEUED`, then `COMPLETED` or `FAILED` —
+and a `FAILED` command likely never produces a corresponding app-level event
+at all, since those typically only fire on a *confirmed* change.
+
+`rawRequest`/`sanitizedRequest` are a Kotlin/Java `toString()` of the command
+object, not structured JSON — parsed with regex, not `json.loads`.
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `message.clientRequest.sequenceNumber` | integer | *(not currently stored)* | |
+| `message.clientRequest.status` | string | `.status` on the relevant model below | Observed: `QUEUED`, `COMPLETED`, `FAILED`, `CANCELLED`, `TIMEOUT` — treat as an open set, not exhaustive. `TIMEOUT` surfaced in the MESMER log only after the first four were documented, which is itself evidence the set keeps growing |
+| `message.clientRequest.rawRequest` | string | parsed via regex | Command object `toString()`; command type determined by its prefix (`Frequency(`, `NetworkMode(`, `TetherMode(`) |
+| `message.clientRequest.additionalInfo` | string | feeds `counts_by_info` | e.g. `"Request is not valid for reason atakplugin.gotennaproag.fh1$c"` on a FAILED Frequency SET |
+
+**`Frequency(channels=[...], action=SET, ...)` → `AtakFrequencySetAttempt`**
+(`result.atak_frequency_set_attempts`) — a frequency **SET** attempt at the
+radio-command level. Channel frequencies are in Hz in the raw string;
+converted to MHz on parse (`464550000hz` → `464.55`).
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `timestamp` | string | From the SDK Error record's own `timestamp`, not `timestampInMillis`. **Note this is the raw ISO-8601 `…Z` form**, unlike most ATAK timestamps which are normalized to `YYYY-MM-DD HH:MM:SS.ffffff` — UI consumers must handle both |
+| `status` | string | Open set — QUEUED / COMPLETED / FAILED / CANCELLED / TIMEOUT observed |
+| `action` | string | `SET` and `GET` both observed. ⚠️ The parser records **any** `Frequency(channels=` command here regardless of `action`, so the 12 `action=GET` records in the MESMER log are currently counted as SET attempts — see the parsing-requirements limitation |
+| `channels` | list | `[{"frequency": float (MHz), "isControlChannel": bool}]` |
+
+**`NetworkMode(listenOnly=<bool>, action=GET, ...)` and
+`TetherMode(enabled=<bool>, batteryThreshold=<int>, action=GET, ...)` →
+`AtakRadioModeQuery`** (`result.atak_radio_mode_queries`) — mostly the app
+**polling** current listen-only or tether-mode state. `action=GET` was the only
+value in the samples reviewed when this was first written, but `action=SET` has
+since been observed (MESMER: 12 `NetworkMode` SETs, 6 of them COMPLETED — real
+mode-change commands, not polls). The parser stores both in this one list, so a
+mode-change command is currently counted inside the UI's "poll history."
+The *confirmed* mode (as opposed to a poll of it) comes from the Device Health
+record's own `mode` field instead (see below) — `LISTEN_ONLY` has been
+observed there directly, distinct from these polls.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `timestamp` | string | Raw ISO-8601 `…Z` form, as with `AtakFrequencySetAttempt` |
+| `mode_type` | string | `"listenOnly"` (from `NetworkMode`) or `"tether"` (from `TetherMode`) |
+| `value` | bool | The polled state at query time |
+| `status` | string | Open set — QUEUED / COMPLETED / FAILED / CANCELLED / TIMEOUT observed |
+| `battery_threshold` | integer | Tether only. Absent key → `None`, never `0` — a real 0% threshold must stay distinguishable from "not reported" |
+| `action` | string | `GET` and `SET` both observed — see note above |
 
 ---
 

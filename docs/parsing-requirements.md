@@ -474,6 +474,7 @@ Lifecycle and configuration change events.
 | `event.location` | object | `{lat, long, alt}` | Present on `deviceDisconnected` only |
 | `event.updateStatus` | string | `"STARTED"` | Present on `firmwareUpdate` only |
 | `event.updateTimeInMillis` | int | `1780500003000` | Present on `firmwareUpdate` only |
+| `event.isRelayModeEnabled` | bool | `true` | Present on `relayModeUpdated` only → `AtakEvent.relay_mode_enabled`. **Optional[bool]** — absent key stores `None`, not `False`; unknown relay state must never render as a confirmed OFF |
 
 **Event types observed:**
 
@@ -484,6 +485,7 @@ Lifecycle and configuration change events.
 | `powerLevelUpdated` | 1 | TX power changed |
 | `pliSettingUpdated` | 1 | PLI interval/mode changed |
 | `firmwareUpdate` | — | Firmware update lifecycle (`updateStatus`, `updateTimeInMillis`) — significant QA event |
+| `relayModeUpdated` | 2 | Relay mode toggled on/off (`isRelayModeEnabled`). This is the **confirmed** relay state — a discrete event, unlike the continuous `health.mode` telemetry. Only 2 observations to date, so absence of the flag is plausible and stays `None` |
 
 #### 5. SDK Error Record (SDK Logging 2.0) — NEW
 
@@ -538,6 +540,45 @@ are general structured log events, not error-only records.
 14. **`originatorUUID`:** `ANDROID-*` UUID; store `""` when missing. `originatorCallsign` is empty in observed samples.
 15. **`sdkError` records:** Aggregate into `AtakSdkErrorSummary`; never store per-record; surface a `DATA LIMITATION` for the unknown volume baseline. The total count stays informational, but `_result_to_dict()` sums the `ERROR|BLE` subset of `counts_by_tag` into `summary.ble_fail_count` to drive the BLE Health Score dimension. The fallback to the `deviceDisconnected` event count fires **only when no SDK 2.0 summary is present at all** (`atak_sdk_error_summary is None`) — a summary that exists but has zero `ERROR|BLE` entries is a genuine `0`, not a fallback trigger. The `> 0 = fail` threshold is an initial estimate pending field validation.
 
+16. **`clientRequest`-shaped `sdkError` records — raw radio commands (2026-06-04):** A subset of `sdkError` records carry `message.clientRequest` instead of `message.event`. Unlike `event`-shaped sdkError records (aggregated only, rule 15), these are extracted **per record** because the volume is low and each one is individually meaningful. Command type comes from the `rawRequest` prefix:
+    - `Frequency(channels=` → `AtakFrequencySetAttempt` (`atak_frequency_set_attempts`)
+    - `NetworkMode(` or `TetherMode(` → `AtakRadioModeQuery` (`atak_radio_mode_queries`)
+    - Any other prefix is **ignored** — `Location(`, `Gid(`, `GetDeviceAlert(`, and `DeviceInfo(` are all observed in real logs and must not be misclassified into either bucket, which would inflate the attempt and poll counts.
+
+    Channel frequencies are parsed from `Frequency: <hz>hz isControlChannel: YES|NO` — Hz converted to MHz, `YES`/`NO` to bool. `batteryThreshold` absent → `None`, never `0` (a real 0% threshold is indistinguishable otherwise).
+
+17. **Command status is an open set and is never confirmed state:** `QUEUED`, `COMPLETED`, `FAILED`, `CANCELLED`, and `TIMEOUT` are observed so far — do not treat that list as exhaustive, and never filter the UI through a hardcoded allow-list (a dropped status silently undercounts attempts). Missing `status` stores `""` with the record still retained. See "Radio Command Layer vs Confirmed State" below for why even `COMPLETED` is not confirmation.
+
+18. **`--- RSDK LOGS ---` divider:** Some field logs append a second, unwrapped section after the main JSON array closes — a divider line followed by bare `sdkError` records of the same shape. `_load_records()` skips the divider and the mid-file array-close artifact transparently, without logging parse errors. The skip is deliberately shaped to the known artifacts; genuinely malformed records must still surface a `parse_errors` entry rather than disappearing.
+
+### Radio Command Layer vs Confirmed State — ATAK Enhanced Log
+
+The `clientRequest` records are the **raw radio-command layer**. They record what the
+app *asked the radio to do*, not what the radio *did*. Keeping these two layers
+separate is the whole point of the model — conflating them produces a dashboard that
+reports configuration the radio may never have adopted.
+
+| Question | Confirmed source | NOT a source |
+|----------|-----------------|--------------|
+| What frequency was this radio on? | `frequencyUpdated` event (full channel list) | Any `Frequency(...)` SET attempt, **including `COMPLETED`** |
+| What radio mode was it in? | Device Health record's own `mode` field (`NORMAL` / `LISTEN_ONLY`) — continuous periodic telemetry | Any `NetworkMode(` / `TetherMode(` poll, at any status |
+| Was relay mode on? | `relayModeUpdated` event's `isRelayModeEnabled` | — |
+
+**Decision (2026-08-04): a `COMPLETED` SET is not confirmation.** An earlier
+implementation promoted `COMPLETED` Frequency SET attempts into the confirmed-frequency
+timeline, on the reasoning that a COMPLETED ack means the radio adopted the config. That
+was reverted. `COMPLETED` is a command-layer acknowledgement — it confirms the command
+completed, not that the radio is operating on that configuration. Only `frequencyUpdated`
+carries the app-level confirmation.
+
+The practical consequence is that **enhanced logs have no confirmed frequency at all**:
+`frequencyUpdated` is not emitted in the enhanced format (see the Regular vs Enhanced
+table), so a log like CL_B with 6 COMPLETED SETs and 0 events yields "confirmed frequency
+unknown, 6 attempts observed." That is the honest answer and it is what the UI shows —
+the attempt counts stay visible so no data is lost, but they are never presented as
+state. Do not re-derive confirmed frequency from attempts without a field-validated
+reason to believe the ack implies adoption.
+
 ### Known Limitations — ATAK Enhanced Log
 
 - **`senderCallsign` is populated starting with ATAK plugin v3.0** (was always empty in earlier plugin versions/samples) — used as the `device.callsign` fallback when the filename doesn't yield one. `originatorCallsign`/`receiverCallsign`/`senderUUID`/`receiverUUID` remain always empty; identity for those is GID-only (`originatorUUID` does carry an `ANDROID-*` UUID)
@@ -549,6 +590,10 @@ are general structured log events, not error-only records.
 - **Receiver-side `deliveryTimeInMillis = 0` on `fileTransfer`** is a placeholder, not a real delivery time — only meaningful when `isSender=true` and `deliveryStatus=SUCCESS`
 - **`serialNumber = "Unknown"` in Device Health records** is expected behavior during BLE reconnection (the health poll fires before the serial resolves) — not a parser error
 - **SDK Logging 2.0 / `sdkError` record volume** (56,179 across 7 logs) is very high; the baseline for healthy sessions is unknown — the total count is flagged as informational in `parse_errors` until a baseline is established. The `ERROR|BLE` subset is the one exception that drives a pass/fail signal (the BLE Health Score dimension via `summary.ble_fail_count`); that threshold is likewise unvalidated and may change once a BLE-error baseline is established
+- **Frequency `action=GET` is undecided.** The parser records *any* `Frequency(channels=` command into `atak_frequency_set_attempts` regardless of `action`, and every sample reviewed so far used `action=SET` — but `action=GET` Frequency records **have** since been observed in the MESMER log, where 12 GETs are currently counted as SET attempts. The `action` field is stored so the data stays honest, but the model name and the "SET attempts" UI label are wrong for those records. Needs either an `action=SET` gate or a rename to a neutral `AtakFrequencyCommand`
+- **`NetworkMode`/`TetherMode` `action=SET` is counted as a poll.** Same root cause in the other direction: MESMER carries 12 `NetworkMode` records with `action=SET` (6 COMPLETED — real mode-change commands) that are merged into the "poll history" count. A genuine mode-change command is currently buried inside a number labelled as polls
+- **Command status vocabulary is open.** `QUEUED`, `COMPLETED`, `FAILED`, `CANCELLED`, `TIMEOUT` observed so far; `TIMEOUT` was found only after the initial four were documented, which is itself evidence the set will keep growing. Parser stores the string verbatim and the UI enumerates dynamically
+- **`isRelayModeEnabled` has only 2 observations.** Absent flag stores `None` (unknown), explicit false stores `False`. The distinction matters — an unknown relay state must not render as a confirmed OFF
 - **`sdkError` regular vs enhanced scope is unconfirmed** — it is not yet known whether regular (non-enhanced) user logs from the same firmware also emit `sdkError` records or whether this record type is exclusive to enhanced/debug sessions. The `Differences: Regular vs Enhanced` table is intentionally left without an `sdkError` row until a regular log from the same firmware version is available to compare
 
 ### Sample File Observations (day1 session)
