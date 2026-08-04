@@ -638,7 +638,7 @@ function AtakConnectionState({ results }) {
 
 function AtakEventsTimeline({ results }) {
   const atak = results.filter(r => r.log_format === 'atak')
-  const eventColors = { deviceConnected:'#00e5a0', deviceDisconnected:'#ff4757', powerLevelUpdated:'#ffd166', pliSettingUpdated:'#00d4ff', frequencyUpdated:'#c77dff', firmwareUpdate:'#ff6b35' }
+  const eventColors = { deviceConnected:'#00e5a0', deviceDisconnected:'#ff4757', powerLevelUpdated:'#ffd166', pliSettingUpdated:'#00d4ff', frequencyUpdated:'#c77dff', firmwareUpdate:'#ff6b35', relayModeUpdated:'#3b82f6' }
   const allEvents = atak.flatMap(r => (r.atak_events||[]).map(e => ({ ...e, device: shortLabel(r) }))).sort((a,b)=>a.timestamp?.localeCompare(b.timestamp))
   if (!allEvents.length) return <ChartCard title="Device Events Timeline" height={60}><NoData message="No events recorded" /></ChartCard>
 
@@ -650,13 +650,19 @@ function AtakEventsTimeline({ results }) {
     }
     if (e.event_type==='powerLevelUpdated')  return `${e.power_watts}W`
     if (e.event_type==='pliSettingUpdated')  return `${e.pli_interval_sec}s · auto=${e.pli_auto_send}`
-    if (e.event_type==='frequencyUpdated')   return `${e.power_watts}W · ${e.bandwidth_khz}kHz · ${e.channels?.length||0} ch`
+    if (e.event_type==='frequencyUpdated') {
+      const chList = (e.channels || [])
+        .map(c => `${c.frequency}${c.isControlChannel ? '★' : ''}`)
+        .join(', ')
+      return `${e.power_watts}W · ${e.bandwidth_khz}kHz · [${chList || '—'}] MHz (★=ctrl)`
+    }
     if (e.event_type==='firmwareUpdate')     return `${e.update_status}${e.update_time_ms != null ? ` · ${e.update_time_ms}ms` : ''}`
+    if (e.event_type==='relayModeUpdated')   return e.relay_mode_enabled ? 'Relay mode ON' : 'Relay mode OFF'
     return ''
   }
 
   return (
-    <ChartCard title="Device Events Timeline" subtitle="Connect · Disconnect · Power · PLI · Frequency" height={allEvents.length * 30 + 50}>
+    <ChartCard title="Device Events Timeline" subtitle="Connect · Disconnect · Power · PLI · Frequency · Relay" height={allEvents.length * 30 + 50}>
       <div style={{ overflowY: 'auto', height: '100%' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--mono)', fontSize: 9 }}>
           <thead><tr style={{ borderBottom:'1px solid var(--border2)' }}>{['Time','Device','Event','Detail'].map(h=><th key={h} style={{ padding:'4px 8px', textAlign:'left', color:'var(--muted)', fontWeight:400 }}>{h}</th>)}</tr></thead>

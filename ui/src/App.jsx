@@ -15,7 +15,8 @@ const TABS = [
   { id:'thermal',   label:'Thermal' },
   { id:'battery',   label:'Battery' },
   { id:'hops',      label:'Hop Count' },
-  { id:'rssi',      label:'RSSI' },
+  { id:'rssi',      label:'Freq/RSSI' },
+  { id:'modes',     label:'Modes', atakOnly: true },
   { id:'chat',      label:'Chat' },
   { id:'health',    label:'Health Score' },
   { id:'relay-health', label:'Relay Health', relayOnly: true },
@@ -1262,6 +1263,434 @@ function HopsTab({ results }) {
   )
 }
 
+function OriginatorFrequencySection({ results }) {
+  const freqNodes = React.useMemo(() => {
+    const nodes = []
+    results.filter(r => r.log_format === 'atak').forEach(r => {
+      const fnCallsign = r.source_filename
+        ? r.source_filename.replace(/^diagnostic_/, '').replace(/^ATAK_/, '').replace(/_?\d{10,}_.*$/, '').replace(/_/g, ' ').trim()
+        : ''
+      const callsign = r.device?.callsign || fnCallsign || r.source_filename
+      const gid = r.device?.gid || callsign
+
+      // Average/median RSSI for this device, from received messages only —
+      // sent-message RSSI is always 0 (placeholder, not a real reading).
+      const rssiVals = (r.atak_messages || [])
+        .filter(m => !m.is_sender && m.rssi != null)
+        .map(m => m.rssi)
+      // If every received RSSI is exactly 0, this is the same early-integration
+      // gap seen elsewhere (RSSI not populated by this FW/radio yet) — an
+      // average of "0 dBm" would misleadingly read as a real (excellent) signal.
+      const allZero = rssiVals.length > 0 && rssiVals.every(v => v === 0)
+      let avgRssi = null, medRssi = null
+      if (rssiVals.length && !allZero) {
+        avgRssi = Math.round(rssiVals.reduce((a, b) => a + b, 0) / rssiVals.length)
+        const sorted = [...rssiVals].sort((a, b) => a - b)
+        const mid = Math.floor(sorted.length / 2)
+        medRssi = sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+      }
+
+      // Frequency changes are discrete config events, not per-message samples
+      // (unlike PLI interval, which is reported on every message) — so
+      // duration per config is the time between consecutive frequencyUpdated
+      // events, not a count of messages.
+      const freqEvents = (r.atak_events || [])
+        .filter(e => e.event_type === 'frequencyUpdated' && e.timestamp)
+        .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+
+      // Frequency SET command attempts — the raw radio-command layer,
+      // extracted from SDK Logging 2.0 clientRequest records. Distinct from
+      // frequencyUpdated: an attempt can be QUEUED, then COMPLETED or
+      // FAILED at the radio, and a FAILED attempt likely never produces a
+      // confirming frequencyUpdated event at all. Shown separately so a
+      // failed attempt doesn't get confused with a confirmed change.
+      const setAttempts = (r.atak_frequency_set_attempts || [])
+        .filter(a => a.timestamp)
+        .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+      const attemptCounts = setAttempts.reduce((acc, a) => {
+        acc[a.status] = (acc[a.status] || 0) + 1
+        return acc
+      }, {})
+
+      // SDK Logging 2.0 timestamps already end in 'Z'; parser-normalized ones
+      // ("YYYY-MM-DD HH:MM:SS.ffffff") don't. Appending a second 'Z' yields an
+      // Invalid Date, so durations silently render as '—'.
+      const toMs = ts => new Date(ts.replace(' ', 'T') + (ts.includes('Z') ? '' : 'Z')).getTime()
+
+      const chKey = ch => (ch || []).map(c => `${c.frequency}${c.isControlChannel ? '*' : ''}`).sort().join(',')
+      const chLabel = ch => {
+        if (!ch || !ch.length) return '—'
+        const sorted = [...ch].sort((a, b) => (a.frequency||0) - (b.frequency||0))
+        const shown = sorted.slice(0, 2).map(c => `${c.frequency}${c.isControlChannel ? '★' : ''}`)
+        return shown.join(', ') + (sorted.length > 2 ? ` +${sorted.length - 2}` : '')
+      }
+
+      // Confirmed frequency comes ONLY from the frequencyUpdated event. A
+      // COMPLETED SET is a radio-command ack, not confirmation the radio is
+      // operating on that config, so it is NOT promoted here — it stays in the
+      // attempt counts below. Enhanced logs emit no frequencyUpdated events at
+      // all (e.g. CL_B: 6 COMPLETED SETs, 0 events), so for those the honest
+      // answer is "confirmed frequency unknown, N attempts observed".
+      const completedSetCount = setAttempts.filter(a => a.status === 'COMPLETED').length
+      const confirmedChanges = freqEvents
+        .map(e => ({ timestamp: e.timestamp, channels: e.channels }))
+        .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+
+      const sessionStartMs = r.session_start ? toMs(r.session_start) : (confirmedChanges[0] ? toMs(confirmedChanges[0].timestamp) : null)
+      const sessionEndMs   = r.session_end   ? toMs(r.session_end)   : null
+
+      const segments = []           // { key, label, durationSec }
+      const durByKey = {}
+      // Stretch before the first confirmed change has an unknown config —
+      // same honesty pattern as PLI Settings: don't imply we know what it was.
+      let unknownLeadSec = 0
+      if (confirmedChanges.length && sessionStartMs != null) {
+        const gap = (toMs(confirmedChanges[0].timestamp) - sessionStartMs) / 1000
+        if (gap > 0) unknownLeadSec = gap
+      }
+
+      confirmedChanges.forEach((e, i) => {
+        const startMs = toMs(e.timestamp)
+        const endMs = i + 1 < confirmedChanges.length ? toMs(confirmedChanges[i + 1].timestamp) : sessionEndMs
+        const durSec = endMs != null ? Math.max(0, (endMs - startMs) / 1000) : 0
+        const key = chKey(e.channels)
+        durByKey[key] = (durByKey[key] || 0) + durSec
+        if (!segments.some(s => s.key === key)) {
+          segments.push({ key, label: chLabel(e.channels) })
+        }
+      })
+
+      if (!freqEvents.length && !rssiVals.length && !setAttempts.length) return  // nothing to show for this device
+      nodes.push({
+        callsign, gid,
+        hasChanges: segments.length > 1,
+        segments: segments.map(s => ({ ...s, durationSec: durByKey[s.key] })),
+        unknownLeadSec,
+        // `current` is the config from the chronologically LAST confirmed change,
+        // not the last element of `segments` — that array is ordered by first
+        // appearance, so a config the radio returns to late in the session loses
+        // the badge to whichever distinct config happened to appear last
+        // (VALERIE ends on 445.5, but 450 was the last *new* config seen).
+        lastKey: confirmedChanges.length
+          ? chKey(confirmedChanges[confirmedChanges.length - 1].channels)
+          : null,
+        avgRssi, medRssi, allZero, rssiCount: rssiVals.length,
+        attemptCounts, hasFailedAttempts: (attemptCounts.FAILED || 0) > 0,
+        completedSetCount,
+      })
+    })
+    return nodes.sort((a, b) => a.callsign.localeCompare(b.callsign))
+  }, [results])
+
+  if (!freqNodes.length) return null
+
+  const fmtDur = sec => {
+    if (!sec) return '—'
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60)
+    return h > 0 ? `${h}h ${m}m` : `${m}m`
+  }
+  const rssiColor = (dbm) => dbm >= -70 ? C.green : dbm >= -85 ? C.yellow : C.red
+
+  return (
+    <>
+      <SectionHeader icon="📻" title="Originator Frequency — All Network Nodes" sub="Confirmed config from frequencyUpdated events (duration per config) · SET attempts from raw radio commands, incl. failures · avg/median RSSI from received messages" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 6, marginBottom: 16 }}>
+        {freqNodes.map((node, i) => (
+          <div key={i} style={{
+            background: 'var(--panel)', border: '1px solid var(--border)',
+            borderLeft: `3px solid ${node.hasChanges ? C.yellow : node.hasFailedAttempts ? C.red : C.accent}`,
+            borderRadius: 5, padding: '10px 12px', minHeight: 140,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 }}>
+              <div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: '#c8ddf4', fontWeight: 700 }}>{node.callsign}</div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.dim, marginTop: 1 }}>{node.gid}</div>
+              </div>
+              {node.hasChanges && (
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.yellow, background: `${C.yellow}15`, border: `1px solid ${C.yellow}40`, borderRadius: 3, padding: '2px 7px', whiteSpace: 'nowrap' }}>
+                  ⚠ MIXED
+                </div>
+              )}
+            </div>
+
+            {node.unknownLeadSec > 0 && (
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted, marginBottom: 5 }}>
+                ⚠ first {fmtDur(node.unknownLeadSec)} of session — config unknown (no event yet)
+              </div>
+            )}
+
+            {node.segments.map((s) => (
+              <div key={s.key} style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+                <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 15, fontWeight: 700, color: s.key === node.lastKey ? C.accent : '#94a3b8', lineHeight: 1.3 }}>
+                  {s.label} <span style={{ fontSize: 9, color: C.dim }}>MHz</span>
+                </span>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#94a3b8' }}>
+                  {fmtDur(s.durationSec)}
+                </span>
+                {s.key === node.lastKey && (
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.accent }}>current</span>
+                )}
+              </div>
+            ))}
+            {!node.segments.length && (
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.dim, marginBottom: 4 }}>
+                No confirmed frequency — no frequencyUpdated events in this log
+                {node.completedSetCount > 0 && (
+                  <>. {node.completedSetCount} COMPLETED SET command{node.completedSetCount > 1 ? 's' : ''} observed
+                  (counted below) — a command ack is not confirmation of radio state</>
+                )}
+              </div>
+            )}
+
+            {Object.keys(node.attemptCounts).length > 0 && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4, marginBottom: 4 }}>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted }}>SET attempts (raw cmd):</span>
+                {/* Status list built dynamically — the vocabulary is an open set
+                    (QUEUED/COMPLETED/FAILED/CANCELLED/TIMEOUT observed so far).
+                    A hardcoded list drops real attempts from the count. */}
+                {Object.entries(node.attemptCounts).map(([s, count]) => (
+                  <span key={s} style={{
+                    fontFamily: 'var(--mono)', fontSize: 7,
+                    color: s === 'FAILED' ? C.red : s === 'COMPLETED' ? C.green : C.muted,
+                  }}>
+                    {count} {s.toLowerCase()}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)', display: 'flex', gap: 14 }}>
+              <div>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 16, fontWeight: 700, color: node.avgRssi != null ? rssiColor(node.avgRssi) : C.dim, lineHeight: 1 }}>
+                  {node.avgRssi != null ? `${node.avgRssi}` : '—'}
+                </div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted }}>avg dBm</div>
+              </div>
+              <div>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 16, fontWeight: 700, color: node.medRssi != null ? rssiColor(node.medRssi) : C.dim, lineHeight: 1 }}>
+                  {node.medRssi != null ? `${node.medRssi}` : '—'}
+                </div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted }}>median dBm</div>
+              </div>
+            </div>
+            {node.allZero && (
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted, marginTop: 4 }}>
+                ⚠ all {node.rssiCount} received RSSI readings are 0 — not real signal data (known early-integration gap)
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
+  )
+}
+
+function OriginatorRadioModeSection({ results }) {
+  const modeNodes = React.useMemo(() => {
+    const nodes = []
+    results.filter(r => r.log_format === 'atak').forEach(r => {
+      const fnCallsign = r.source_filename
+        ? r.source_filename.replace(/^diagnostic_/, '').replace(/^ATAK_/, '').replace(/_?\d{10,}_.*$/, '').replace(/_/g, ' ').trim()
+        : ''
+      const callsign = r.device?.callsign || fnCallsign || r.source_filename
+      const gid = r.device?.gid || callsign
+
+      // SDK Logging 2.0 timestamps already end in 'Z'; parser-normalized ones
+      // ("YYYY-MM-DD HH:MM:SS.ffffff") don't. Appending a second 'Z' yields an
+      // Invalid Date, so durations silently render as '—'.
+      const toMs = ts => new Date(ts.replace(' ', 'T') + (ts.includes('Z') ? '' : 'Z')).getTime()
+
+      // Confirmed mode changes come from health telemetry's own `mode` field
+      // (NORMAL / LISTEN_ONLY observed so far) — this is continuous, periodic
+      // ground truth, unlike Frequency's discrete change events. Segment
+      // duration is the time between consecutive samples with a different
+      // mode value.
+      const healthSamples = (r.atak_health_samples || [])
+        .filter(h => h.mode && h.timestamp)
+        .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+
+      const segments = []
+      healthSamples.forEach((h) => {
+        const last = segments[segments.length - 1]
+        if (last && last.mode === h.mode) {
+          last.endMs = toMs(h.timestamp)
+        } else {
+          segments.push({ mode: h.mode, startMs: toMs(h.timestamp), endMs: toMs(h.timestamp) })
+        }
+      })
+      const modeSegments = segments.map(s => ({ mode: s.mode, durationSec: Math.max(0, (s.endMs - s.startMs) / 1000) }))
+
+      // Relay mode — a discrete event (relayModeUpdated), not continuous
+      // telemetry like health.mode. Same event-boundary segment pattern as
+      // Frequency: duration is time to the next event (or session end), and
+      // the stretch before the first event has an unknown relay state.
+      const relayEvents = (r.atak_events || [])
+        .filter(e => e.event_type === 'relayModeUpdated' && e.timestamp)
+        .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+      const sessionStartMs = r.session_start ? toMs(r.session_start) : null
+      const sessionEndMs   = r.session_end   ? toMs(r.session_end)   : null
+
+      let relayUnknownLeadSec = 0
+      if (relayEvents.length && sessionStartMs != null) {
+        const gap = (toMs(relayEvents[0].timestamp) - sessionStartMs) / 1000
+        if (gap > 0) relayUnknownLeadSec = gap
+      }
+      const relaySegments = []
+      relayEvents.forEach((e, i) => {
+        const last = relaySegments[relaySegments.length - 1]
+        const startMs = toMs(e.timestamp)
+        const endMs = i + 1 < relayEvents.length ? toMs(relayEvents[i + 1].timestamp) : sessionEndMs
+        const durSec = endMs != null ? Math.max(0, (endMs - startMs) / 1000) : 0
+        if (last && last.enabled === e.relay_mode_enabled) {
+          last.durationSec += durSec
+        } else {
+          relaySegments.push({ enabled: e.relay_mode_enabled, durationSec: durSec })
+        }
+      })
+
+      // NetworkMode/TetherMode GET-polls — the app asking "what mode are you
+      // in right now," not a change. Grouped by mode_type + status; status
+      // list built dynamically since new values keep showing up (QUEUED,
+      // COMPLETED, FAILED, CANCELLED observed so far — don't assume that's all).
+      const queries = (r.atak_radio_mode_queries || [])
+      const pollCounts = {}  // { listenOnly: {STATUS: n}, tether: {STATUS: n} }
+      queries.forEach(q => {
+        if (!pollCounts[q.mode_type]) pollCounts[q.mode_type] = {}
+        pollCounts[q.mode_type][q.status] = (pollCounts[q.mode_type][q.status] || 0) + 1
+      })
+
+      if (!modeSegments.length && !queries.length && !relaySegments.length) return
+      nodes.push({
+        callsign, gid,
+        hasChanges: new Set(modeSegments.map(s => s.mode)).size > 1 || new Set(relaySegments.map(s => s.enabled)).size > 1,
+        modeSegments, pollCounts,
+        relaySegments, relayUnknownLeadSec,
+      })
+    })
+    return nodes.sort((a, b) => a.callsign.localeCompare(b.callsign))
+  }, [results])
+
+  if (!modeNodes.length) return null
+
+  const fmtDur = sec => {
+    if (!sec) return '—'
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60)
+    return h > 0 ? `${h}h ${m}m` : `${m}m`
+  }
+  const modeColor = m => m === 'LISTEN_ONLY' ? C.yellow : m === 'NORMAL' ? C.accent : '#94a3b8'
+  const statusColor = s => s === 'FAILED' ? C.red : s === 'COMPLETED' ? C.green : s === 'CANCELLED' ? C.muted : C.muted
+
+  return (
+    <>
+      <SectionHeader icon="🎛️" title="Radio Mode — All Network Nodes" sub="Confirmed listen-only/normal mode from health telemetry · relay mode from relayModeUpdated events · NetworkMode/TetherMode poll history" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 6, marginBottom: 16 }}>
+        {modeNodes.map((node) => (
+          <div key={node.gid} style={{
+            background: 'var(--panel)', border: '1px solid var(--border)',
+            borderLeft: `3px solid ${node.hasChanges ? C.yellow : C.accent}`,
+            borderRadius: 5, padding: '10px 12px', minHeight: 120,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 }}>
+              <div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: '#c8ddf4', fontWeight: 700 }}>{node.callsign}</div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.dim, marginTop: 1 }}>{node.gid}</div>
+              </div>
+              {node.hasChanges && (
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.yellow, background: `${C.yellow}15`, border: `1px solid ${C.yellow}40`, borderRadius: 3, padding: '2px 7px', whiteSpace: 'nowrap' }}>
+                  ⚠ MIXED
+                </div>
+              )}
+            </div>
+
+            {node.modeSegments.map((s, j) => (
+              <div key={j} style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+                <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 15, fontWeight: 700, color: modeColor(s.mode), lineHeight: 1.3 }}>
+                  {s.mode}
+                </span>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#94a3b8' }}>
+                  {fmtDur(s.durationSec)}
+                </span>
+                {j === node.modeSegments.length - 1 && (
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.accent }}>current</span>
+                )}
+              </div>
+            ))}
+            {!node.modeSegments.length && (
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.dim, marginBottom: 4 }}>No health telemetry with a mode value in this log</div>
+            )}
+
+            {node.relaySegments.length > 0 && (
+              <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
+                {node.relayUnknownLeadSec > 0 && (
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted, marginBottom: 4 }}>
+                    ⚠ first {fmtDur(node.relayUnknownLeadSec)} of session — relay state unknown (no event yet)
+                  </div>
+                )}
+                {node.relaySegments.map((s, j) => (
+                  <div key={j} style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 15, fontWeight: 700, color: s.enabled ? C.green : C.muted, lineHeight: 1.3 }}>
+                      RELAY {s.enabled ? 'ON' : 'OFF'}
+                    </span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#94a3b8' }}>
+                      {fmtDur(s.durationSec)}
+                    </span>
+                    {j === node.relaySegments.length - 1 && (
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.accent }}>current</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {Object.keys(node.pollCounts).length > 0 && (
+              <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
+                {Object.entries(node.pollCounts).map(([modeType, statuses]) => (
+                  <div key={modeType} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted }}>
+                      {modeType === 'listenOnly' ? 'NetworkMode' : 'TetherMode'} polls:
+                    </span>
+                    {Object.entries(statuses).map(([status, count]) => (
+                      <span key={status} style={{ fontFamily: 'var(--mono)', fontSize: 7, color: statusColor(status) }}>
+                        {count} {status.toLowerCase()}
+                      </span>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
+  )
+}
+
+function ModesTab({ results }) {
+  // This tab is atakOnly, so an ATAK log is always loaded here. The real empty
+  // case is an ATAK log carrying none of the three mode sources — e.g. the
+  // v3.0 builds that emit zero connectionState (device-health) records.
+  const atakResults = results.filter(r => r.log_format === 'atak')
+  const hasModeData = atakResults.some(r =>
+    (r.atak_health_samples || []).some(h => h.mode) ||
+    (r.atak_radio_mode_queries || []).length > 0 ||
+    (r.atak_events || []).some(e => e.event_type === 'relayModeUpdated')
+  )
+  return (
+    <div>
+      {!hasModeData && (
+        <Note>
+          No radio mode data in the loaded ATAK log{atakResults.length > 1 ? 's' : ''} — no
+          device-health records carrying a <b>mode</b> field, no NetworkMode/TetherMode polls,
+          and no <b>relayModeUpdated</b> events. Some ATAK plug-in v3.0 builds emit zero
+          connectionState (device-health) records for a session, which also removes the
+          confirmed listen-only/normal mode source.
+        </Note>
+      )}
+      <OriginatorRadioModeSection results={results} />
+    </div>
+  )
+}
+
 function RssiTab({ results }) {
   const hasGripRssi = results.some(r =>
     (r.grip_messages || []).some(g => g.direction === 'incoming' && g.rssi != null)
@@ -1293,6 +1722,7 @@ function RssiTab({ results }) {
 
   return (
     <div>
+      <OriginatorFrequencySection results={results} />
       <SectionHeader
         icon="📡"
         title="RSSI by Hop Count"
@@ -1826,7 +2256,7 @@ function AtakTab({ results }) {
       <SectionHeader icon="📡" title="Connection State Over Time" sub="CONNECTED vs CONNECTING health samples" />
       <ChartPanel results={atakResults} selectedPoints={['atak_connection_state']} />
 
-      <SectionHeader icon="🗓️" title="Device Events Timeline" sub="Connect · Disconnect · Power · PLI · Frequency changes" />
+      <SectionHeader icon="🗓️" title="Device Events Timeline" sub="Connect · Disconnect · Power · PLI · Frequency · Relay changes" />
       <ChartPanel results={atakResults} selectedPoints={['atak_events_timeline']} />
 
       {atakResults.some(r => (r.summary?.partially_received || 0) > 0) && (
@@ -2136,6 +2566,7 @@ function TabContent({ tab, results }) {
     case 'battery':   return <BatteryTab   results={results} />
     case 'hops':      return <HopsTab      results={results} />
     case 'rssi':      return <RssiTab      results={results} />
+    case 'modes':     return <ModesTab     results={results} />
     case 'chat':      return <ChatTab      results={results} />
     case 'health':      return <HealthTab      results={results} />
     case 'relay-health':
@@ -2289,6 +2720,17 @@ export default function App() {
       const atakHlth  = (r.atak_health_samples|| []).filter(h => inWindow(h.timestamp))
       const gripMsgs  = (r.grip_messages      || []).filter(g => inWindow(g.timestamp))
       const gripXfers = (r.grip_transfers     || []).filter(t => inWindow(t.start_timestamp))
+      // Radio-command layer — timestamps here are the raw SDK 2.0 ISO '…Z' form
+      // rather than the parser-normalized one, which inWindow() already handles.
+      const atakFreq  = (r.atak_frequency_set_attempts || []).filter(a => inWindow(a.timestamp))
+      const atakModeQ = (r.atak_radio_mode_queries     || []).filter(q => inWindow(q.timestamp))
+      // Config-change events (frequencyUpdated, relayModeUpdated, PLI settings,
+      // connect/disconnect). Windowing these keeps the Modes card's relay
+      // segments on the same time range as its health-derived mode segments,
+      // and makes the ATAK Events Timeline follow the slider like every other
+      // time series. `ble_fail_count` is unaffected — it comes from the
+      // SDK-error aggregate and is carried over whole below.
+      const atakEvts  = (r.atak_events                 || []).filter(e => inWindow(e.timestamp))
 
       // Recompute summary fields that derive from the filtered arrays
       const hops     = msgs.map(m => m.hop_count).filter(Boolean)
@@ -2358,6 +2800,9 @@ export default function App() {
         atak_health_samples:  atakHlth,
         grip_messages:        gripMsgs,
         grip_transfers:       gripXfers,
+        atak_events:                 atakEvts,
+        atak_frequency_set_attempts: atakFreq,
+        atak_radio_mode_queries:     atakModeQ,
         summary: { ...r.summary, ...recomputed },
       }
     })
