@@ -24,7 +24,8 @@ from typing import Optional
 from .models import (
     ParseResult, DeviceInfo, SystemSample, SessionGap,
     AtakMessage, AtakDeviceHealth, AtakEvent, AtakAppInfo,
-    AtakSdkErrorSummary, AtakSdkErrorSample,
+    AtakSdkErrorSummary, AtakSdkErrorSample, AtakFrequencySetAttempt,
+    AtakRadioModeQuery,
 )
 
 _TS_FMT_OUT = "%Y-%m-%d %H:%M:%S.%f"
@@ -248,6 +249,9 @@ def _handle_event(record: dict, result: ParseResult) -> None:
         atak_event.bandwidth_khz = event.get("bandwidth")
         atak_event.channels = event.get("channels", [])
 
+    elif event_type == "relayModeUpdated":
+        atak_event.relay_mode_enabled = event.get("isRelayModeEnabled")
+
     result.atak_events.append(atak_event)
 
 
@@ -274,7 +278,65 @@ def _handle_sdk_log(record: dict, result: ParseResult) -> None:
     msg = record.get("message", {})
     device_state = msg.get("deviceState", {}) if isinstance(msg, dict) else {}
     event = msg.get("event", {}) if isinstance(msg, dict) else {}
-    info = event.get("additionalInfo", "") if isinstance(event, dict) else ""
+    client_request = msg.get("clientRequest", {}) if isinstance(msg, dict) else {}
+    # additionalInfo can live under either message.event (older shape) or
+    # message.clientRequest (the raw radio-command shape, e.g. Frequency SET
+    # attempts) — checking only .event silently dropped all clientRequest
+    # detail, including every Frequency SET attempt, into the generic tag
+    # count with no visibility into what actually happened.
+    info = ""
+    if isinstance(event, dict):
+        info = event.get("additionalInfo", "")
+    if not info and isinstance(client_request, dict):
+        info = client_request.get("additionalInfo", "")
+
+    # Frequency SET command attempts — a distinct, first-class data point.
+    # rawRequest is a Kotlin/Java toString(), not structured JSON, so pull
+    # the channel list out with a regex rather than trying to json.loads it.
+    if isinstance(client_request, dict):
+        raw_request = client_request.get("rawRequest", "")
+        if "Frequency(channels=" in raw_request:
+            channels = [
+                {"frequency": float(freq) / 1_000_000, "isControlChannel": ctrl == "YES"}
+                for freq, ctrl in re.findall(
+                    r"Frequency:\s*(\d+)hz\s+isControlChannel:\s*(YES|NO)", raw_request
+                )
+            ]
+            action_match = re.search(r"action=(\w+)", raw_request)
+            result.atak_frequency_set_attempts.append(AtakFrequencySetAttempt(
+                timestamp=record.get("timestamp", ""),
+                status=client_request.get("status", ""),
+                action=action_match.group(1) if action_match else "",
+                channels=channels,
+            ))
+
+        # NetworkMode / TetherMode — the app polling (GET) current listen-only
+        # or tether-mode state. Structurally different from Frequency's SET
+        # commands: these don't change anything, they ask "what mode are you
+        # in right now." Observed action so far: GET only.
+        elif raw_request.startswith("NetworkMode("):
+            value_match = re.search(r"listenOnly=(true|false)", raw_request, re.IGNORECASE)
+            action_match = re.search(r"action=(\w+)", raw_request)
+            result.atak_radio_mode_queries.append(AtakRadioModeQuery(
+                timestamp=record.get("timestamp", ""),
+                mode_type="listenOnly",
+                value=(value_match.group(1).lower() == "true") if value_match else None,
+                status=client_request.get("status", ""),
+                action=action_match.group(1) if action_match else "",
+            ))
+
+        elif raw_request.startswith("TetherMode("):
+            value_match = re.search(r"enabled=(true|false)", raw_request, re.IGNORECASE)
+            threshold_match = re.search(r"batteryThreshold=(\d+)", raw_request)
+            action_match = re.search(r"action=(\w+)", raw_request)
+            result.atak_radio_mode_queries.append(AtakRadioModeQuery(
+                timestamp=record.get("timestamp", ""),
+                mode_type="tether",
+                value=(value_match.group(1).lower() == "true") if value_match else None,
+                status=client_request.get("status", ""),
+                battery_threshold=int(threshold_match.group(1)) if threshold_match else None,
+                action=action_match.group(1) if action_match else "",
+            ))
 
     # Accumulate into the mutable state dict on result (cleaned up after loop)
     if not hasattr(result, "_sdk_log_state"):
@@ -393,9 +455,22 @@ def _load_records(text: str, result: ParseResult) -> list[dict]:
         text = text[:-1]
 
     for i, raw_line in enumerate(text.splitlines(), start=1):
-        line = raw_line.strip().rstrip(",")
+        line = raw_line.strip()
         if not line:
             continue
+        # Some field logs append a second, unwrapped section after the main
+        # array closes (seen as a "--- RSDK LOGS ---" divider followed by more
+        # bare JSON objects — same sdk_log record shape, just not wrapped in
+        # a second array). Lines that don't even look like a JSON object are
+        # section dividers/annotations, not parse failures — skip silently.
+        if not line.startswith("{"):
+            continue
+        line = line.rstrip(",")
+        # A trailing ']' here is the main array's closing bracket landing on
+        # the same line as the last real record, because the array doesn't
+        # close at the true end of the file when a second section follows it.
+        if line.endswith("]"):
+            line = line[:-1].rstrip(",")
         try:
             records.append(json.loads(line))
         except json.JSONDecodeError as e:

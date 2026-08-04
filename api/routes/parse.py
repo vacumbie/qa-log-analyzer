@@ -337,8 +337,33 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
                 "location":         e.location,
                 "update_status":    e.update_status,
                 "update_time_ms":   e.update_time_ms,
+                "relay_mode_enabled": e.relay_mode_enabled,
             }
             for e in r.atak_events
+        ]
+
+        # Frequency SET command attempts — raw radio-command layer, distinct
+        # from confirmed frequencyUpdated events (see AtakFrequencySetAttempt)
+        base["atak_frequency_set_attempts"] = [
+            {
+                "timestamp": a.timestamp,
+                "status":    a.status,
+                "action":    a.action,
+                "channels":  a.channels,
+            }
+            for a in r.atak_frequency_set_attempts
+        ]
+
+        base["atak_radio_mode_queries"] = [
+            {
+                "timestamp":          q.timestamp,
+                "mode_type":          q.mode_type,
+                "value":              q.value,
+                "status":             q.status,
+                "battery_threshold":  q.battery_threshold,
+                "action":             q.action,
+            }
+            for q in r.atak_radio_mode_queries
         ]
 
         # SDK Logging 2.0 summary — None if no sdkError records were present
