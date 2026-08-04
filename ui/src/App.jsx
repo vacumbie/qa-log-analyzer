@@ -2687,11 +2687,11 @@ function LogSelector({ results, activeDevice, setActiveDevice }) {
 
       {open && (
         <>
-          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 49 }} />
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 9998 }} />
           <div style={{
             position: 'absolute', top: '100%', left: 0, marginTop: 4,
             background: 'var(--panel)', border: '1px solid var(--border2)',
-            borderRadius: 6, zIndex: 50, minWidth: 280, maxWidth: 420,
+            borderRadius: 6, zIndex: 9999, minWidth: 280, maxWidth: 420,
             boxShadow: '0 8px 32px #000a',
             maxHeight: '60vh', overflowY: 'auto',
           }}>
