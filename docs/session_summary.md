@@ -123,7 +123,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | `atak` | `sdkError` (SDK Logging 2.0) volume baseline unknown — count is informational, not pass/fail |
 | `atak` | **Radio commands are not confirmed state.** `atak_frequency_set_attempts` / `atak_radio_mode_queries` are the raw command layer. Confirmed frequency = `frequencyUpdated` event only; confirmed mode = Device Health `mode`; confirmed relay = `relayModeUpdated`. A `COMPLETED` SET is an ack, NOT confirmation (decided 2026-08-04). Enhanced logs emit no `frequencyUpdated`, so they honestly show "confirmed frequency unknown" + attempt counts |
 | `atak` | Command status is an open set — `QUEUED`/`COMPLETED`/`FAILED`/`CANCELLED`/`TIMEOUT` observed. `TIMEOUT` was found only after the first four were documented. Never render through a hardcoded allow-list |
-| `atak` | `action` GET/SET is parsed but not acted on — 12 `Frequency` GETs are counted as SET attempts and 12 `NetworkMode` SETs (6 COMPLETED) are counted as polls, both in MESMER. Labels are wrong for those records; fix pending |
+| `atak` | Both `action=SET` and `action=GET` occur in Frequency and mode records, and both are stored (GETs are never dropped — that would lose real observations). **Consumers must split on `action`:** a GET is a query, not a change attempt. Real MESMER counts — 28 Frequency cmds (16 SET / 12 GET), 2,028 mode records (2,016 GET polls / 12 SET change cmds, 6 COMPLETED). Model names lag the data: `AtakFrequencySetAttempt` holds GETs, `AtakRadioModeQuery` holds SETs |
 | `atak` | Some field logs append a `--- RSDK LOGS ---` divider + bare `sdkError` records after the main array closes — handled transparently (no `parse_errors` entry by design), but the file isn't strictly valid JSON as a whole |
 | `atak` | `isRelayModeEnabled` has only 2 observations — absent flag stores `None` (unknown), not `False` |
 | `atak` | `numberOfOpenSegments = -99` is a sentinel → stored as null |
@@ -191,7 +191,8 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | Stale-base reverts of 4 committed fixes + 4 deleted tests | ✅ Restored (2026-08-04) — found by 5 of 6 gate agents; full deleted-line audit against HEAD confirmed nothing else clobbered |
 | New ATAK arrays not covered by the time-window filter | ✅ Done (2026-08-04) — `atak_frequency_set_attempts`, `atak_radio_mode_queries`, and `atak_events` added to `filteredResults`; `ble_fail_count` still carried over whole (SDK-error aggregate isn't time-windowable) |
 | `current` badge on the wrong frequency config | ✅ Done (2026-08-04) — karen found on VALERIE; `lastKey` came from `segments` (first-seen order) instead of the chronologically last confirmed change, so a radio returning to an earlier config showed the wrong one as current |
-| `action` GET/SET conflation in Frequency + mode records | ⏳ Pending — MESMER: 12 Frequency GETs counted as SET attempts, 12 NetworkMode SETs counted as polls |
+| `action` GET/SET conflation in Frequency + mode records | ✅ Done (2026-08-04) — UI splits on `action`; both actions still stored. Verified against the real 144 MB MESMER log: Frequency 16 SET / 12 GET, mode 2,016 polls / 12 change cmds. The old empty-state "10 COMPLETED SET commands" was itself wrong — only 6 were SETs |
+| Rename `AtakFrequencySetAttempt` / `AtakRadioModeQuery` to neutral names | ⏸ Deferred — ~69 references incl. serialized keys, tests, docs; churn with no behavior change |
 | `_CSV_TYPES` decision for the two new ATAK tables | ⏳ Pending — `atak_radio_mode_queries` is flat and CSV-ready; `atak_frequency_set_attempts` nests `channels`, so JSON-only is defensible — but record the choice in `export.py` either way |
 
 ---
@@ -334,8 +335,17 @@ falls back to `No events recorded` when a window excludes everything. Health Sco
 confirmed **not** to move with the slider while Thermal and RSSI do — the deliberate
 non-windowing of `ble_fail_count` is working, not accidentally frozen.
 
-*Still open on this branch (see What to Work On Next):* `action` GET/SET conflation; review
-of vera's test additions; status-chip render order shifts with the window (cosmetic).
+*Also fixed (2026-08-04, after the 8-commit split):* the **`action` GET/SET conflation**.
+The UI now splits Frequency commands into SET attempts vs GET queries, and mode records into
+polls (`GET`) vs change cmds (`SET`), instead of labelling every record with one name. GETs
+are still parsed and stored — dropping them would lose real observations — so this is a
+presentation fix, not a filter. Verified by running the parser over the real 144 MB MESMER
+log: 28 Frequency commands (16 SET / 12 GET) and 2,028 mode records (2,016 GET polls / 12
+SET change cmds, 6 COMPLETED). It also caught a second error: the empty-state text claimed
+"10 COMPLETED SET commands" when only **6** were SETs — the other 4 were completed GETs.
+
+*Still open on this branch (see What to Work On Next):* review of vera's test additions;
+status-chip render order shifts with the window (cosmetic); model names still lag the data.
 
 **2026-07-29 — Originator PLI 5s-bucket bug, PLI Settings mislabeling, and a two-layer UI header/dropdown bug (all field-verified):**
 - **Originator PLI silently dropped 5s-cadence traffic:** BARK's log showed a real ~5s PLI
@@ -679,10 +689,8 @@ Based on the backlog, the most actionable items (not blocked):
    The full gate ran 2026-08-04 (see Most Recent Work). Stale-base reverts, the `toMs`
    NaN bug, the hardcoded status list, and the blank Modes tab are all fixed; the
    COMPLETED-SET decision is made and implemented. Remaining before merge:
-   - **`action` GET/SET conflation** — gate the Frequency branch on `action=SET` or rename
-     the model to a neutral `AtakFrequencyCommand`, and split mode SETs out of the poll
-     count. Real MESMER data has 12 of each miscategorized.
-   - **Push and open the PR** — 8 commits are on the branch; nothing is pushed yet.
+   - **Push the `action`-split commit** — PR #33 is open and has the first 8 commits; the
+     9th (the GET/SET split) is committed locally but not pushed.
    - **Review vera's additions** — she wrote 16 tests and 2 fixtures into the tree
      (`test_atak.py` now 97 tests) beyond auditing; they haven't been reviewed.
    - **Status-chip render order** (cosmetic) — chips reorder between slider positions; see

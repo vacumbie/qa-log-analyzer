@@ -402,7 +402,8 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | ATAK radio-command layer (Frequency SET attempts, NetworkMode/TetherMode queries, `relayModeUpdated`) + Modes tab | ✅ Built 2026-08-04 — uncommitted; see `docs/session_summary.md` |
 | New ATAK command/query arrays not covered by the time-window filter | ✅ Done (2026-08-04) — `atak_frequency_set_attempts`, `atak_radio_mode_queries`, `atak_events` added to `filteredResults` |
 | `current` frequency badge misattributed to the last *new* config instead of the chronologically last change | ✅ Done (2026-08-04) — `lastKey` now derived from `confirmedChanges`, not `segments` insertion order |
-| ATAK `action` GET/SET conflation | ⏳ Pending — the Frequency branch records any `Frequency(channels=` regardless of `action` (12 GETs counted as SET attempts in MESMER), and `NetworkMode` SETs are counted as polls |
+| ATAK `action` GET/SET conflation | ✅ Done (2026-08-04) — both actions are still stored (dropping GETs would lose real observations); the UI splits on `action` so SET attempts, GET queries, mode polls, and mode change cmds are counted and labelled separately. Verified against the real MESMER log: 28 Frequency cmds = 16 SET + 12 GET; 2,028 mode records = 2,016 polls + 12 change cmds |
+| Rename `AtakFrequencySetAttempt`/`AtakRadioModeQuery` (they hold both actions) | ⏳ Deferred — ~69 references incl. the two serialized keys, tests, and docs; pure churn for no behavior change. Docstrings state what the fields actually hold |
 | `_CSV_TYPES` entry or JSON-only note for the two new ATAK tables | ⏳ Pending — decision not yet recorded in `api/routes/export.py` |
 
 ---

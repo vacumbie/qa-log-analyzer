@@ -290,7 +290,10 @@ def _handle_sdk_log(record: dict, result: ParseResult) -> None:
     if not info and isinstance(client_request, dict):
         info = client_request.get("additionalInfo", "")
 
-    # Frequency SET command attempts — a distinct, first-class data point.
+    # Frequency commands — a distinct, first-class data point. Both action=SET
+    # (change the radio) and action=GET (ask what it's on) land here; `action`
+    # is stored so consumers can tell them apart, and the UI splits on it. Do
+    # not filter GETs out — dropping records would lose real observations.
     # rawRequest is a Kotlin/Java toString(), not structured JSON, so pull
     # the channel list out with a regex rather than trying to json.loads it.
     if isinstance(client_request, dict):
@@ -310,10 +313,12 @@ def _handle_sdk_log(record: dict, result: ParseResult) -> None:
                 channels=channels,
             ))
 
-        # NetworkMode / TetherMode — the app polling (GET) current listen-only
-        # or tether-mode state. Structurally different from Frequency's SET
-        # commands: these don't change anything, they ask "what mode are you
-        # in right now." Observed action so far: GET only.
+        # NetworkMode / TetherMode — usually the app polling (GET) current
+        # listen-only or tether-mode state: those don't change anything, they
+        # ask "what mode are you in right now." action=SET also occurs, though,
+        # and those ARE change commands — `action` distinguishes them and the UI
+        # labels each separately. Neither is confirmed state; that comes from
+        # the Device Health record's own `mode` field.
         elif raw_request.startswith("NetworkMode("):
             value_match = re.search(r"listenOnly=(true|false)", raw_request, re.IGNORECASE)
             action_match = re.search(r"action=(\w+)", raw_request)

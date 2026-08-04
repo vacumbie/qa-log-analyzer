@@ -197,7 +197,7 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
   - **Confirmed config timeline** — one row per distinct channel plan, from `frequencyUpdated` events **only**, with duration per config. Rows are ordered by **first appearance**; durations aggregate every stretch on that config. The `current` marker and accent highlight go to the config of the **chronologically last** confirmed change, which is not necessarily the last row — a radio that returns to an earlier config ends the session on it (VALERIE: 5 events, ends on `445.5` which is row 1, while `450` is the last row). `⚠ MIXED` badge when more than one config was confirmed. Channel label shows the two lowest frequencies with `★` on the control channel and `+N` for the remainder.
   - **`⚠ first Xm of session — config unknown (no event yet)`** — the stretch before the first confirmed change, so the card never implies we know the starting config.
   - **Empty state** — when there are no `frequencyUpdated` events the card says so explicitly, and when COMPLETED SET commands exist it names the count and states that a command ack is not confirmation of radio state. Enhanced logs always land here (see the parsing spec's "Radio Command Layer vs Confirmed State"); the attempt counts below carry the data.
-  - **SET attempts (raw cmd)** — counts by status, colored (FAILED red · COMPLETED green · everything else muted). **Status list is built dynamically** from the data — the vocabulary is an open set (`QUEUED`/`COMPLETED`/`FAILED`/`CANCELLED`/`TIMEOUT` observed) and a hardcoded list silently drops real attempts. Card left border turns red when any attempt FAILED.
+  - **Raw commands, one row per `action`** — `SET attempts (raw cmd)` and `GET queries (raw cmd)` are counted and labelled separately, because a GET is a query, not a change attempt (MESMER: 28 commands = 16 SET + 12 GET). An unparsed `action` gets its own `commands, action unknown` row rather than being folded into SET. Within each row, counts by status, colored (FAILED red · COMPLETED green · everything else muted). **Status list is built dynamically** from the data — the vocabulary is an open set (`QUEUED`/`COMPLETED`/`FAILED`/`CANCELLED`/`TIMEOUT` observed) and a hardcoded list silently drops real records. Card left border turns red when any command FAILED.
   - **avg / median dBm** — from ATAK received-message RSSI.
 
 - **RSSI Distribution by Hop Count** — `rssi_by_hop` chart grouped by hop count; diagnostic format: convert unsigned byte (value − 256); ATAK and RSDK GRIP: already signed dBm, no conversion needed
@@ -294,7 +294,7 @@ filter unless an ATAK log is loaded. Carries the `α` alpha badge.
 - **Radio Mode — All Network Nodes** — one card per ATAK node (`OriginatorRadioModeSection`), covering three distinct data sources that must not be conflated:
   - **Confirmed listen-only / normal mode** — from the Device Health record's own `mode` field. This is continuous periodic telemetry, so segment duration is the time between consecutive samples whose `mode` differs. `LISTEN_ONLY` yellow · `NORMAL` cyan.
   - **Confirmed relay mode** — from `relayModeUpdated` events (`isRelayModeEnabled`). A discrete event, so duration runs to the next event or session end, and the stretch before the first event is an explicit unknown lead. `RELAY ON` green · `OFF` muted.
-  - **NetworkMode / TetherMode poll history** — from `atak_radio_mode_queries`, grouped by `mode_type` then status. These are the app *asking* the radio its mode, **not** a change and **not** confirmation. Status list is built dynamically for the same open-set reason as the frequency card.
+  - **NetworkMode / TetherMode raw commands** — from `atak_radio_mode_queries`, grouped by `mode_type`, then `action`, then status. `action=GET` renders as `polls` (the app *asking* the radio its mode); `action=SET` renders as `change cmds` (a real mode-change command — MESMER has 12, 6 COMPLETED, which a single "polls" label would bury). Neither is confirmation. Status list is built dynamically for the same open-set reason as the frequency card.
 - `⚠ MIXED` badge when more than one confirmed mode or relay state occurred in the session.
 - **Empty state** — the tab is `atakOnly`, so "no ATAK log" is unreachable. The real empty case is an ATAK log carrying none of the three sources, which happens on the v3.0 builds that emit zero `connectionState` records. The note names that limitation explicitly rather than rendering a blank page.
 
@@ -384,9 +384,11 @@ confirmation and that was reverted on 2026-08-04; see `parsing-requirements.md` 
 "Radio Command Layer vs Confirmed State" for the reasoning and its consequence (enhanced
 logs show "confirmed frequency unknown" plus attempt counts).
 
-**Still pending on this feature:** `action` GET/SET is parsed but not acted on, so some GETs
-display as SET attempts and some mode SETs display as polls. (Time-window coverage and the
-`current`-badge misattribution were both fixed 2026-08-04.)
+Time-window coverage, the `current`-badge misattribution, and the `action` GET/SET
+conflation were all fixed 2026-08-04. The models still carry their original names
+(`AtakFrequencySetAttempt` holds GETs, `AtakRadioModeQuery` holds SETs) — a deliberate
+deferral, since renaming them and the two serialized keys is ~69 references of churn for
+no behavior change.
 
 ### ATAK Enhanced Log (SDK Logging 2.0) — ✅ Implemented
 Full support for the enhanced ATAK log format. The `SdkLogSummaryCard` renders the aggregated `atak_sdk_error_summary` (counts by tag and by `additionalInfo`, distinct radio types, and a retained sample) — high-volume `sdkError` records are aggregated, never rendered per-record, with the volume-baseline `DATA LIMITATION` surfaced in the banner. Also covers the enhanced message/event fields: `loggingUserLocation` / `transmittedLocation`, `originatorUUID`, the `-99` open-segments sentinel shown as `unknown`, `firmwareUpdate` events, and `deviceDisconnected` location. See ATAK tab spec (section 12).

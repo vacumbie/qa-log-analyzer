@@ -605,7 +605,7 @@ converted to MHz on parse (`464550000hz` → `464.55`).
 |-------|------|-------|
 | `timestamp` | string | From the SDK Error record's own `timestamp`, not `timestampInMillis`. **Note this is the raw ISO-8601 `…Z` form**, unlike most ATAK timestamps which are normalized to `YYYY-MM-DD HH:MM:SS.ffffff` — UI consumers must handle both |
 | `status` | string | Open set — QUEUED / COMPLETED / FAILED / CANCELLED / TIMEOUT observed |
-| `action` | string | `SET` and `GET` both observed. ⚠️ The parser records **any** `Frequency(channels=` command here regardless of `action`, so the 12 `action=GET` records in the MESMER log are currently counted as SET attempts — see the parsing-requirements limitation |
+| `action` | string | `SET` and `GET` both observed — MESMER has 28 Frequency commands, 16 SET and 12 GET. Every `Frequency(channels=` command is stored here regardless of action (GETs are not dropped — that would lose real observations); **consumers must split on `action`**, since a GET is a query, not a change attempt. The UI renders SET and GET as separate labelled rows |
 | `channels` | list | `[{"frequency": float (MHz), "isControlChannel": bool}]` |
 
 **`NetworkMode(listenOnly=<bool>, action=GET, ...)` and
@@ -613,9 +613,11 @@ converted to MHz on parse (`464550000hz` → `464.55`).
 `AtakRadioModeQuery`** (`result.atak_radio_mode_queries`) — mostly the app
 **polling** current listen-only or tether-mode state. `action=GET` was the only
 value in the samples reviewed when this was first written, but `action=SET` has
-since been observed (MESMER: 12 `NetworkMode` SETs, 6 of them COMPLETED — real
-mode-change commands, not polls). The parser stores both in this one list, so a
-mode-change command is currently counted inside the UI's "poll history."
+since been observed (MESMER: 2,028 mode records — 2,016 GET polls and 12
+`NetworkMode` SETs, 6 of them COMPLETED, which are real mode-change commands).
+The parser stores both in this one list; the UI splits on `action` and labels
+them separately (`polls` vs `change cmds`) so a change command is never counted
+as a poll. Neither is confirmed state.
 The *confirmed* mode (as opposed to a poll of it) comes from the Device Health
 record's own `mode` field instead (see below) — `LISTEN_ONLY` has been
 observed there directly, distinct from these polls.

@@ -1380,10 +1380,17 @@ function OriginatorFrequencySection({ results }) {
       const setAttempts = (r.atak_frequency_set_attempts || [])
         .filter(a => a.timestamp)
         .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
-      const attemptCounts = setAttempts.reduce((acc, a) => {
-        acc[a.status] = (acc[a.status] || 0) + 1
-        return acc
-      }, {})
+      // Bucket by action, THEN status. A Frequency(...) command can be a SET
+      // (change the radio) or a GET (ask what it's on) — MESMER carries 12 of
+      // the latter. Counting them together reports GETs as change attempts.
+      // Records whose action didn't parse get their own bucket rather than
+      // being folded into SET, which would overstate change attempts.
+      const cmdCounts = {}   // { SET: {QUEUED: n, …}, GET: {…}, '': {…} }
+      setAttempts.forEach(a => {
+        const action = a.action || ''
+        if (!cmdCounts[action]) cmdCounts[action] = {}
+        cmdCounts[action][a.status] = (cmdCounts[action][a.status] || 0) + 1
+      })
 
       // SDK Logging 2.0 timestamps already end in 'Z'; parser-normalized ones
       // ("YYYY-MM-DD HH:MM:SS.ffffff") don't. Appending a second 'Z' yields an
@@ -1404,7 +1411,11 @@ function OriginatorFrequencySection({ results }) {
       // attempt counts below. Enhanced logs emit no frequencyUpdated events at
       // all (e.g. CL_B: 6 COMPLETED SETs, 0 events), so for those the honest
       // answer is "confirmed frequency unknown, N attempts observed".
-      const completedSetCount = setAttempts.filter(a => a.status === 'COMPLETED').length
+      // Only a COMPLETED *SET* is worth naming in the empty state — a COMPLETED
+      // GET just means a successful query and says nothing about configuration.
+      const completedSetCount = setAttempts.filter(
+        a => a.status === 'COMPLETED' && a.action === 'SET'
+      ).length
       const confirmedChanges = freqEvents
         .map(e => ({ timestamp: e.timestamp, channels: e.channels }))
         .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
@@ -1448,7 +1459,7 @@ function OriginatorFrequencySection({ results }) {
           ? chKey(confirmedChanges[confirmedChanges.length - 1].channels)
           : null,
         avgRssi, medRssi, allZero, rssiCount: rssiVals.length,
-        attemptCounts, hasFailedAttempts: (attemptCounts.FAILED || 0) > 0,
+        cmdCounts, hasFailedAttempts: setAttempts.some(a => a.status === 'FAILED'),
         completedSetCount,
       })
     })
@@ -1463,10 +1474,17 @@ function OriginatorFrequencySection({ results }) {
     return h > 0 ? `${h}h ${m}m` : `${m}m`
   }
   const rssiColor = (dbm) => dbm >= -70 ? C.green : dbm >= -85 ? C.yellow : C.red
+  // Label raw-command rows by action. An unrecognised action is shown verbatim
+  // rather than guessed at — the vocabulary here is as open as the status one.
+  const freqCmdLabel = action =>
+    action === 'SET' ? 'SET attempts (raw cmd)'
+    : action === 'GET' ? 'GET queries (raw cmd)'
+    : action ? `${action} commands (raw cmd)`
+    : 'commands, action unknown (raw cmd)'
 
   return (
     <>
-      <SectionHeader icon="📻" title="Originator Frequency — All Network Nodes" sub="Confirmed config from frequencyUpdated events (duration per config) · SET attempts from raw radio commands, incl. failures · avg/median RSSI from received messages" />
+      <SectionHeader icon="📻" title="Originator Frequency — All Network Nodes" sub="Confirmed config from frequencyUpdated events (duration per config) · raw radio commands split by action (SET attempts vs GET queries), incl. failures · avg/median RSSI from received messages" />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 6, marginBottom: 16 }}>
         {freqNodes.map((node, i) => (
           <div key={i} style={{
@@ -1515,19 +1533,26 @@ function OriginatorFrequencySection({ results }) {
               </div>
             )}
 
-            {Object.keys(node.attemptCounts).length > 0 && (
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4, marginBottom: 4 }}>
-                <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted }}>SET attempts (raw cmd):</span>
-                {/* Status list built dynamically — the vocabulary is an open set
-                    (QUEUED/COMPLETED/FAILED/CANCELLED/TIMEOUT observed so far).
-                    A hardcoded list drops real attempts from the count. */}
-                {Object.entries(node.attemptCounts).map(([s, count]) => (
-                  <span key={s} style={{
-                    fontFamily: 'var(--mono)', fontSize: 7,
-                    color: s === 'FAILED' ? C.red : s === 'COMPLETED' ? C.green : C.muted,
-                  }}>
-                    {count} {s.toLowerCase()}
-                  </span>
+            {Object.keys(node.cmdCounts).length > 0 && (
+              <div style={{ marginTop: 4, marginBottom: 4 }}>
+                {/* One row per action, so a GET is never read as a change attempt.
+                    Status list within a row is built dynamically — the vocabulary
+                    is an open set (QUEUED/COMPLETED/FAILED/CANCELLED/TIMEOUT
+                    observed so far); a hardcoded list drops real records. */}
+                {Object.entries(node.cmdCounts).map(([action, statuses]) => (
+                  <div key={action} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted }}>
+                      {freqCmdLabel(action)}:
+                    </span>
+                    {Object.entries(statuses).map(([s, count]) => (
+                      <span key={s} style={{
+                        fontFamily: 'var(--mono)', fontSize: 7,
+                        color: s === 'FAILED' ? C.red : s === 'COMPLETED' ? C.green : C.muted,
+                      }}>
+                        {count} {s.toLowerCase()}
+                      </span>
+                    ))}
+                  </div>
                 ))}
               </div>
             )}
@@ -1621,15 +1646,21 @@ function OriginatorRadioModeSection({ results }) {
         }
       })
 
-      // NetworkMode/TetherMode GET-polls — the app asking "what mode are you
-      // in right now," not a change. Grouped by mode_type + status; status
-      // list built dynamically since new values keep showing up (QUEUED,
-      // COMPLETED, FAILED, CANCELLED observed so far — don't assume that's all).
+      // NetworkMode/TetherMode records, grouped by mode_type + action + status.
+      // Most are GET-polls — the app asking "what mode are you in right now,"
+      // not a change — but action=SET does occur (MESMER carries 12 NetworkMode
+      // SETs, 6 of them COMPLETED), and those are real mode-change commands.
+      // Reporting them together buries a change command inside a poll count.
+      // Status list built dynamically since new values keep showing up (QUEUED,
+      // COMPLETED, FAILED, CANCELLED, TIMEOUT so far — don't assume that's all).
       const queries = (r.atak_radio_mode_queries || [])
-      const pollCounts = {}  // { listenOnly: {STATUS: n}, tether: {STATUS: n} }
+      const pollCounts = {}  // { listenOnly: { GET: {STATUS: n}, SET: {…} }, tether: {…} }
       queries.forEach(q => {
+        const action = q.action || ''
         if (!pollCounts[q.mode_type]) pollCounts[q.mode_type] = {}
-        pollCounts[q.mode_type][q.status] = (pollCounts[q.mode_type][q.status] || 0) + 1
+        if (!pollCounts[q.mode_type][action]) pollCounts[q.mode_type][action] = {}
+        const byStatus = pollCounts[q.mode_type][action]
+        byStatus[q.status] = (byStatus[q.status] || 0) + 1
       })
 
       if (!modeSegments.length && !queries.length && !relaySegments.length) return
@@ -1651,11 +1682,18 @@ function OriginatorRadioModeSection({ results }) {
     return h > 0 ? `${h}h ${m}m` : `${m}m`
   }
   const modeColor = m => m === 'LISTEN_ONLY' ? C.yellow : m === 'NORMAL' ? C.accent : '#94a3b8'
+  // A GET is a poll; a SET is an actual mode-change command. Neither is
+  // confirmed state — that still comes from the health record's own `mode`.
+  const modeCmdLabel = action =>
+    action === 'GET' ? 'polls'
+    : action === 'SET' ? 'change cmds'
+    : action ? `${action} cmds`
+    : 'cmds, action unknown'
   const statusColor = s => s === 'FAILED' ? C.red : s === 'COMPLETED' ? C.green : s === 'CANCELLED' ? C.muted : C.muted
 
   return (
     <>
-      <SectionHeader icon="🎛️" title="Radio Mode — All Network Nodes" sub="Confirmed listen-only/normal mode from health telemetry · relay mode from relayModeUpdated events · NetworkMode/TetherMode poll history" />
+      <SectionHeader icon="🎛️" title="Radio Mode — All Network Nodes" sub="Confirmed listen-only/normal mode from health telemetry · relay mode from relayModeUpdated events · NetworkMode/TetherMode raw commands split by action (polls vs change cmds)" />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 6, marginBottom: 16 }}>
         {modeNodes.map((node) => (
           <div key={node.gid} style={{
@@ -1717,18 +1755,20 @@ function OriginatorRadioModeSection({ results }) {
 
             {Object.keys(node.pollCounts).length > 0 && (
               <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
-                {Object.entries(node.pollCounts).map(([modeType, statuses]) => (
-                  <div key={modeType} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted }}>
-                      {modeType === 'listenOnly' ? 'NetworkMode' : 'TetherMode'} polls:
-                    </span>
-                    {Object.entries(statuses).map(([status, count]) => (
-                      <span key={status} style={{ fontFamily: 'var(--mono)', fontSize: 7, color: statusColor(status) }}>
-                        {count} {status.toLowerCase()}
+                {Object.entries(node.pollCounts).flatMap(([modeType, byAction]) =>
+                  Object.entries(byAction).map(([action, statuses]) => (
+                    <div key={`${modeType}|${action}`} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted }}>
+                        {modeType === 'listenOnly' ? 'NetworkMode' : 'TetherMode'} {modeCmdLabel(action)}:
                       </span>
-                    ))}
-                  </div>
-                ))}
+                      {Object.entries(statuses).map(([status, count]) => (
+                        <span key={status} style={{ fontFamily: 'var(--mono)', fontSize: 7, color: statusColor(status) }}>
+                          {count} {status.toLowerCase()}
+                        </span>
+                      ))}
+                    </div>
+                  ))
+                )}
               </div>
             )}
           </div>
