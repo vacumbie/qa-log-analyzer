@@ -855,20 +855,20 @@ function BatteryTab({ results }) {
 
 // ── Hop Count Map ─────────────────────────────────────────────────────────────
 
-const HOP_COLORS = {
-  1: '#00e5a0',   // green  — direct
-  2: '#ffd166',   // yellow — one relay
-  3: '#ff6b35',   // orange — two relays
-  4: '#ff4757',   // red    — three relays
-}
-const hopColor = (h) => HOP_COLORS[h] || '#ef4444'
-
-const rssiColor = (rssi) => {
+// Map-only color palette, scoped to the Hop Count map's markers and RF-link
+// lines. Kept separate from any per-component RSSI color helpers (e.g. the
+// ones inside PliTab/RssiTab, which use the standard green=good/red=bad
+// severity convention for plain text) — the map needs higher-contrast colors
+// since the original green/yellow palette blended into OpenStreetMap's light
+// basemap (green parks, tan/beige buildings).
+const MAP_HOP_COLORS = { 1: '#0080ff', 2: '#ffb400', 3: '#ff5500', 4: '#c400ff' }
+const mapHopColor = (h) => MAP_HOP_COLORS[h] || MAP_HOP_COLORS[4]
+const mapRssiColor = (rssi) => {
   if (rssi == null) return '#4a6080'
-  if (rssi >= -70)  return '#00e5a0'
-  if (rssi >= -85)  return '#ffd166'
-  if (rssi >= -100) return '#ff6b35'
-  return '#ff4757'
+  if (rssi >= -70)  return '#0080ff'
+  if (rssi >= -85)  return '#ffb400'
+  if (rssi >= -100) return '#ff5500'
+  return '#c400ff'
 }
 const rssiLabel = (rssi) => {
   if (rssi == null) return 'Unknown'
@@ -925,19 +925,30 @@ function HopCountMap({ results }) {
   }, [])
 
   // Build map data for selected device
-  const { points, senderOptions } = React.useMemo(() => {
+  const { points, senderOptions, excludedNonPliCount } = React.useMemo(() => {
     const r = atakResults.find(r => r.source_filename === selectedDevice)
-    if (!r) return { points: [], senderOptions: [] }
+    if (!r) return { points: [], senderOptions: [], excludedNonPliCount: 0 }
 
-    const msgs = (r.atak_messages || []).filter(m =>
+    const hasLocation = m =>
       !m.is_sender &&
       m.logging_user_location?.lat &&
       m.transmitted_location?.lat &&
       m.hop_count != null
-    )
+
+    const allLocated = (r.atak_messages || []).filter(hasLocation)
+
+    // transmitted_location is only a valid stand-in for "where the sender
+    // physically was" on pli messages (a PLI's whole purpose is reporting the
+    // originator's own position). On mapObject messages, transmitted_location
+    // is the coordinate of the shared object itself (a PIN, route, shape,
+    // etc.) — unrelated to the sender's real position. Plotting those as RF
+    // links draws lines to wherever that pin happens to be, not to the
+    // originator, which is why lines could point somewhere nonsensical.
+    const msgs = allLocated.filter(m => m.message_type === 'pli')
+    const excludedNonPliCount = allLocated.length - msgs.length
 
     const senders = ['ALL', ...new Set(msgs.map(m => m.originator_callsign || 'Unknown').filter(Boolean).sort())]
-    
+
     const filtered = selectedSender === 'ALL'
       ? msgs
       : msgs.filter(m => (m.originator_callsign || 'Unknown') === selectedSender)
@@ -954,7 +965,7 @@ function HopCountMap({ results }) {
       msgType:    m.message_type,
     }))
 
-    return { points: pts, senderOptions: senders }
+    return { points: pts, senderOptions: senders, excludedNonPliCount }
   }, [atakResults, selectedDevice, selectedSender])
 
   // Init map once Leaflet is ready
@@ -994,11 +1005,17 @@ function HopCountMap({ results }) {
     linesRef.current   = []
 
     const bounds = []
-    let linkCount = 0          // cap RF lines at 80 for readability
+    // Cap RF lines at 80 for readability, but sample evenly across the whole
+    // point set rather than just taking the first 80 — otherwise, on a
+    // session with more than 80 points, everything past index 80 silently
+    // gets a dot with no line at all, regardless of when in the session it
+    // happened.
+    const MAX_LINES = 80
+    const linkStride = Math.max(1, Math.ceil(points.length / MAX_LINES))
     const seenHopDiamonds = new Set()  // one diamond per hop count (max 4)
 
-    points.forEach(p => {
-      const color = hopColor(p.hops)
+    points.forEach((p, i) => {
+      const color = mapHopColor(p.hops)
       const radius = p.hops === 1 ? 7 : p.hops === 2 ? 6 : 5
 
       // Receiver dot
@@ -1020,13 +1037,39 @@ function HopCountMap({ results }) {
       markersRef.current.push(circle)
       bounds.push([p.lat, p.lon])
 
+      // Sender (originator) position marker — this is the actual moving
+      // node's reported GPS position. Previously this endpoint only existed
+      // as the far end of a sampled RF-link line with no marker at all, so
+      // a moving node's real track was invisible; only the receiver's own
+      // (usually near-static) position showed as a dot. Plotted for every
+      // point, not stride-sampled like the lines, since the whole point is
+      // to see the full trail. Hollow ring (vs. the receiver's filled dot)
+      // to visually distinguish "where the sender was" from "where the
+      // logging device was."
+      if (p.senderLat) {
+        const senderMarker = L.circleMarker([p.senderLat, p.senderLon], {
+          radius: 4,
+          fillColor: color,
+          fillOpacity: 0.25,
+          color: color,
+          weight: 1.5,
+          opacity: 0.85,
+        }).bindPopup(`
+          <div style="font-family:monospace;font-size:11px;line-height:1.6">
+            <b>${p.sender}</b> (sender position)<br/>
+            ${p.hops} hop${p.hops !== 1 ? 's' : ''} · RSSI: ${p.rssi} dBm<br/>
+            Time: ${p.time?.slice(11,19) || '—'}
+          </div>
+        `).addTo(map)
+        markersRef.current.push(senderMarker)
+        bounds.push([p.senderLat, p.senderLon])
+      }
+
       // RF link line to sender position
-      if (showLinks && p.senderLat) {
-        const lc = rssiColor(p.rssi)
+      if (showLinks && p.senderLat && i % linkStride === 0) {
+        const lc = mapRssiColor(p.rssi)
         const dist = haversineDistance(p.lat, p.lon, p.senderLat, p.senderLon)
-        // Thin lines when many points — sample to max 150 RF lines for readability
-        if (linkCount < 80) {
-          linkCount++
+        {
           const line = L.polyline([[p.lat,p.lon],[p.senderLat,p.senderLon]],
             { color: lc, weight: 1.5, opacity: 0.4, dashArray: '4,5' }).addTo(map)
           linesRef.current.push(line)
@@ -1034,7 +1077,7 @@ function HopCountMap({ results }) {
           if (!seenHopDiamonds.has(p.hops)) {
             seenHopDiamonds.add(p.hops)
             const ml = (p.lat+p.senderLat)/2, mn = (p.lon+p.senderLon)/2
-            const hc = hopColor(p.hops)
+            const hc = mapHopColor(p.hops)
             const mid = L.marker([ml,mn], {
               icon: L.divIcon({
                 className: '',
@@ -1119,11 +1162,29 @@ function HopCountMap({ results }) {
         </span>
       </div>
 
+      {excludedNonPliCount > 0 && (
+        <div style={{
+          background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6,
+          padding: '8px 12px', marginBottom: 10,
+          fontFamily: 'var(--mono)', fontSize: 9, color: C.muted,
+        }}>
+          ⚠ {excludedNonPliCount.toLocaleString()} location point{excludedNonPliCount !== 1 ? 's' : ''} excluded from this
+          map — {excludedNonPliCount !== 1 ? 'they carry' : 'it carries'} a <code>mapObject</code> location (a shared
+          pin/route/shape), not the sender&rsquo;s own position, so plotting {excludedNonPliCount !== 1 ? 'them' : 'it'} as an
+          RF link would point somewhere unrelated to where the sender actually was. Only <code>pli</code> messages
+          (position reports) are used for RF-link mapping.
+        </div>
+      )}
+
       {/* Legend */}
-      <div style={{ display: 'flex', gap: 14, marginBottom: 10, flexWrap: 'wrap' }}>
+      <div style={{
+        background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6,
+        padding: '10px 14px', marginBottom: 10,
+        display: 'flex', gap: 14, flexWrap: 'wrap',
+      }}>
         {hopCounts.map(h => (
           <div key={h} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <div style={{ width: 10, height: 10, borderRadius: '50%', background: hopColor(h), border: '1.5px solid #0d1428' }} />
+            <div style={{ width: 10, height: 10, borderRadius: '50%', background: mapHopColor(h), border: '1.5px solid #0d1428' }} />
             <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#94a3b8' }}>
               {h}{h === 4 ? '+' : ''} hop{h !== 1 ? 's' : ''}
               {countByHop[h] ? <span style={{ color: '#334155' }}> ({countByHop[h]})</span> : ''}
@@ -1131,13 +1192,25 @@ function HopCountMap({ results }) {
           </div>
         ))}
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#4a6080', border: '1.5px solid #0d1428' }} />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#334155' }}>filled = this device&rsquo;s own position</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'transparent', border: '1.5px solid #4a6080' }} />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#334155' }}>hollow = sender&rsquo;s reported position</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <div style={{ width: 18, height: 0, borderTop: '1px dashed #4a6080' }} />
           <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#334155' }}>RF link (color=RSSI, label=distance)</span>
         </div>
       </div>
 
       {showLinks && (
-        <div style={{ display:'flex', gap:12, flexWrap:'wrap', alignItems:'center', marginBottom:10 }}>
+        <div style={{
+          background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6,
+          padding: '10px 14px', marginBottom: 10,
+          display:'flex', gap:12, flexWrap:'wrap', alignItems:'center',
+        }}>
           <span style={{ fontFamily:'var(--mono)', fontSize:8, color:C.muted, textTransform:'uppercase', letterSpacing:'0.08em' }}>RF Signal:</span>
           {[
             { label:'Strong', sub:'>= -70 dBm',       color:'#00e5a0' },
