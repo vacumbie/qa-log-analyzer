@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Bar, Line } from 'react-chartjs-2'
 import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement,
@@ -167,6 +168,9 @@ function TempPeak({ results }) {
 }
 
 function BatteryOverTime({ results }) {
+  const [hiddenLabels, setHiddenLabels] = useState(new Set())
+  const [pickerOpen, setPickerOpen] = useState(false)
+
   // X axis = real wall-clock time (HH:MM UTC), Y axis = battery %
   // Each device's actual sample timestamps are used directly rather than
   // normalizing to 0-100% session, so the chart shows real time of day.
@@ -293,6 +297,7 @@ function BatteryOverTime({ results }) {
 
   const opts = {
     ...LINE_OPTS(),
+    plugins: { tooltip: TT_CFG, legend: { display: false } },
     scales: {
       x: {
         grid: { color: GRID },
@@ -344,9 +349,68 @@ function BatteryOverTime({ results }) {
     return new Set(src3.map(s => s.serial_number).filter(Boolean)).size > 1
   })
 
+  const allLabels = datasets.map(d => d.label)
+  const visibleDatasets = datasets.filter(d => !hiddenLabels.has(d.label))
+  const shownCount = allLabels.length - hiddenLabels.size
+
+  const toggleLabel = (label) => {
+    setHiddenLabels(prev => {
+      const next = new Set(prev)
+      if (next.has(label)) next.delete(label)
+      else next.add(label)
+      return next
+    })
+  }
+
   return (
     <ChartCard title="Battery % Over Time" subtitle="X axis = real time (UTC) · Y axis = battery % · one line per radio serial · ▲ = Unknown/reconnecting BLE poll" height={320}>
-      <Line data={{ labels, datasets }} options={opts} />
+      <div style={{ position: 'relative', marginBottom: 10, display: 'inline-block' }}>
+        <button
+          onClick={() => setPickerOpen(o => !o)}
+          style={{
+            fontFamily: 'var(--mono)', fontSize: 9, color: '#94a3b8',
+            background: 'var(--panel)', border: '1px solid var(--border2)', borderRadius: 5,
+            padding: '6px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+          }}
+        >
+          Radios ({shownCount}/{allLabels.length} shown) <span style={{ fontSize: 8 }}>{pickerOpen ? '▲' : '▼'}</span>
+        </button>
+        {pickerOpen && (
+          <>
+            <div onClick={() => setPickerOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 9998 }} />
+            <div style={{
+              position: 'absolute', top: '100%', left: 0, marginTop: 4,
+              background: 'var(--panel)', border: '1px solid var(--border2)', borderRadius: 6,
+              zIndex: 9999, minWidth: 320, maxWidth: 480, maxHeight: '50vh', overflowY: 'auto',
+              boxShadow: '0 8px 32px #000a', padding: 8,
+            }}>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 6, paddingBottom: 6, borderBottom: '1px solid var(--border)' }}>
+                <button
+                  onClick={() => setHiddenLabels(new Set())}
+                  style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#00d4ff', background: 'transparent', border: '1px solid #00d4ff40', borderRadius: 4, padding: '4px 8px', cursor: 'pointer' }}
+                >Select All</button>
+                <button
+                  onClick={() => setHiddenLabels(new Set(allLabels))}
+                  style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#4a6080', background: 'transparent', border: '1px solid var(--border2)', borderRadius: 4, padding: '4px 8px', cursor: 'pointer' }}
+                >Clear Selection</button>
+              </div>
+              {datasets.map(d => (
+                <label key={d.label} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '4px 4px', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 9 }}>
+                  <input
+                    type="checkbox"
+                    checked={!hiddenLabels.has(d.label)}
+                    onChange={() => toggleLabel(d.label)}
+                    style={{ accentColor: d.borderColor, cursor: 'pointer' }}
+                  />
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: d.borderColor, flexShrink: 0 }} />
+                  <span style={{ color: hiddenLabels.has(d.label) ? '#334155' : '#c8ddf4' }}>{d.label}</span>
+                </label>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+      <Line data={{ labels, datasets: visibleDatasets }} options={opts} />
       {swapNote && <DataNote text={swapNote} />}
       {hasMultiSerial && !swapNote && (
         <DataNote text="Multiple radio serials detected. Each line represents one radio — lines do not indicate simultaneous connections." />
