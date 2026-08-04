@@ -78,6 +78,14 @@ CLIENT_REQUEST_EDGE_FIXTURE = FIXTURE_DIR / "atak_client_request_edge_cases.json
 # did not turn the loader into a blanket error suppressor.
 TRUNCATED_RECORD_FIXTURE = FIXTURE_DIR / "atak_truncated_final_record.json"
 
+# Mixed-action commands, modelled on the real MESMER log (2026-06-04), which
+# carries both Frequency action=GET and NetworkMode action=SET -- neither of
+# which had been observed when the frequency/mode parsing was first written.
+# A GET is a query, not a change attempt, and a mode SET is a change command,
+# not a poll; the UI splits on `action` to label them, so `action` must survive
+# serialization. The last record omits `action` entirely: unknown, not SET.
+MIXED_ACTION_FIXTURE = FIXTURE_DIR / "atak_mixed_action_commands.json"
+
 
 # ── Fixture availability ──────────────────────────────────────────────────────
 
@@ -420,6 +428,8 @@ def test_frequency_set_attempts_extracted_with_statuses():
     assert len(attempts) == 3
     statuses = [a.status for a in attempts]
     assert statuses == ["QUEUED", "COMPLETED", "FAILED"]
+    # Every command in this fixture happens to be a SET; mixed SET/GET traffic
+    # is covered by test_frequency_get_commands_kept_and_tagged_with_their_action
     assert all(a.action == "SET" for a in attempts)
     # Hz -> MHz conversion: 464550000hz -> 464.55 MHz
     assert attempts[0].channels[0]["frequency"] == 464.55
@@ -436,10 +446,12 @@ def test_client_request_additional_info_captured():
 
 
 def test_network_mode_and_tether_mode_queries_extracted():
-    """NetworkMode/TetherMode clientRequest records are GET-polls of current
-    state, not SET commands — distinct from AtakFrequencySetAttempt. Status
-    vocabulary keeps growing (QUEUED/COMPLETED/FAILED/CANCELLED observed) —
-    don't assume a fixed set."""
+    """NetworkMode/TetherMode clientRequest records are usually GET-polls of
+    current state — distinct from AtakFrequencySetAttempt. Every record in THIS
+    fixture is a GET; action=SET also occurs in real logs and is covered by
+    test_mode_change_commands_distinguishable_from_polls. Status vocabulary keeps
+    growing (QUEUED/COMPLETED/FAILED/CANCELLED/TIMEOUT observed) — don't assume
+    a fixed set."""
     result = parse_atak_log(FREQ_DIVIDER_FIXTURE)
     queries = result.atak_radio_mode_queries
     assert len(queries) == 2
@@ -529,6 +541,9 @@ def test_relay_mode_enabled_serialized_for_ui():
 
 
 def test_relay_mode_turned_off_recorded_as_false():
+    """An explicit isRelayModeEnabled=false is a confirmed OFF, and must be
+    stored as False -- distinct from the absent-flag case below, which is
+    unknown. The pair is what keeps the UI from rendering unknown as OFF."""
     result = parse_atak_log(CLIENT_REQUEST_EDGE_FIXTURE)
     relay = [e for e in result.atak_events if e.event_type == "relayModeUpdated"]
     assert relay[0].relay_mode_enabled is False
@@ -545,8 +560,9 @@ def test_relay_mode_missing_flag_stays_none():
 
 def test_unobserved_client_request_status_preserved_verbatim():
     """The status vocabulary is documented as an open set -- QUEUED, COMPLETED,
-    FAILED and CANCELLED are what has been seen, not what is allowed. A value
-    outside that set must pass through unchanged rather than be normalized,
+    FAILED, CANCELLED and TIMEOUT are what has been seen, not what is allowed.
+    TIMED_OUT below is deliberately a value never observed in any log: a value
+    outside the known set must pass through unchanged rather than be normalized,
     bucketed as unknown, or dropped."""
     result = parse_atak_log(CLIENT_REQUEST_EDGE_FIXTURE)
     listen_only = next(q for q in result.atak_radio_mode_queries
@@ -605,6 +621,57 @@ def test_valid_records_around_a_truncated_one_still_parsed():
     result = parse_atak_log(TRUNCATED_RECORD_FIXTURE)
     assert len(result.atak_health_samples) == 1
     assert [a.status for a in result.atak_frequency_set_attempts] == ["COMPLETED"]
+
+
+def test_frequency_get_commands_kept_and_tagged_with_their_action():
+    """A Frequency command can be action=GET (asking what the radio is on) as
+    well as action=SET. GETs must be kept -- dropping them would lose real
+    observations -- but tagged with their own action, since counting a query as
+    a change attempt is what the MESMER log exposed (12 of its 28 are GETs)."""
+    result = parse_atak_log(MIXED_ACTION_FIXTURE)
+    actions = [a.action for a in result.atak_frequency_set_attempts]
+    assert actions == ["SET", "GET", "GET", ""]
+
+
+def test_mode_change_commands_distinguishable_from_polls():
+    """NetworkMode/TetherMode records are mostly GET polls, but action=SET does
+    occur and those are real mode-change commands. Both land in one list, so
+    `action` is the only thing separating a change command from a poll -- if it
+    were dropped, a confirmed mode change would be counted as a poll."""
+    result = parse_atak_log(MIXED_ACTION_FIXTURE)
+    pairs = [(q.mode_type, q.action) for q in result.atak_radio_mode_queries]
+    assert pairs == [("listenOnly", "SET"), ("listenOnly", "GET"), ("tether", "SET")]
+
+
+def test_command_action_survives_serialization():
+    """UI-data-path guard: the Freq/RSSI and Modes cards bucket by `action` to
+    label SET attempts vs GET queries and polls vs change cmds. If `action` were
+    missing from _result_to_dict() every record would collapse into one bucket
+    and the labels would silently lie again."""
+    d = _result_to_dict(parse_atak_log(MIXED_ACTION_FIXTURE))
+    assert [a["action"] for a in d["atak_frequency_set_attempts"]] == \
+        ["SET", "GET", "GET", ""]
+    assert [q["action"] for q in d["atak_radio_mode_queries"]] == \
+        ["SET", "GET", "SET"]
+
+
+def test_command_with_no_action_is_empty_not_assumed_set():
+    """A command string with no action= at all is unknown, not SET. Defaulting
+    it to SET would overstate change attempts; the UI gives it its own
+    'action unknown' bucket."""
+    result = parse_atak_log(MIXED_ACTION_FIXTURE)
+    no_action = result.atak_frequency_set_attempts[-1]
+    assert no_action.action == ""
+    assert no_action.status == "QUEUED"       # still a real, retained record
+
+
+def test_real_timeout_status_passes_through():
+    """TIMEOUT is a real observed status (MESMER, 2026-06-04) that surfaced only
+    after QUEUED/COMPLETED/FAILED/CANCELLED were documented -- direct evidence
+    the vocabulary is open. It must survive verbatim, like any other value."""
+    result = parse_atak_log(MIXED_ACTION_FIXTURE)
+    statuses = {a.status for a in result.atak_frequency_set_attempts}
+    assert "TIMEOUT" in statuses
 
 
 # ── Error handling ────────────────────────────────────────────────────────────

@@ -183,7 +183,8 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | PLI Settings "session-start" mislabeling | ✅ Done + field-verified (2026-07-29) — relabeled + gap-caveat added |
 | UI header/dropdown stacking-context bug | ✅ Done + field-verified (2026-07-29) — `overscroll-behavior: none` + header `zIndex: 100` |
 | ATAK radio-command layer — Frequency SET attempts + NetworkMode/TetherMode queries + `relayModeUpdated` | ✅ Done (2026-08-04) — 8 commits on `fix-atak-v3-filename-and-health-limitation`, not yet pushed; parser→API→UI chain verified, new Modes tab, RSSI→Freq/RSSI, field-verified by karen |
-| Status-chip render order shifts as the time window changes | ⏳ Pending (cosmetic) — `Object.entries(attemptCounts)` yields first-encountered order, which depends on which records survive the window, so chips reorder between slider positions. No data lost. Fix by sorting on a canonical status list with unrecognised values appended (keeping the open-vocabulary property) or by descending count |
+| Status-chip **and per-action row** render order shifts as the time window changes | ⏳ Pending — insertion order depends on which records survive the window. Karen found in round 4 that this now moves whole rows, not just chips: at 12h the frequency card shows `SET attempts` above `GET queries`, at 6h they flip. Higher impact than the original chip nit, since SET attempts is the row read first. Fix by ordering rows `SET → GET → unknown` and chips by a canonical status list with unrecognised values appended (keeping the open-vocabulary property) |
+| `hasFailedAttempts` is not action-scoped — a FAILED **GET** would paint the card red | ⏳ Pending — `App.jsx:1462` uses `setAttempts.some(a => a.status === 'FAILED')`, and `setAttempts` now holds both actions despite its name. Latent, not reproducible in any current log (HOTLIPS/SYNTH4 FAILEDs are all SETs; MESMER's GET failure mode is TIMEOUT). It is the last place a GET is still read as a change attempt. Fix: `a.action === 'SET' && a.status === 'FAILED'`, and rename `setAttempts` → `freqCommands` |
 | COMPLETED SET treated as confirmed frequency | ✅ Resolved (2026-08-04) — **reverted**; confirmed frequency is `frequencyUpdated` only. Enhanced logs honestly show "unknown" + attempt counts |
 | `toMs` double-`Z` → `NaN` → durations render `—` | ✅ Done (2026-08-04) — karen found live on MESMER; both sites match the correct form at `App.jsx:2744` |
 | SET-attempt status hardcoded allow-list drops real statuses | ✅ Done (2026-08-04) — dynamic; MESMER's CANCELLED + TIMEOUT no longer vanish (28 shown, was 24) |
@@ -344,8 +345,29 @@ log: 28 Frequency commands (16 SET / 12 GET) and 2,028 mode records (2,016 GET p
 SET change cmds, 6 COMPLETED). It also caught a second error: the empty-state text claimed
 "10 COMPLETED SET commands" when only **6** were SETs — the other 4 were completed GETs.
 
-*Still open on this branch (see What to Work On Next):* review of vera's test additions;
-status-chip render order shifts with the window (cosmetic); model names still lag the data.
+*Vera's test additions reviewed (2026-08-04) — kept.* Mutation-tested rather than trusted:
+three injected regressions (isControlChannel always True, absent batteryThreshold → 0,
+missing relay flag → False) were each caught by exactly the intended test, and the two new
+fixtures carry real-shaped `Gid`/`Location`/`GetDeviceAlert` payloads rather than minimal
+stubs. The review found one real gap — **no fixture had mixed `action` values**, so three
+tests encoded "Frequency is always SET, mode is always GET" and the `action`-split fix had
+zero coverage. Closed with `atak_mixed_action_commands.json` and 5 tests pinning that GETs
+are kept and tagged, mode SETs stay distinguishable from polls, `action` survives
+serialization, an absent `action` is `""` and not assumed SET, and the real `TIMEOUT` status
+passes through. Suite at **215 passed, 2 skipped**. Those 5 were mutation-checked too —
+filtering GETs out trips 4 of them.
+
+*Karen round 4 (the `action` split) — PASS.* MESMER's frequency card matches the parser
+ground truth exactly (16 SET / 12 GET), the empty state corrected from 10 to 6 COMPLETED
+SETs, and the split is provably lossless: `932 GET + 6 SET = 938`, the exact pre-fix merged
+count. All five of her original findings are now closed. One note for whoever reads her
+report: the Modes poll counts look 70 short of ground truth at the default window because
+the default snaps to 10:00–22:00 while the session runs to 22:34 — clearing the window
+lands on the exact figures. Not a miscount.
+
+*Still open on this branch (see What to Work On Next):* two items karen raised in round 4
+(row/chip render order, `hasFailedAttempts` not action-scoped); model names still lag the
+data.
 
 **2026-07-29 — Originator PLI 5s-bucket bug, PLI Settings mislabeling, and a two-layer UI header/dropdown bug (all field-verified):**
 - **Originator PLI silently dropped 5s-cadence traffic:** BARK's log showed a real ~5s PLI
