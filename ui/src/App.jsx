@@ -15,7 +15,8 @@ const TABS = [
   { id:'thermal',   label:'Thermal' },
   { id:'battery',   label:'Battery' },
   { id:'hops',      label:'Hop Count' },
-  { id:'rssi',      label:'RSSI' },
+  { id:'rssi',      label:'Freq/RSSI' },
+  { id:'modes',     label:'Modes', atakOnly: true },
   { id:'chat',      label:'Chat' },
   { id:'health',    label:'Health Score' },
   { id:'relay-health', label:'Relay Health', relayOnly: true },
@@ -351,7 +352,20 @@ function PliSettingsSection({ results }) {
     const initial = toSetting(events[0])
     const changes = events.slice(1).map(toSetting)
 
-    return { callsign, initial, changes }
+    // pliSettingUpdated only fires on a change — it does NOT log the
+    // starting configuration at session start. If the first event happens
+    // well after the session began, the setting for that earlier stretch
+    // is genuinely unknown, not "whatever this card shows."
+    let gapMinutes = null
+    if (r.session_start && events[0].timestamp) {
+      const startMs = new Date(r.session_start.replace(' ', 'T') + 'Z').getTime()
+      const firstMs = new Date(events[0].timestamp.replace(' ', 'T') + 'Z').getTime()
+      if (!isNaN(startMs) && !isNaN(firstMs) && firstMs > startMs) {
+        gapMinutes = Math.round((firstMs - startMs) / 60000)
+      }
+    }
+
+    return { callsign, initial, changes, gapMinutes }
   }).filter(d => d.initial !== null)
 
   if (!deviceSettings.length) return null
@@ -375,7 +389,7 @@ function PliSettingsSection({ results }) {
       <SectionHeader
         icon="📡"
         title="PLI Settings per Device"
-        sub="Session-start setting and mid-session changes · intervals < 60s highlighted red"
+        sub="First observed setting-change event, plus mid-session changes · pliSettingUpdated only fires on a change, so the setting before the first event is unknown · intervals < 60s highlighted red"
       />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 10, marginBottom: 16 }}>
         {deviceSettings.map((d, i) => {
@@ -389,7 +403,7 @@ function PliSettingsSection({ results }) {
                 {d.callsign}
               </div>
 
-              {/* Session-start setting */}
+              {/* First observed setting-change event (not necessarily the session-start config) */}
               <div style={{ display: 'flex', gap: 12, marginBottom: hasChanges ? 8 : 0, flexWrap: 'wrap' }}>
                 <div>
                   <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginBottom: 2 }}>INTERVAL</div>
@@ -406,10 +420,15 @@ function PliSettingsSection({ results }) {
                   </div>
                 </div>
                 <div>
-                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginBottom: 2 }}>FIRST SEEN</div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginBottom: 2 }}>FIRST CHANGE EVENT</div>
                   <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#94a3b8' }}>{iv.ts}</div>
                 </div>
               </div>
+              {d.gapMinutes !== null && d.gapMinutes >= 2 && (
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.yellow, marginTop: 6 }}>
+                  ⚠ {d.gapMinutes}m into the session before this — setting for that stretch is unknown
+                </div>
+              )}
 
               {/* Mid-session changes */}
               {hasChanges && (
@@ -483,7 +502,33 @@ function PliTab({ results }) {
         const sentPli = (r.atak_messages || [])
           .filter(m => m.message_type === 'pli' && m.is_sender && m.timestamp)
           .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
-        if (sentPli.length >= 2) {
+
+        // Prefer the self-reported interval carried on each message
+        // (message.interval — populated starting with ATAK plugin v3.0; see
+        // docs/atak_v3_early_integration_notes.md). It's ground truth, not a
+        // guess, and it captures cadences the gap-inference bucket list below
+        // can't represent at all (e.g. a genuine 5s cadence — nearest bucket
+        // is 15s, which is outside the ±25% tolerance, so gap inference
+        // silently discards it as noise). Only fall back to gap inference
+        // when NO sent PLI message on this node reports a usable interval
+        // (pre-v3.0 logs never populate this field).
+        const reported = {}
+        sentPli.forEach(m => {
+          const sec = parseInt(m.pli_interval, 10)
+          if (!isNaN(sec) && sec > 0) {
+            const iv = `${sec} seconds`
+            reported[iv] = (reported[iv] || 0) + 1
+          }
+        })
+
+        if (Object.keys(reported).length > 0) {
+          // Self-reported intervals are ground truth — the device states its own
+          // cadence — NOT inferred from send-time gaps, so the < 1-min noise floor
+          // used by gap inference below does NOT apply here. Even a short 5s
+          // session with only a few PLIs is a real cadence and must render;
+          // applying that floor here is exactly what dropped the 5s cadence.
+          Object.assign(nodeMap[nodeKey].intervalCounts, reported)
+        } else if (sentPli.length >= 2) {
           const gaps = []
           for (let i = 1; i < sentPli.length; i++) {
             const ms = new Date(sentPli[i].timestamp.replace(' ','T')+'Z').getTime()
@@ -540,7 +585,7 @@ function PliTab({ results }) {
               const c = pliColor(s)
               return <span key={iv} style={{ fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700, color: c }}>{iv.replace(' seconds', 's')}</span>
             })}
-            {!has5s && <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginLeft: 8 }}>· no 5s data in loaded files — load RSO_HagenM or Steven logs to see 5s nodes</span>}
+            {!has5s && <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.muted, marginLeft: 8 }}>· no 5s data in loaded files</span>}
           </div>
         )
       })()}
@@ -554,13 +599,16 @@ function PliTab({ results }) {
               const color    = pliColor(domSec)
               const hasChanges = realIntervals.length > 1
 
-              // Duration: count × interval_sec → h/m
+              // Duration: count × interval_sec → h/m, or seconds when under a
+              // minute (a short 5s cadence totals e.g. 15s — "0m" reads oddly)
               const fmtDur = (iv, count) => {
                 const sec = parsePliSeconds(iv)
                 if (!sec || !count) return '—'
                 const t = sec * count
                 const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60)
-                return h > 0 ? `${h}h ${m}m` : `${m}m`
+                if (h > 0) return `${h}h ${m}m`
+                if (m > 0) return `${m}m`
+                return `${t}s`
               }
               return (
                 <div key={i} style={{
@@ -807,20 +855,20 @@ function BatteryTab({ results }) {
 
 // ── Hop Count Map ─────────────────────────────────────────────────────────────
 
-const HOP_COLORS = {
-  1: '#00e5a0',   // green  — direct
-  2: '#ffd166',   // yellow — one relay
-  3: '#ff6b35',   // orange — two relays
-  4: '#ff4757',   // red    — three relays
-}
-const hopColor = (h) => HOP_COLORS[h] || '#ef4444'
-
-const rssiColor = (rssi) => {
+// Map-only color palette, scoped to the Hop Count map's markers and RF-link
+// lines. Kept separate from any per-component RSSI color helpers (e.g. the
+// ones inside PliTab/RssiTab, which use the standard green=good/red=bad
+// severity convention for plain text) — the map needs higher-contrast colors
+// since the original green/yellow palette blended into OpenStreetMap's light
+// basemap (green parks, tan/beige buildings).
+const MAP_HOP_COLORS = { 1: '#0080ff', 2: '#ffb400', 3: '#ff5500', 4: '#c400ff' }
+const mapHopColor = (h) => MAP_HOP_COLORS[h] || MAP_HOP_COLORS[4]
+const mapRssiColor = (rssi) => {
   if (rssi == null) return '#4a6080'
-  if (rssi >= -70)  return '#00e5a0'
-  if (rssi >= -85)  return '#ffd166'
-  if (rssi >= -100) return '#ff6b35'
-  return '#ff4757'
+  if (rssi >= -70)  return '#0080ff'
+  if (rssi >= -85)  return '#ffb400'
+  if (rssi >= -100) return '#ff5500'
+  return '#c400ff'
 }
 const rssiLabel = (rssi) => {
   if (rssi == null) return 'Unknown'
@@ -877,19 +925,30 @@ function HopCountMap({ results }) {
   }, [])
 
   // Build map data for selected device
-  const { points, senderOptions } = React.useMemo(() => {
+  const { points, senderOptions, excludedNonPliCount } = React.useMemo(() => {
     const r = atakResults.find(r => r.source_filename === selectedDevice)
-    if (!r) return { points: [], senderOptions: [] }
+    if (!r) return { points: [], senderOptions: [], excludedNonPliCount: 0 }
 
-    const msgs = (r.atak_messages || []).filter(m =>
+    const hasLocation = m =>
       !m.is_sender &&
       m.logging_user_location?.lat &&
       m.transmitted_location?.lat &&
       m.hop_count != null
-    )
+
+    const allLocated = (r.atak_messages || []).filter(hasLocation)
+
+    // transmitted_location is only a valid stand-in for "where the sender
+    // physically was" on pli messages (a PLI's whole purpose is reporting the
+    // originator's own position). On mapObject messages, transmitted_location
+    // is the coordinate of the shared object itself (a PIN, route, shape,
+    // etc.) — unrelated to the sender's real position. Plotting those as RF
+    // links draws lines to wherever that pin happens to be, not to the
+    // originator, which is why lines could point somewhere nonsensical.
+    const msgs = allLocated.filter(m => m.message_type === 'pli')
+    const excludedNonPliCount = allLocated.length - msgs.length
 
     const senders = ['ALL', ...new Set(msgs.map(m => m.originator_callsign || 'Unknown').filter(Boolean).sort())]
-    
+
     const filtered = selectedSender === 'ALL'
       ? msgs
       : msgs.filter(m => (m.originator_callsign || 'Unknown') === selectedSender)
@@ -906,7 +965,7 @@ function HopCountMap({ results }) {
       msgType:    m.message_type,
     }))
 
-    return { points: pts, senderOptions: senders }
+    return { points: pts, senderOptions: senders, excludedNonPliCount }
   }, [atakResults, selectedDevice, selectedSender])
 
   // Init map once Leaflet is ready
@@ -946,11 +1005,17 @@ function HopCountMap({ results }) {
     linesRef.current   = []
 
     const bounds = []
-    let linkCount = 0          // cap RF lines at 80 for readability
+    // Cap RF lines at 80 for readability, but sample evenly across the whole
+    // point set rather than just taking the first 80 — otherwise, on a
+    // session with more than 80 points, everything past index 80 silently
+    // gets a dot with no line at all, regardless of when in the session it
+    // happened.
+    const MAX_LINES = 80
+    const linkStride = Math.max(1, Math.ceil(points.length / MAX_LINES))
     const seenHopDiamonds = new Set()  // one diamond per hop count (max 4)
 
-    points.forEach(p => {
-      const color = hopColor(p.hops)
+    points.forEach((p, i) => {
+      const color = mapHopColor(p.hops)
       const radius = p.hops === 1 ? 7 : p.hops === 2 ? 6 : 5
 
       // Receiver dot
@@ -972,13 +1037,39 @@ function HopCountMap({ results }) {
       markersRef.current.push(circle)
       bounds.push([p.lat, p.lon])
 
+      // Sender (originator) position marker — this is the actual moving
+      // node's reported GPS position. Previously this endpoint only existed
+      // as the far end of a sampled RF-link line with no marker at all, so
+      // a moving node's real track was invisible; only the receiver's own
+      // (usually near-static) position showed as a dot. Plotted for every
+      // point, not stride-sampled like the lines, since the whole point is
+      // to see the full trail. Hollow ring (vs. the receiver's filled dot)
+      // to visually distinguish "where the sender was" from "where the
+      // logging device was."
+      if (p.senderLat) {
+        const senderMarker = L.circleMarker([p.senderLat, p.senderLon], {
+          radius: 4,
+          fillColor: color,
+          fillOpacity: 0.25,
+          color: color,
+          weight: 1.5,
+          opacity: 0.85,
+        }).bindPopup(`
+          <div style="font-family:monospace;font-size:11px;line-height:1.6">
+            <b>${p.sender}</b> (sender position)<br/>
+            ${p.hops} hop${p.hops !== 1 ? 's' : ''} · RSSI: ${p.rssi} dBm<br/>
+            Time: ${p.time?.slice(11,19) || '—'}
+          </div>
+        `).addTo(map)
+        markersRef.current.push(senderMarker)
+        bounds.push([p.senderLat, p.senderLon])
+      }
+
       // RF link line to sender position
-      if (showLinks && p.senderLat) {
-        const lc = rssiColor(p.rssi)
+      if (showLinks && p.senderLat && i % linkStride === 0) {
+        const lc = mapRssiColor(p.rssi)
         const dist = haversineDistance(p.lat, p.lon, p.senderLat, p.senderLon)
-        // Thin lines when many points — sample to max 150 RF lines for readability
-        if (linkCount < 80) {
-          linkCount++
+        {
           const line = L.polyline([[p.lat,p.lon],[p.senderLat,p.senderLon]],
             { color: lc, weight: 1.5, opacity: 0.4, dashArray: '4,5' }).addTo(map)
           linesRef.current.push(line)
@@ -986,7 +1077,7 @@ function HopCountMap({ results }) {
           if (!seenHopDiamonds.has(p.hops)) {
             seenHopDiamonds.add(p.hops)
             const ml = (p.lat+p.senderLat)/2, mn = (p.lon+p.senderLon)/2
-            const hc = hopColor(p.hops)
+            const hc = mapHopColor(p.hops)
             const mid = L.marker([ml,mn], {
               icon: L.divIcon({
                 className: '',
@@ -1071,11 +1162,29 @@ function HopCountMap({ results }) {
         </span>
       </div>
 
+      {excludedNonPliCount > 0 && (
+        <div style={{
+          background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6,
+          padding: '8px 12px', marginBottom: 10,
+          fontFamily: 'var(--mono)', fontSize: 9, color: C.muted,
+        }}>
+          ⚠ {excludedNonPliCount.toLocaleString()} location point{excludedNonPliCount !== 1 ? 's' : ''} excluded from this
+          map — {excludedNonPliCount !== 1 ? 'they carry' : 'it carries'} a <code>mapObject</code> location (a shared
+          pin/route/shape), not the sender&rsquo;s own position, so plotting {excludedNonPliCount !== 1 ? 'them' : 'it'} as an
+          RF link would point somewhere unrelated to where the sender actually was. Only <code>pli</code> messages
+          (position reports) are used for RF-link mapping.
+        </div>
+      )}
+
       {/* Legend */}
-      <div style={{ display: 'flex', gap: 14, marginBottom: 10, flexWrap: 'wrap' }}>
+      <div style={{
+        background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6,
+        padding: '10px 14px', marginBottom: 10,
+        display: 'flex', gap: 14, flexWrap: 'wrap',
+      }}>
         {hopCounts.map(h => (
           <div key={h} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <div style={{ width: 10, height: 10, borderRadius: '50%', background: hopColor(h), border: '1.5px solid #0d1428' }} />
+            <div style={{ width: 10, height: 10, borderRadius: '50%', background: mapHopColor(h), border: '1.5px solid #0d1428' }} />
             <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#94a3b8' }}>
               {h}{h === 4 ? '+' : ''} hop{h !== 1 ? 's' : ''}
               {countByHop[h] ? <span style={{ color: '#334155' }}> ({countByHop[h]})</span> : ''}
@@ -1083,13 +1192,25 @@ function HopCountMap({ results }) {
           </div>
         ))}
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#4a6080', border: '1.5px solid #0d1428' }} />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#334155' }}>filled = this device&rsquo;s own position</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'transparent', border: '1.5px solid #4a6080' }} />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#334155' }}>hollow = sender&rsquo;s reported position</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <div style={{ width: 18, height: 0, borderTop: '1px dashed #4a6080' }} />
           <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: '#334155' }}>RF link (color=RSSI, label=distance)</span>
         </div>
       </div>
 
       {showLinks && (
-        <div style={{ display:'flex', gap:12, flexWrap:'wrap', alignItems:'center', marginBottom:10 }}>
+        <div style={{
+          background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6,
+          padding: '10px 14px', marginBottom: 10,
+          display:'flex', gap:12, flexWrap:'wrap', alignItems:'center',
+        }}>
           <span style={{ fontFamily:'var(--mono)', fontSize:8, color:C.muted, textTransform:'uppercase', letterSpacing:'0.08em' }}>RF Signal:</span>
           {[
             { label:'Strong', sub:'>= -70 dBm',       color:'#00e5a0' },
@@ -1215,6 +1336,501 @@ function HopsTab({ results }) {
   )
 }
 
+// Raw radio-command groupings are keyed by values from open vocabularies, so
+// their insertion order depends on which records happen to survive the time
+// window — dragging the slider would otherwise reshuffle rows and chips, with
+// SET attempts jumping above and below GET queries between positions. These
+// give a stable render order. Unrecognised values sort last (alphabetically
+// among themselves) but are never dropped: that is the whole point of treating
+// the vocabularies as open.
+const ACTION_ORDER    = ['SET', 'GET']
+const STATUS_ORDER    = ['QUEUED', 'COMPLETED', 'FAILED', 'CANCELLED', 'TIMEOUT']
+const MODE_TYPE_ORDER = ['listenOnly', 'tether']
+
+function sortedEntries(obj, order) {
+  const rank = key => {
+    const i = order.indexOf(key)
+    return i < 0 ? order.length : i
+  }
+  return Object.entries(obj).sort(
+    ([a], [b]) => rank(a) - rank(b) || a.localeCompare(b)
+  )
+}
+
+function OriginatorFrequencySection({ results }) {
+  const freqNodes = React.useMemo(() => {
+    const nodes = []
+    results.filter(r => r.log_format === 'atak').forEach(r => {
+      const fnCallsign = r.source_filename
+        ? r.source_filename.replace(/^diagnostic_/, '').replace(/^ATAK_/, '').replace(/_?\d{10,}_.*$/, '').replace(/_/g, ' ').trim()
+        : ''
+      const callsign = r.device?.callsign || fnCallsign || r.source_filename
+      const gid = r.device?.gid || callsign
+
+      // Average/median RSSI for this device, from received messages only —
+      // sent-message RSSI is always 0 (placeholder, not a real reading).
+      const rssiVals = (r.atak_messages || [])
+        .filter(m => !m.is_sender && m.rssi != null)
+        .map(m => m.rssi)
+      // If every received RSSI is exactly 0, this is the same early-integration
+      // gap seen elsewhere (RSSI not populated by this FW/radio yet) — an
+      // average of "0 dBm" would misleadingly read as a real (excellent) signal.
+      const allZero = rssiVals.length > 0 && rssiVals.every(v => v === 0)
+      let avgRssi = null, medRssi = null
+      if (rssiVals.length && !allZero) {
+        avgRssi = Math.round(rssiVals.reduce((a, b) => a + b, 0) / rssiVals.length)
+        const sorted = [...rssiVals].sort((a, b) => a - b)
+        const mid = Math.floor(sorted.length / 2)
+        medRssi = sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+      }
+
+      // Frequency changes are discrete config events, not per-message samples
+      // (unlike PLI interval, which is reported on every message) — so
+      // duration per config is the time between consecutive frequencyUpdated
+      // events, not a count of messages.
+      const freqEvents = (r.atak_events || [])
+        .filter(e => e.event_type === 'frequencyUpdated' && e.timestamp)
+        .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+
+      // Frequency SET command attempts — the raw radio-command layer,
+      // extracted from SDK Logging 2.0 clientRequest records. Distinct from
+      // frequencyUpdated: an attempt can be QUEUED, then COMPLETED or
+      // FAILED at the radio, and a FAILED attempt likely never produces a
+      // confirming frequencyUpdated event at all. Shown separately so a
+      // failed attempt doesn't get confused with a confirmed change.
+      // Named freqCommands, not setAttempts: this list holds every Frequency
+      // command, GET as well as SET (the serialized key keeps its original name).
+      const freqCommands = (r.atak_frequency_set_attempts || [])
+        .filter(a => a.timestamp)
+        .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+      // Bucket by action, THEN status. A Frequency(...) command can be a SET
+      // (change the radio) or a GET (ask what it's on) — MESMER carries 12 of
+      // the latter. Counting them together reports GETs as change attempts.
+      // Records whose action didn't parse get their own bucket rather than
+      // being folded into SET, which would overstate change attempts.
+      const cmdCounts = {}   // { SET: {QUEUED: n, …}, GET: {…}, '': {…} }
+      freqCommands.forEach(a => {
+        const action = a.action || ''
+        if (!cmdCounts[action]) cmdCounts[action] = {}
+        cmdCounts[action][a.status] = (cmdCounts[action][a.status] || 0) + 1
+      })
+
+      // SDK Logging 2.0 timestamps already end in 'Z'; parser-normalized ones
+      // ("YYYY-MM-DD HH:MM:SS.ffffff") don't. Appending a second 'Z' yields an
+      // Invalid Date, so durations silently render as '—'.
+      const toMs = ts => new Date(ts.replace(' ', 'T') + (ts.includes('Z') ? '' : 'Z')).getTime()
+
+      const chKey = ch => (ch || []).map(c => `${c.frequency}${c.isControlChannel ? '*' : ''}`).sort().join(',')
+      const chLabel = ch => {
+        if (!ch || !ch.length) return '—'
+        const sorted = [...ch].sort((a, b) => (a.frequency||0) - (b.frequency||0))
+        const shown = sorted.slice(0, 2).map(c => `${c.frequency}${c.isControlChannel ? '★' : ''}`)
+        return shown.join(', ') + (sorted.length > 2 ? ` +${sorted.length - 2}` : '')
+      }
+
+      // Confirmed frequency comes ONLY from the frequencyUpdated event. A
+      // COMPLETED SET is a radio-command ack, not confirmation the radio is
+      // operating on that config, so it is NOT promoted here — it stays in the
+      // attempt counts below. Enhanced logs emit no frequencyUpdated events at
+      // all (e.g. CL_B: 6 COMPLETED SETs, 0 events), so for those the honest
+      // answer is "confirmed frequency unknown, N attempts observed".
+      // Only a COMPLETED *SET* is worth naming in the empty state — a COMPLETED
+      // GET just means a successful query and says nothing about configuration.
+      const completedSetCount = freqCommands.filter(
+        a => a.status === 'COMPLETED' && a.action === 'SET'
+      ).length
+      const confirmedChanges = freqEvents
+        .map(e => ({ timestamp: e.timestamp, channels: e.channels }))
+        .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+
+      const sessionStartMs = r.session_start ? toMs(r.session_start) : (confirmedChanges[0] ? toMs(confirmedChanges[0].timestamp) : null)
+      const sessionEndMs   = r.session_end   ? toMs(r.session_end)   : null
+
+      const segments = []           // { key, label, durationSec }
+      const durByKey = {}
+      // Stretch before the first confirmed change has an unknown config —
+      // same honesty pattern as PLI Settings: don't imply we know what it was.
+      let unknownLeadSec = 0
+      if (confirmedChanges.length && sessionStartMs != null) {
+        const gap = (toMs(confirmedChanges[0].timestamp) - sessionStartMs) / 1000
+        if (gap > 0) unknownLeadSec = gap
+      }
+
+      confirmedChanges.forEach((e, i) => {
+        const startMs = toMs(e.timestamp)
+        const endMs = i + 1 < confirmedChanges.length ? toMs(confirmedChanges[i + 1].timestamp) : sessionEndMs
+        const durSec = endMs != null ? Math.max(0, (endMs - startMs) / 1000) : 0
+        const key = chKey(e.channels)
+        durByKey[key] = (durByKey[key] || 0) + durSec
+        if (!segments.some(s => s.key === key)) {
+          segments.push({ key, label: chLabel(e.channels) })
+        }
+      })
+
+      if (!freqEvents.length && !rssiVals.length && !freqCommands.length) return  // nothing to show for this device
+      nodes.push({
+        callsign, gid,
+        hasChanges: segments.length > 1,
+        segments: segments.map(s => ({ ...s, durationSec: durByKey[s.key] })),
+        unknownLeadSec,
+        // `current` is the config from the chronologically LAST confirmed change,
+        // not the last element of `segments` — that array is ordered by first
+        // appearance, so a config the radio returns to late in the session loses
+        // the badge to whichever distinct config happened to appear last
+        // (VALERIE ends on 445.5, but 450 was the last *new* config seen).
+        lastKey: confirmedChanges.length
+          ? chKey(confirmedChanges[confirmedChanges.length - 1].channels)
+          : null,
+        avgRssi, medRssi, allZero, rssiCount: rssiVals.length,
+        // Red border means "a change attempt failed." A failed GET is a failed
+        // query — it says nothing about whether the radio was reconfigured, so
+        // it must not raise the same alarm.
+        cmdCounts,
+        hasFailedAttempts: freqCommands.some(a => a.action === 'SET' && a.status === 'FAILED'),
+        completedSetCount,
+      })
+    })
+    return nodes.sort((a, b) => a.callsign.localeCompare(b.callsign))
+  }, [results])
+
+  if (!freqNodes.length) return null
+
+  const fmtDur = sec => {
+    if (!sec) return '—'
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60)
+    return h > 0 ? `${h}h ${m}m` : `${m}m`
+  }
+  const rssiColor = (dbm) => dbm >= -70 ? C.green : dbm >= -85 ? C.yellow : C.red
+  // Label raw-command rows by action. An unrecognised action is shown verbatim
+  // rather than guessed at — the vocabulary here is as open as the status one.
+  const freqCmdLabel = action =>
+    action === 'SET' ? 'SET attempts (raw cmd)'
+    : action === 'GET' ? 'GET queries (raw cmd)'
+    : action ? `${action} commands (raw cmd)`
+    : 'commands, action unknown (raw cmd)'
+
+  return (
+    <>
+      <SectionHeader icon="📻" title="Originator Frequency — All Network Nodes" sub="Confirmed config from frequencyUpdated events (duration per config) · raw radio commands split by action (SET attempts vs GET queries), incl. failures · avg/median RSSI from received messages" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 6, marginBottom: 16 }}>
+        {freqNodes.map((node, i) => (
+          <div key={i} style={{
+            background: 'var(--panel)', border: '1px solid var(--border)',
+            borderLeft: `3px solid ${node.hasChanges ? C.yellow : node.hasFailedAttempts ? C.red : C.accent}`,
+            borderRadius: 5, padding: '10px 12px', minHeight: 140,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 }}>
+              <div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: '#c8ddf4', fontWeight: 700 }}>{node.callsign}</div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.dim, marginTop: 1 }}>{node.gid}</div>
+              </div>
+              {node.hasChanges && (
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.yellow, background: `${C.yellow}15`, border: `1px solid ${C.yellow}40`, borderRadius: 3, padding: '2px 7px', whiteSpace: 'nowrap' }}>
+                  ⚠ MIXED
+                </div>
+              )}
+            </div>
+
+            {node.unknownLeadSec > 0 && (
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted, marginBottom: 5 }}>
+                ⚠ first {fmtDur(node.unknownLeadSec)} of session — config unknown (no event yet)
+              </div>
+            )}
+
+            {node.segments.map((s) => (
+              <div key={s.key} style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+                <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 15, fontWeight: 700, color: s.key === node.lastKey ? C.accent : '#94a3b8', lineHeight: 1.3 }}>
+                  {s.label} <span style={{ fontSize: 9, color: C.dim }}>MHz</span>
+                </span>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#94a3b8' }}>
+                  {fmtDur(s.durationSec)}
+                </span>
+                {s.key === node.lastKey && (
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.accent }}>current</span>
+                )}
+              </div>
+            ))}
+            {!node.segments.length && (
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.dim, marginBottom: 4 }}>
+                No confirmed frequency — no frequencyUpdated events in this log
+                {node.completedSetCount > 0 && (
+                  <>. {node.completedSetCount} COMPLETED SET command{node.completedSetCount > 1 ? 's' : ''} observed
+                  (counted below) — a command ack is not confirmation of radio state</>
+                )}
+              </div>
+            )}
+
+            {Object.keys(node.cmdCounts).length > 0 && (
+              <div style={{ marginTop: 4, marginBottom: 4 }}>
+                {/* One row per action, so a GET is never read as a change attempt.
+                    Status list within a row is built dynamically — the vocabulary
+                    is an open set (QUEUED/COMPLETED/FAILED/CANCELLED/TIMEOUT
+                    observed so far); a hardcoded list drops real records. */}
+                {sortedEntries(node.cmdCounts, ACTION_ORDER).map(([action, statuses]) => (
+                  <div key={action} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted }}>
+                      {freqCmdLabel(action)}:
+                    </span>
+                    {sortedEntries(statuses, STATUS_ORDER).map(([s, count]) => (
+                      <span key={s} style={{
+                        fontFamily: 'var(--mono)', fontSize: 7,
+                        color: s === 'FAILED' ? C.red : s === 'COMPLETED' ? C.green : C.muted,
+                      }}>
+                        {count} {s.toLowerCase()}
+                      </span>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)', display: 'flex', gap: 14 }}>
+              <div>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 16, fontWeight: 700, color: node.avgRssi != null ? rssiColor(node.avgRssi) : C.dim, lineHeight: 1 }}>
+                  {node.avgRssi != null ? `${node.avgRssi}` : '—'}
+                </div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted }}>avg dBm</div>
+              </div>
+              <div>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 16, fontWeight: 700, color: node.medRssi != null ? rssiColor(node.medRssi) : C.dim, lineHeight: 1 }}>
+                  {node.medRssi != null ? `${node.medRssi}` : '—'}
+                </div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted }}>median dBm</div>
+              </div>
+            </div>
+            {node.allZero && (
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted, marginTop: 4 }}>
+                ⚠ all {node.rssiCount} received RSSI readings are 0 — not real signal data (known early-integration gap)
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
+  )
+}
+
+function OriginatorRadioModeSection({ results }) {
+  const modeNodes = React.useMemo(() => {
+    const nodes = []
+    results.filter(r => r.log_format === 'atak').forEach(r => {
+      const fnCallsign = r.source_filename
+        ? r.source_filename.replace(/^diagnostic_/, '').replace(/^ATAK_/, '').replace(/_?\d{10,}_.*$/, '').replace(/_/g, ' ').trim()
+        : ''
+      const callsign = r.device?.callsign || fnCallsign || r.source_filename
+      const gid = r.device?.gid || callsign
+
+      // SDK Logging 2.0 timestamps already end in 'Z'; parser-normalized ones
+      // ("YYYY-MM-DD HH:MM:SS.ffffff") don't. Appending a second 'Z' yields an
+      // Invalid Date, so durations silently render as '—'.
+      const toMs = ts => new Date(ts.replace(' ', 'T') + (ts.includes('Z') ? '' : 'Z')).getTime()
+
+      // Confirmed mode changes come from health telemetry's own `mode` field
+      // (NORMAL / LISTEN_ONLY observed so far) — this is continuous, periodic
+      // ground truth, unlike Frequency's discrete change events. Segment
+      // duration is the time between consecutive samples with a different
+      // mode value.
+      const healthSamples = (r.atak_health_samples || [])
+        .filter(h => h.mode && h.timestamp)
+        .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+
+      const segments = []
+      healthSamples.forEach((h) => {
+        const last = segments[segments.length - 1]
+        if (last && last.mode === h.mode) {
+          last.endMs = toMs(h.timestamp)
+        } else {
+          segments.push({ mode: h.mode, startMs: toMs(h.timestamp), endMs: toMs(h.timestamp) })
+        }
+      })
+      const modeSegments = segments.map(s => ({ mode: s.mode, durationSec: Math.max(0, (s.endMs - s.startMs) / 1000) }))
+
+      // Relay mode — a discrete event (relayModeUpdated), not continuous
+      // telemetry like health.mode. Same event-boundary segment pattern as
+      // Frequency: duration is time to the next event (or session end), and
+      // the stretch before the first event has an unknown relay state.
+      const relayEvents = (r.atak_events || [])
+        .filter(e => e.event_type === 'relayModeUpdated' && e.timestamp)
+        .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+      const sessionStartMs = r.session_start ? toMs(r.session_start) : null
+      const sessionEndMs   = r.session_end   ? toMs(r.session_end)   : null
+
+      let relayUnknownLeadSec = 0
+      if (relayEvents.length && sessionStartMs != null) {
+        const gap = (toMs(relayEvents[0].timestamp) - sessionStartMs) / 1000
+        if (gap > 0) relayUnknownLeadSec = gap
+      }
+      const relaySegments = []
+      relayEvents.forEach((e, i) => {
+        const last = relaySegments[relaySegments.length - 1]
+        const startMs = toMs(e.timestamp)
+        const endMs = i + 1 < relayEvents.length ? toMs(relayEvents[i + 1].timestamp) : sessionEndMs
+        const durSec = endMs != null ? Math.max(0, (endMs - startMs) / 1000) : 0
+        if (last && last.enabled === e.relay_mode_enabled) {
+          last.durationSec += durSec
+        } else {
+          relaySegments.push({ enabled: e.relay_mode_enabled, durationSec: durSec })
+        }
+      })
+
+      // NetworkMode/TetherMode records, grouped by mode_type + action + status.
+      // Most are GET-polls — the app asking "what mode are you in right now,"
+      // not a change — but action=SET does occur (MESMER carries 12 NetworkMode
+      // SETs, 6 of them COMPLETED), and those are real mode-change commands.
+      // Reporting them together buries a change command inside a poll count.
+      // Status list built dynamically since new values keep showing up (QUEUED,
+      // COMPLETED, FAILED, CANCELLED, TIMEOUT so far — don't assume that's all).
+      const queries = (r.atak_radio_mode_queries || [])
+      const pollCounts = {}  // { listenOnly: { GET: {STATUS: n}, SET: {…} }, tether: {…} }
+      queries.forEach(q => {
+        const action = q.action || ''
+        if (!pollCounts[q.mode_type]) pollCounts[q.mode_type] = {}
+        if (!pollCounts[q.mode_type][action]) pollCounts[q.mode_type][action] = {}
+        const byStatus = pollCounts[q.mode_type][action]
+        byStatus[q.status] = (byStatus[q.status] || 0) + 1
+      })
+
+      if (!modeSegments.length && !queries.length && !relaySegments.length) return
+      nodes.push({
+        callsign, gid,
+        hasChanges: new Set(modeSegments.map(s => s.mode)).size > 1 || new Set(relaySegments.map(s => s.enabled)).size > 1,
+        modeSegments, pollCounts,
+        relaySegments, relayUnknownLeadSec,
+      })
+    })
+    return nodes.sort((a, b) => a.callsign.localeCompare(b.callsign))
+  }, [results])
+
+  if (!modeNodes.length) return null
+
+  const fmtDur = sec => {
+    if (!sec) return '—'
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60)
+    return h > 0 ? `${h}h ${m}m` : `${m}m`
+  }
+  const modeColor = m => m === 'LISTEN_ONLY' ? C.yellow : m === 'NORMAL' ? C.accent : '#94a3b8'
+  // A GET is a poll; a SET is an actual mode-change command. Neither is
+  // confirmed state — that still comes from the health record's own `mode`.
+  const modeCmdLabel = action =>
+    action === 'GET' ? 'polls'
+    : action === 'SET' ? 'change cmds'
+    : action ? `${action} cmds`
+    : 'cmds, action unknown'
+  const statusColor = s => s === 'FAILED' ? C.red : s === 'COMPLETED' ? C.green : s === 'CANCELLED' ? C.muted : C.muted
+
+  return (
+    <>
+      <SectionHeader icon="🎛️" title="Radio Mode — All Network Nodes" sub="Confirmed listen-only/normal mode from health telemetry · relay mode from relayModeUpdated events · NetworkMode/TetherMode raw commands split by action (polls vs change cmds)" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 6, marginBottom: 16 }}>
+        {modeNodes.map((node) => (
+          <div key={node.gid} style={{
+            background: 'var(--panel)', border: '1px solid var(--border)',
+            borderLeft: `3px solid ${node.hasChanges ? C.yellow : C.accent}`,
+            borderRadius: 5, padding: '10px 12px', minHeight: 120,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 }}>
+              <div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: '#c8ddf4', fontWeight: 700 }}>{node.callsign}</div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.dim, marginTop: 1 }}>{node.gid}</div>
+              </div>
+              {node.hasChanges && (
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.yellow, background: `${C.yellow}15`, border: `1px solid ${C.yellow}40`, borderRadius: 3, padding: '2px 7px', whiteSpace: 'nowrap' }}>
+                  ⚠ MIXED
+                </div>
+              )}
+            </div>
+
+            {node.modeSegments.map((s, j) => (
+              <div key={j} style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+                <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 15, fontWeight: 700, color: modeColor(s.mode), lineHeight: 1.3 }}>
+                  {s.mode}
+                </span>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#94a3b8' }}>
+                  {fmtDur(s.durationSec)}
+                </span>
+                {j === node.modeSegments.length - 1 && (
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.accent }}>current</span>
+                )}
+              </div>
+            ))}
+            {!node.modeSegments.length && (
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: C.dim, marginBottom: 4 }}>No health telemetry with a mode value in this log</div>
+            )}
+
+            {node.relaySegments.length > 0 && (
+              <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
+                {node.relayUnknownLeadSec > 0 && (
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted, marginBottom: 4 }}>
+                    ⚠ first {fmtDur(node.relayUnknownLeadSec)} of session — relay state unknown (no event yet)
+                  </div>
+                )}
+                {node.relaySegments.map((s, j) => (
+                  <div key={j} style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 15, fontWeight: 700, color: s.enabled ? C.green : C.muted, lineHeight: 1.3 }}>
+                      RELAY {s.enabled ? 'ON' : 'OFF'}
+                    </span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#94a3b8' }}>
+                      {fmtDur(s.durationSec)}
+                    </span>
+                    {j === node.relaySegments.length - 1 && (
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.accent }}>current</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {Object.keys(node.pollCounts).length > 0 && (
+              <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
+                {sortedEntries(node.pollCounts, MODE_TYPE_ORDER).flatMap(([modeType, byAction]) =>
+                  sortedEntries(byAction, ACTION_ORDER).map(([action, statuses]) => (
+                    <div key={`${modeType}|${action}`} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted }}>
+                        {modeType === 'listenOnly' ? 'NetworkMode' : 'TetherMode'} {modeCmdLabel(action)}:
+                      </span>
+                      {sortedEntries(statuses, STATUS_ORDER).map(([status, count]) => (
+                        <span key={status} style={{ fontFamily: 'var(--mono)', fontSize: 7, color: statusColor(status) }}>
+                          {count} {status.toLowerCase()}
+                        </span>
+                      ))}
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
+  )
+}
+
+function ModesTab({ results }) {
+  // This tab is atakOnly, so an ATAK log is always loaded here. The real empty
+  // case is an ATAK log carrying none of the three mode sources — e.g. the
+  // v3.0 builds that emit zero connectionState (device-health) records.
+  const atakResults = results.filter(r => r.log_format === 'atak')
+  const hasModeData = atakResults.some(r =>
+    (r.atak_health_samples || []).some(h => h.mode) ||
+    (r.atak_radio_mode_queries || []).length > 0 ||
+    (r.atak_events || []).some(e => e.event_type === 'relayModeUpdated')
+  )
+  return (
+    <div>
+      {!hasModeData && (
+        <Note>
+          No radio mode data in the loaded ATAK log{atakResults.length > 1 ? 's' : ''} — no
+          device-health records carrying a <b>mode</b> field, no NetworkMode/TetherMode polls,
+          and no <b>relayModeUpdated</b> events. Some ATAK plug-in v3.0 builds emit zero
+          connectionState (device-health) records for a session, which also removes the
+          confirmed listen-only/normal mode source.
+        </Note>
+      )}
+      <OriginatorRadioModeSection results={results} />
+    </div>
+  )
+}
+
 function RssiTab({ results }) {
   const hasGripRssi = results.some(r =>
     (r.grip_messages || []).some(g => g.direction === 'incoming' && g.rssi != null)
@@ -1246,6 +1862,7 @@ function RssiTab({ results }) {
 
   return (
     <div>
+      <OriginatorFrequencySection results={results} />
       <SectionHeader
         icon="📡"
         title="RSSI by Hop Count"
@@ -1779,7 +2396,7 @@ function AtakTab({ results }) {
       <SectionHeader icon="📡" title="Connection State Over Time" sub="CONNECTED vs CONNECTING health samples" />
       <ChartPanel results={atakResults} selectedPoints={['atak_connection_state']} />
 
-      <SectionHeader icon="🗓️" title="Device Events Timeline" sub="Connect · Disconnect · Power · PLI · Frequency changes" />
+      <SectionHeader icon="🗓️" title="Device Events Timeline" sub="Connect · Disconnect · Power · PLI · Frequency · Relay changes" />
       <ChartPanel results={atakResults} selectedPoints={['atak_events_timeline']} />
 
       {atakResults.some(r => (r.summary?.partially_received || 0) > 0) && (
@@ -2089,6 +2706,7 @@ function TabContent({ tab, results }) {
     case 'battery':   return <BatteryTab   results={results} />
     case 'hops':      return <HopsTab      results={results} />
     case 'rssi':      return <RssiTab      results={results} />
+    case 'modes':     return <ModesTab     results={results} />
     case 'chat':      return <ChatTab      results={results} />
     case 'health':      return <HealthTab      results={results} />
     case 'relay-health':
@@ -2136,11 +2754,11 @@ function LogSelector({ results, activeDevice, setActiveDevice }) {
 
       {open && (
         <>
-          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 49 }} />
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 9998 }} />
           <div style={{
             position: 'absolute', top: '100%', left: 0, marginTop: 4,
             background: 'var(--panel)', border: '1px solid var(--border2)',
-            borderRadius: 6, zIndex: 50, minWidth: 280, maxWidth: 420,
+            borderRadius: 6, zIndex: 9999, minWidth: 280, maxWidth: 420,
             boxShadow: '0 8px 32px #000a',
             maxHeight: '60vh', overflowY: 'auto',
           }}>
@@ -2242,6 +2860,17 @@ export default function App() {
       const atakHlth  = (r.atak_health_samples|| []).filter(h => inWindow(h.timestamp))
       const gripMsgs  = (r.grip_messages      || []).filter(g => inWindow(g.timestamp))
       const gripXfers = (r.grip_transfers     || []).filter(t => inWindow(t.start_timestamp))
+      // Radio-command layer — timestamps here are the raw SDK 2.0 ISO '…Z' form
+      // rather than the parser-normalized one, which inWindow() already handles.
+      const atakFreq  = (r.atak_frequency_set_attempts || []).filter(a => inWindow(a.timestamp))
+      const atakModeQ = (r.atak_radio_mode_queries     || []).filter(q => inWindow(q.timestamp))
+      // Config-change events (frequencyUpdated, relayModeUpdated, PLI settings,
+      // connect/disconnect). Windowing these keeps the Modes card's relay
+      // segments on the same time range as its health-derived mode segments,
+      // and makes the ATAK Events Timeline follow the slider like every other
+      // time series. `ble_fail_count` is unaffected — it comes from the
+      // SDK-error aggregate and is carried over whole below.
+      const atakEvts  = (r.atak_events                 || []).filter(e => inWindow(e.timestamp))
 
       // Recompute summary fields that derive from the filtered arrays
       const hops     = msgs.map(m => m.hop_count).filter(Boolean)
@@ -2311,6 +2940,9 @@ export default function App() {
         atak_health_samples:  atakHlth,
         grip_messages:        gripMsgs,
         grip_transfers:       gripXfers,
+        atak_events:                 atakEvts,
+        atak_frequency_set_attempts: atakFreq,
+        atak_radio_mode_queries:     atakModeQ,
         summary: { ...r.summary, ...recomputed },
       }
     })
@@ -2359,6 +2991,7 @@ export default function App() {
         WebkitBackdropFilter: 'blur(12px)',
         borderBottom: '1px solid var(--border2)',
         display: 'flex', alignItems: 'center', gap: 20,
+        position: 'relative', zIndex: 100,
       }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
           <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 18, fontWeight: 700, letterSpacing: '0.06em', color: '#c8ddf4' }}>

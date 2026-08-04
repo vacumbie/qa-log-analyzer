@@ -32,8 +32,11 @@ def _detect_format(filename: str, content: str) -> str:
 
     Detection order:
       1. FW Log        — bracket pattern [digits-digits, MODULE, LEVEL] with TRX/RELAY/TPORT
-      2. ATAK          — filename starts with 'diagnostic_ATAK_' or content is JSON
-                         with ATAK-specific fields (logId, connectionState, appVersion)
+      2. ATAK          — filename starts with 'diagnostic_ATAK_' (legacy), or
+                         content is JSON with ATAK-specific fields (logId,
+                         connectionState, atakVersion, deliveryStatus). ATAK
+                         plugin v3.0 filenames drop the 'ATAK_' segment, so
+                         those are detected by content here, not by filename.
       3. Relay Manager — filename or content signals the goTenna Relay Manager app
       4. RSDK          — filename contains 'rsdk' or content has RSDK line markers
       5. Diagnostic    — fallback (goTenna Pro+ block format)
@@ -46,7 +49,8 @@ def _detect_format(filename: str, content: str) -> str:
         return "fw_log"
 
     # ── ATAK detection ────────────────────────────────────────────────────────
-    # Filename convention: diagnostic_ATAK_<CALLSIGN>_<GID>_<DATE>.log
+    # Filename convention (legacy): diagnostic_ATAK_<CALLSIGN>_<GID>_<DATE>.log
+    # v3.0 drops the ATAK_ segment — those files match the content check below.
     if "diagnostic_atak_" in name:
         return "atak"
     # Content: ATAK logs are JSON arrays/objects with these distinctive fields
@@ -293,6 +297,9 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
                 "log_id":              m.log_id,
                 "message_timestamp":   m.message_timestamp,
                 "is_sender":           m.is_sender,
+                # sender_callsign intentionally NOT serialized — it is an internal
+                # fallback source for device.callsign only (see log-field-definitions.md);
+                # no UI consumer. device.callsign carries the resolved identity to the UI.
                 "sender_gid":          m.sender_gid,
                 "delivery_status":     m.delivery_status,
                 "segment_count":       m.segment_count,
@@ -330,8 +337,33 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
                 "location":         e.location,
                 "update_status":    e.update_status,
                 "update_time_ms":   e.update_time_ms,
+                "relay_mode_enabled": e.relay_mode_enabled,
             }
             for e in r.atak_events
+        ]
+
+        # Frequency SET command attempts — raw radio-command layer, distinct
+        # from confirmed frequencyUpdated events (see AtakFrequencySetAttempt)
+        base["atak_frequency_set_attempts"] = [
+            {
+                "timestamp": a.timestamp,
+                "status":    a.status,
+                "action":    a.action,
+                "channels":  a.channels,
+            }
+            for a in r.atak_frequency_set_attempts
+        ]
+
+        base["atak_radio_mode_queries"] = [
+            {
+                "timestamp":          q.timestamp,
+                "mode_type":          q.mode_type,
+                "value":              q.value,
+                "status":             q.status,
+                "battery_threshold":  q.battery_threshold,
+                "action":             q.action,
+            }
+            for q in r.atak_radio_mode_queries
         ]
 
         # SDK Logging 2.0 summary — None if no sdkError records were present

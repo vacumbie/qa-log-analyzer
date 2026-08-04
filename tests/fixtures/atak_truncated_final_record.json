@@ -1,0 +1,7 @@
+[{"timestampInMillis":1780575305889,"event":{"type":"powerLevelUpdated","power":1.0}},
+{"serialNumber":"PNE234200704","connectionState":"CONNECTED","batteryLevel":77,"isCharging":false,"connectionType":"BLE","mode":"NORMAL","firmwareVersion":"3.2.11","storedMessages":0,"powerAmpTemperature":31,"systemTemperature":29,"transmitPowerDifferential":255,"hardwareVersion":9,"bootloaderVersion":20,"chipArchitecture":"LEGACY_NXP","errorCode":"SystemErrorCodes(errorValue=0)","gid":90296226464906,"timestampInMillis":1780610710000}]
+
+--- RSDK LOGS ---
+
+{"id":"cccccccc-0000-0000-0000-000000000001","timestamp":"2026-06-04T12:14:37.566138Z","tags":["ERROR","RADIO"],"message":{"deviceState":{"platformType":"ANDROID","connectionType":"BLE","serialNumber":"PNE234200704","address":"DF:97:C9:3D:EC:E3","connectionState":"CONNECTED","personalGid":90296226464906,"batteryLevel":99,"firmwareVersion":"3.2.11","radioType":"PRO_X_2","mcuuuid":"0032ffffffffffff4e4573952017000b","endorsements":"PREMIUM"},"clientRequest":{"sequenceNumber":100,"additionalInfo":"","requestType":"j","rawMessageData":"","rawRequest":"Frequency(channels=[Frequency: 464550000hz isControlChannel: YES], messageId=0, creationTime=1780437271277, action=SET, _bytes=[], sequenceId=-1)","sanitizedRequest":"","status":"COMPLETED"}}}
+{"id":"cccccccc-0000-0000-0000-000000000002","timestamp":"2026-06-04T12:14:38.000000Z","tags":["ERROR","RADIO"]

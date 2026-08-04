@@ -1,5 +1,5 @@
 # QA Log Analyzer — Session Summary
-_Last updated: 2026-06-16_
+_Last updated: 2026-08-04_
 
 ---
 
@@ -86,7 +86,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 
 ---
 
-## 14 Tabs (Current State)
+## 15 Tabs (Current State)
 
 | # | Tab Key | Name | Gate | Status |
 |---|---------|------|------|--------|
@@ -97,13 +97,14 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | 5 | `thermal` | Thermal | Always | ✅ |
 | 6 | `battery` | Battery | Always | ✅ |
 | 7 | `hops` | Hop Count | Always | ✅ |
-| 8 | `rssi` | RSSI | Always | ✅ |
+| 8 | `rssi` | Freq/RSSI (renamed from RSSI) | Always | ✅ |
 | 9 | `chat` | Chat Activity | Always | ✅ |
 | 10 | `health` | Health Score | Always (device formats only) | ✅ |
 | 11 | `relay-health` | Relay Health | Always visible; dimmed + empty state when no relay_manager log loaded | ✅ |
 | 12 | `atak` | ATAK (α badge) | atak loaded | ✅ |
 | 13 | `fw-log` | FW Log | Always visible; dimmed + empty state when no fw_log loaded | ✅ |
 | 14 | `topology` | Network Topology | NOT IMPLEMENTED | ⚠️ Design spec only |
+| 15 | `modes` | Modes (α badge) | atak loaded | ✅ |
 
 ---
 
@@ -116,8 +117,15 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | `relay_manager` | Prod logs not analyzed — stage/prod behavioral differences unknown |
 | `rsdk` | GRIP hop count and RSSI only when `GRIP_Receiver` incoming fields lines are present |
 | `diagnostic` | Firmware 3.1.11 omits callsign and GID from Received Message blocks |
-| `atak` | Callsign always empty — identity is GID-only (filename is only callsign source) |
+| `atak` | `originatorCallsign`/`receiverCallsign`/UUIDs always empty — identity for those is GID-only. `senderCallsign` IS populated in ATAK plugin v3.0+ (was always empty before) and is now the `device.callsign` fallback when filename parsing doesn't yield one |
+| `atak` | ATAK v3.0 filenames drop the `ATAK_` segment (`diagnostic_<CALLSIGN>_<GID>_...`) — both conventions now accepted by the filename regex |
+| `atak` | Some early ATAK v3.0 builds emit **zero device-health (`connectionState`) records** for a session — no battery/thermal/firmware/radio-health data at all. Flagged via `DATA LIMITATION —` in `parse_errors`, fires only when it actually happens. RSSI also observed as always `0` in early v3.0 captures. See `docs/atak_v3_early_integration_notes.md` |
 | `atak` | `sdkError` (SDK Logging 2.0) volume baseline unknown — count is informational, not pass/fail |
+| `atak` | **Radio commands are not confirmed state.** `atak_frequency_set_attempts` / `atak_radio_mode_queries` are the raw command layer. Confirmed frequency = `frequencyUpdated` event only; confirmed mode = Device Health `mode`; confirmed relay = `relayModeUpdated`. A `COMPLETED` SET is an ack, NOT confirmation (decided 2026-08-04). Enhanced logs emit no `frequencyUpdated`, so they honestly show "confirmed frequency unknown" + attempt counts |
+| `atak` | Command status is an open set — `QUEUED`/`COMPLETED`/`FAILED`/`CANCELLED`/`TIMEOUT` observed. `TIMEOUT` was found only after the first four were documented. Never render through a hardcoded allow-list |
+| `atak` | Both `action=SET` and `action=GET` occur in Frequency and mode records, and both are stored (GETs are never dropped — that would lose real observations). **Consumers must split on `action`:** a GET is a query, not a change attempt. Real MESMER counts — 28 Frequency cmds (16 SET / 12 GET), 2,028 mode records (2,016 GET polls / 12 SET change cmds, 6 COMPLETED). Model names lag the data: `AtakFrequencySetAttempt` holds GETs, `AtakRadioModeQuery` holds SETs |
+| `atak` | Some field logs append a `--- RSDK LOGS ---` divider + bare `sdkError` records after the main array closes — handled transparently (no `parse_errors` entry by design), but the file isn't strictly valid JSON as a whole |
+| `atak` | `isRelayModeEnabled` has only 2 observations — absent flag stores `None` (unknown), not `False` |
 | `atak` | `numberOfOpenSegments = -99` is a sentinel → stored as null |
 | `atak` | Receiver-side `deliveryTimeInMillis = 0` on fileTransfer is a placeholder |
 | `atak` | `serialNumber = "Unknown"` during BLE reconnection is expected, not an error |
@@ -126,6 +134,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | `fw_log` | Battery stabilization errors are a known FW quirk — counted separately |
 | `fw_log` | `RSSI[]` samples are DEBUG-level and skipped — channel energy is the RSSI proxy |
 | `atak` | `deviceDisconnected` omits serial — attribution uses LIFO assumption (pending dev team confirmation) |
+| `atak`/`diagnostic` | Host-clock skew not auto-detected/corrected — a wrong phone clock offsets all `timestampInMillis` uniformly (makes `deliveryTimeInMillis` a large constant, even negative); timestamps stored verbatim, interpret manually. Confirmed: KNOT ≈ −2h. See P6 |
 
 ---
 
@@ -160,13 +169,32 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | P2: Protocol separation (BROADCAST/PRIVATE) in TX/RX | ⏳ Pending |
 | P3: Cross-device delivery matrix using logId | ⏳ Pending |
 | P4: Relay copy/retransmission flag | ⏳ Pending |
-| P6: KNOT clock skew investigation | ⏳ Pending — investigated 2026-06-15 (constant ≈ −2h host-clock skew; uniform across all 50 senders, hop-independent, no buffer lag). **Two QA questions documented as blockers** (see `parsing-requirements.md` P6). GID `90296226464906` KNOT-vs-HOTLIPS **attribution resolved** — same physical radio (`PNE234200704`) used by both operators on different test days, not a mislabel |
+| P6: KNOT clock skew investigation | ✅ Done (tool-side, 2026-06-30) — constant ≈ −2h host-clock skew (uniform across all 50 senders, hop-independent, no buffer lag), documented as a `DATA LIMITATION` in `parsing-requirements.md`; no parser/UI work possible. **Two QA questions remain open as external, non-blocking follow-ups** (which clock was correct; tz/NTP-vs-manually-wrong root cause — see `parsing-requirements.md` P6). GID `90296226464906` KNOT-vs-HOTLIPS **attribution resolved** — same physical radio (`PNE234200704`) used by both operators on different test days, not a mislabel |
 | P7: Poseidon log format | ⏳ Deferred |
 | Network Topology tab (Section 14) | ⏳ Pending (design spec exists) |
 | Time-window disabled state for unparseable timestamps | ✅ Done — `range-unavailable` step in FileUpload.jsx replaces the silent skip |
 | Min battery windowed reduce returns 0 for single-sample sets (ATAK) | ✅ Done — IIFE pattern: `(batPcts => batPcts.length ? Math.min(...batPcts) : null)(filtered)` |
 | `extractTimeRange` doesn't detect ATAK epoch-ms timestamps (`timestampInMillis`) — ATAK logs lose the time-window slider | ✅ Done — scanner now unions wall-clock `TS_RE` with a key-anchored 13-digit `EPOCH_MS_RE`; ATAK regains the slider; client-side only |
 | Battery Chart — Multi-Radio False Recovery DataNote | ⏳ Pending dev team confirmation |
+| ATAK v3.0 filename convention support (`ATAK_` segment optional) + `device.callsign` fallback via `senderCallsign` | ✅ Done (2026-07-29) — `_FILENAME_RE` accepts both conventions; new `sender_callsign` field on `AtakMessage`; callsign falls back to it when filename doesn't match |
+| ATAK v3.0 missing-health-telemetry `DATA LIMITATION` | ✅ Done (2026-07-29) — `parser/atak.py` flags it in `parse_errors` when a log has zero `connectionState` records |
+| ATAK v3.0 test fixtures + coverage | ✅ Done (2026-07-29) — 2 new synthetic fixtures, 8 new tests in `test_atak.py`; suite at 183 passed, 2 skipped |
+| Originator PLI 5s-bucket bug (dropped dominant traffic) | ✅ Done + field-verified (2026-07-29) — prefer self-reported `message.interval` over gap inference |
+| PLI Settings "session-start" mislabeling | ✅ Done + field-verified (2026-07-29) — relabeled + gap-caveat added |
+| UI header/dropdown stacking-context bug | ✅ Done + field-verified (2026-07-29) — `overscroll-behavior: none` + header `zIndex: 100` |
+| ATAK radio-command layer — Frequency SET attempts + NetworkMode/TetherMode queries + `relayModeUpdated` | ✅ Done (2026-08-04) — 8 commits on `fix-atak-v3-filename-and-health-limitation`, not yet pushed; parser→API→UI chain verified, new Modes tab, RSSI→Freq/RSSI, field-verified by karen |
+| Status-chip **and per-action row** render order shifts as the time window changes | ✅ Done (2026-08-04) — module-scope `sortedEntries(obj, order)` plus `ACTION_ORDER` / `STATUS_ORDER` / `MODE_TYPE_ORDER` give a stable render order in both card sections. Unrecognised values sort last (alphabetically among themselves) and are never dropped, preserving the open-vocabulary property |
+| `hasFailedAttempts` is not action-scoped — a FAILED **GET** would paint the card red | ✅ Done (2026-08-04) — now `a.action === 'SET' && a.status === 'FAILED'`; `setAttempts` renamed `freqCommands` since it holds both actions. This was the last place a GET was still read as a change attempt |
+| COMPLETED SET treated as confirmed frequency | ✅ Resolved (2026-08-04) — **reverted**; confirmed frequency is `frequencyUpdated` only. Enhanced logs honestly show "unknown" + attempt counts |
+| `toMs` double-`Z` → `NaN` → durations render `—` | ✅ Done (2026-08-04) — karen found live on MESMER; both sites match the correct form at `App.jsx:2744` |
+| SET-attempt status hardcoded allow-list drops real statuses | ✅ Done (2026-08-04) — dynamic; MESMER's CANCELLED + TIMEOUT no longer vanish (28 shown, was 24) |
+| Modes tab blank page when ATAK log has no mode data | ✅ Done (2026-08-04) — empty state now tests the reachable condition, not `!hasAtak` |
+| Stale-base reverts of 4 committed fixes + 4 deleted tests | ✅ Restored (2026-08-04) — found by 5 of 6 gate agents; full deleted-line audit against HEAD confirmed nothing else clobbered |
+| New ATAK arrays not covered by the time-window filter | ✅ Done (2026-08-04) — `atak_frequency_set_attempts`, `atak_radio_mode_queries`, and `atak_events` added to `filteredResults`; `ble_fail_count` still carried over whole (SDK-error aggregate isn't time-windowable) |
+| `current` badge on the wrong frequency config | ✅ Done (2026-08-04) — karen found on VALERIE; `lastKey` came from `segments` (first-seen order) instead of the chronologically last confirmed change, so a radio returning to an earlier config showed the wrong one as current |
+| `action` GET/SET conflation in Frequency + mode records | ✅ Done (2026-08-04) — UI splits on `action`; both actions still stored. Verified against the real 144 MB MESMER log: Frequency 16 SET / 12 GET, mode 2,016 polls / 12 change cmds. The old empty-state "10 COMPLETED SET commands" was itself wrong — only 6 were SETs |
+| Rename `AtakFrequencySetAttempt` / `AtakRadioModeQuery` to neutral names | ⏸ Deferred — ~69 references incl. serialized keys, tests, docs; churn with no behavior change |
+| `_CSV_TYPES` decision for the two new ATAK tables | ⏳ Pending — `atak_radio_mode_queries` is flat and CSV-ready; `atak_frequency_set_attempts` nests `channels`, so JSON-only is defensible — but record the choice in `export.py` either way |
 
 ---
 
@@ -225,6 +253,232 @@ pytest tests/test_atak.py -v  # single file verbose
 
 ## Most Recent Work (Last Few PRs)
 
+**2026-08-04 — ATAK radio-command layer (Frequency SET attempts, NetworkMode/TetherMode
+queries, `relayModeUpdated`) + full quality-gate pass on
+`fix-atak-v3-filename-and-health-limitation`. Committed as 8 logical commits; not yet
+pushed / no PR opened.**
+
+```
+feat(parser): extract ATAK frequency SET attempts and radio mode queries
+feat(ui):     add Modes tab and Originator Frequency section
+fix(ui):      scope Hop Count Map to PLI locations and re-color markers
+feat(ui):     add per-radio visibility picker to battery chart
+style(ui):    darken page gradient behind content
+fix(ui):      raise LogSelector dropdown above sibling content
+docs:         document ATAK radio-command layer and confirmation model
+docs(session): update session summary
+```
+
+The last four are unrelated to the ATAK feature — they had accumulated in the same working
+tree and were split out rather than riding along in the parser commit.
+
+*What was built (parser → API → UI, chain verified):*
+- `AtakFrequencySetAttempt` and `AtakRadioModeQuery` in `models.py`, populated from
+  `clientRequest`-shaped `sdkError` records in `parser/atak.py`, serialized as
+  `atak_frequency_set_attempts` / `atak_radio_mode_queries`, consumed by two new UI
+  sections. `relay_mode_enabled` added to `AtakEvent` for `relayModeUpdated`.
+- New **Modes** tab (`atakOnly`, α badge) — confirmed listen-only/normal from Device
+  Health `mode`, confirmed relay from `relayModeUpdated`, poll history from the queries.
+- **RSSI tab renamed Freq/RSSI**, gained an Originator Frequency section.
+- Fixture `atak_frequency_and_divider_sample.json` covers the `--- RSDK LOGS ---` divider
+  and all observed statuses.
+
+*The key design decision (2026-08-04) — a `COMPLETED` SET is NOT confirmation.* The first
+implementation merged `COMPLETED` Frequency SET attempts into the confirmed-frequency
+timeline, reasoning that a COMPLETED ack meant the radio adopted the config. That
+contradicted `CLAUDE.md` ("confirmed frequency changes come from `frequencyUpdated`") and
+the model's own docstring, and it was **reverted**. Consequence worth understanding before
+touching this again: enhanced logs emit no `frequencyUpdated` at all, so MESMER/CL_B-type
+logs now legitimately show *"no confirmed frequency — N COMPLETED SET commands observed,
+a command ack is not confirmation of radio state."* The attempt counts stay visible, so no
+data is lost — it is just never presented as state. `models.py` docstring corrected too
+(it had said `COMPLETE (confirmed at the radio)`, which was the origin of the confusion).
+
+*Quality gate run — all six agents, three returned REJECT/FAIL.* The dominant finding,
+raised independently by 5 of 6: **the working tree had been edited from a stale base and
+silently reverted four committed fixes** (PLI self-reported noise floor `3fe76cd`,
+sub-minute `fmtDur` `484fca9`, v3.0 detection docstring + `sender_callsign` rationale
+`0e88d19`, `appVersionTooltip`) plus **deleted four committed tests** — including the two
+from `6c1e832` whose commit message is literally "fixes false-green CI." pytest was green
+only because a fix and its guard test were removed together. All restored; every deleted
+line in the diff was then audited against HEAD to confirm nothing else was clobbered.
+**Lesson: fetch current file state before editing — the CLAUDE.md rule exists for a
+reason, and a green suite is not evidence it was followed.**
+
+*Fixed after the gate:*
+- `toMs` appended a second `Z` to SDK 2.0 timestamps (which already end in `Z`) →
+  `Invalid Date` → `NaN` → every affected duration rendered `—`. Both sites now match the
+  correct form that already existed elsewhere in the file. karen caught this live on the
+  144 MB MESMER log; a real ~9h 55m span was showing as a dash.
+- SET-attempt statuses were rendered through a hardcoded `['QUEUED','COMPLETED','FAILED']`
+  list, silently dropping MESMER's 2 CANCELLED + 2 TIMEOUT (28 real attempts shown as 24),
+  and orphaning the label entirely when all attempts fell outside it. Now dynamic.
+- Modes tab rendered a **blank page** for real ATAK logs with no mode data (BARK, v3.0
+  zero-`connectionState`) because its empty state tested `!hasAtak`, unreachable on an
+  `atakOnly` tab. Now tests for the condition that actually occurs.
+
+*Also fixed after karen's second pass:* the **time-window filter** now covers
+`atak_frequency_set_attempts`, `atak_radio_mode_queries`, and `atak_events`, so a card no
+longer mixes two time ranges. And the **`current` frequency badge was on the wrong
+config** — `lastKey` came from `segments` (ordered by *first appearance*) rather than the
+chronologically last confirmed change, so VALERIE, which ends the session back on `445.5`,
+showed `450` as current in cyan. That was wrong data, not missing data, and it predated
+this branch; MESMER's SET-sourced segment had been masking it.
+
+*Field-verified in the browser (karen, 3 rounds against real MESMER/VALERIE/HOTLIPS/BARK
+logs — final round all PASS):* MESMER shows all 28 SET attempts including CANCELLED and
+TIMEOUT (was 24); BARK/EUD-006 get the explanatory note instead of a blank Modes tab;
+VALERIE's `current` badge sits on `445.5` with exactly one badge in the card, and MESMER/
+HOTLIPS still render the empty state with none. Windowing was checked at four widths with
+counts cross-checked against raw records — the 6h window correctly drops the two 15:28:56
+CANCELLED SETs and keeps the 18:01:44 TIMEOUTs and 18:08:27 COMPLETEDs. The Events Timeline
+falls back to `No events recorded` when a window excludes everything. Health Score BLE was
+confirmed **not** to move with the slider while Thermal and RSSI do — the deliberate
+non-windowing of `ble_fail_count` is working, not accidentally frozen.
+
+*Also fixed (2026-08-04, after the 8-commit split):* the **`action` GET/SET conflation**.
+The UI now splits Frequency commands into SET attempts vs GET queries, and mode records into
+polls (`GET`) vs change cmds (`SET`), instead of labelling every record with one name. GETs
+are still parsed and stored — dropping them would lose real observations — so this is a
+presentation fix, not a filter. Verified by running the parser over the real 144 MB MESMER
+log: 28 Frequency commands (16 SET / 12 GET) and 2,028 mode records (2,016 GET polls / 12
+SET change cmds, 6 COMPLETED). It also caught a second error: the empty-state text claimed
+"10 COMPLETED SET commands" when only **6** were SETs — the other 4 were completed GETs.
+
+*Vera's test additions reviewed (2026-08-04) — kept.* Mutation-tested rather than trusted:
+three injected regressions (isControlChannel always True, absent batteryThreshold → 0,
+missing relay flag → False) were each caught by exactly the intended test, and the two new
+fixtures carry real-shaped `Gid`/`Location`/`GetDeviceAlert` payloads rather than minimal
+stubs. The review found one real gap — **no fixture had mixed `action` values**, so three
+tests encoded "Frequency is always SET, mode is always GET" and the `action`-split fix had
+zero coverage. Closed with `atak_mixed_action_commands.json` and 5 tests pinning that GETs
+are kept and tagged, mode SETs stay distinguishable from polls, `action` survives
+serialization, an absent `action` is `""` and not assumed SET, and the real `TIMEOUT` status
+passes through. Suite at **215 passed, 2 skipped**. Those 5 were mutation-checked too —
+filtering GETs out trips 4 of them.
+
+*Karen round 4 (the `action` split) — PASS.* MESMER's frequency card matches the parser
+ground truth exactly (16 SET / 12 GET), the empty state corrected from 10 to 6 COMPLETED
+SETs, and the split is provably lossless: `932 GET + 6 SET = 938`, the exact pre-fix merged
+count. All five of her original findings are now closed. One note for whoever reads her
+report: the Modes poll counts look 70 short of ground truth at the default window because
+the default snaps to 10:00–22:00 while the session runs to 22:34 — clearing the window
+lands on the exact figures. Not a miscount.
+
+*Both round-4 items fixed (2026-08-04).* Render order is now stable via a shared
+`sortedEntries` helper — rows and chips no longer reshuffle as the slider moves, while
+unrecognised values still render (sorted last) rather than being dropped. And
+`hasFailedAttempts` is action-scoped, so a failed *query* no longer paints the card red as
+though a change attempt had failed — the last place a GET was still read as a change.
+
+*Still open on this branch:* model names lag the data (`AtakFrequencySetAttempt` holds GETs);
+`export.py` `_CSV_TYPES` decision; neither `toMs` site is exercised on screen.
+
+**2026-07-29 — Originator PLI 5s-bucket bug, PLI Settings mislabeling, and a two-layer UI header/dropdown bug (all field-verified):**
+- **Originator PLI silently dropped 5s-cadence traffic:** BARK's log showed a real ~5s PLI
+  cadence for 534 of 702 sent messages (the single largest chunk of the session, ~44
+  minutes), but the UI's Originator PLI card only showed `60s`/`15s` buckets and claimed
+  "no 5s data in loaded files." Root cause: the frontend inferred intervals purely from
+  timing gaps between sent messages, bucketed into a fixed list
+  (`15/30/60/120/180/300/600s`) with ±25% tolerance — a 5s gap is nowhere near 15s±25%, so
+  it was silently discarded as noise. Fix (`ui/src/App.jsx`): prefer the self-reported
+  `message.interval` field (populated per-message starting with ATAK plugin v3.0, already
+  captured by the parser as `pli_interval` but previously unused by this card) over gap
+  inference; fall back to gap inference only for older logs that never populate the field.
+  **Field-verified**: BARK now correctly shows all three buckets (60s/39m, 5s/44m, 15s/32m)
+  against the real log.
+- **PLI Settings card mislabeled its first entry as "session-start setting":**
+  `pliSettingUpdated` only fires on a *change*, not at launch — BARK's first logged change
+  didn't fire until 92–93 minutes into the session, so the card had zero real visibility
+  into that earlier stretch while implying otherwise. Relabeled "FIRST SEEN" →
+  "FIRST CHANGE EVENT", added an explicit `⚠ {n}m into the session before this — setting
+  for that stretch is unknown` caveat when the gap is ≥ 2 minutes. **Field-verified**: BARK
+  now shows "93m into the session before this."
+- **New test/fixture:** `tests/fixtures/atak_v3_5s_pli_sample.json` +
+  `test_sub_15s_pli_interval_preserved` pins that sub-15s intervals round-trip through
+  `pli_interval` — the data contract the frontend fix depends on. Suite at 184 passed, 2
+  skipped.
+- **Doc updated:** `docs/atak_v3_early_integration_notes.md` — new "Bugs found and fixed
+  along the way" section, plus a "Key takeaway" note on why Originator PLI and PLI Settings
+  can legitimately disagree.
+- **Separate UI bug, reported live:** the log-selector dropdown appeared visually
+  overlapped/hidden. Took two passes to fully fix — recorded here so the same mistake isn't
+  repeated:
+  1. First hypothesis (wrong): an external "Forterra portal" banner. Actual cause,
+     confirmed from a screen recording: Chrome's overscroll/rubber-band bounce on a
+     trackpad gesture briefly scrolls the whole page, exposing the decorative
+     `forterra_backdrop.jpg` body background above the app and displacing the header.
+     Fixed with `overscroll-behavior: none` on `html, body, #root` in `ui/src/index.css`.
+  2. Bumping the dropdown's own z-index (50 → 9999) did NOT fully fix a second, related
+     symptom — the dropdown list still showed a sliver hidden behind the tab row
+     (OVERVIEW/PLI FREQUENCY/etc). Root cause: `<header>` has `backdropFilter:
+     'blur(12px)'`, which creates its own stacking context and traps the dropdown inside
+     it — no z-index value on the dropdown itself can escape that trap. Real fix: added
+     `position: 'relative', zIndex: 100` to the `<header>` style in `ui/src/App.jsx` so
+     the whole header (and everything trapped inside it) stacks above the tab row.
+  **Both field-verified fixed** in the browser after applying.
+- **Environment troubleshooting, for future reference:**
+  - Claude Code's `/login` OAuth flow failed with "Invalid OAuth Request — Missing scope
+    parameter" when run from VS Code's built-in terminal — a known upstream bug (GitHub
+    issue #70506) where certain terminal environments trigger a buggy manual-code-paste
+    OAuth flow instead of the normal silent one. Fixed by running `claude` from a
+    standalone Windows Terminal/PowerShell window instead of VS Code's integrated terminal.
+  - `npm install` in `ui/` reported 6 vulnerabilities (babel, brace-expansion, esbuild,
+    js-yaml, postcss) — all dev-tooling/build-chain only, none shipped to end users.
+    Tested `npm audit fix`: made it *worse* (6 → 12) by downgrading `eslint`. Do **not**
+    run `npm audit fix` or `npm audit fix --force` on this project — leave the 6 warnings
+    as-is. `--force` was tried once by accident and bumped Vite 5→8 (breaking) plus left
+    `node_modules` half-updated; recovered via `git checkout -- package.json
+    package-lock.json` + full `node_modules` reinstall.
+
+**2026-07-29 — ATAK plugin v3.0 early-integration support (filename, callsign fallback, missing-health DATA LIMITATION):**
+- Two real field logs introduced (`diagnostic_BARK_65043_2026-07-28_15_09_17_944.log`,
+  `diagnostic_EUD-009_54498_2026-07-29_04_02_14_14.log`) — first logs seen from the new
+  ATAK plugin v3.0 build (app version `3.0.0 (dae7d160) - [5.6.0]`, ATAK `5.6.0.21`,
+  Samsung SM-S931U1). Both parsed clean as `atak` format (format detection unaffected —
+  content sniffing on `logId`/`atakVersion` still matches), but surfaced two real gaps:
+- **Filename convention changed:** v3.0 drops the `ATAK_` segment
+  (`diagnostic_<CALLSIGN>_<GID>_<DATE>_<TIME>.log` vs the old
+  `diagnostic_ATAK_<CALLSIGN>_<GID>_...`). `_FILENAME_RE` in `parser/atak.py` now accepts
+  both. Added a `senderCallsign` fallback for `device.callsign` (new `sender_callsign` field
+  on `AtakMessage`, mirroring the existing GID fallback pattern) for cases where neither
+  filename convention matches at all.
+- **Missing device-health telemetry:** both new logs contained **zero `connectionState`
+  records** — no battery/thermal/firmware/radio-health data for the whole session. Confirmed
+  expected — brand new FW/radio combo, early integration. Added a `DATA LIMITATION —` entry
+  in `parse_errors` when this happens, rather than silently rendering empty Thermal/Battery
+  tabs. Also noted (not yet acted on): RSSI is always `0` in these logs, and PLI interval
+  shows inconsistent values within one session.
+- **New doc:** `docs/atak_v3_early_integration_notes.md` — running baseline of what's
+  actually available in v3.0 logs as the plugin/FW matures (present/absent/inconsistent
+  data categories, source log table to extend as more samples come in).
+- **Docs synced to reflect the fix** (were stating things now factually wrong):
+  `CLAUDE.md` (Known Data Limitations table), `docs/parsing-requirements.md` (Filename
+  Convention sections ×2, "Callsign/UUID fields always empty" claims ×3, Known Limitations),
+  `docs/log-field-definitions.md` (`senderCallsign` field row, Device Health record note).
+- **Tests:** 2 new synthetic fixtures (`diagnostic_KESTREL_11223_2026-07-28_09_00_00_000.log`
+  for the new filename convention, `atak_v3_no_health_sample.json` for the callsign fallback
+  + missing-health-limitation path) and 8 new tests in `test_atak.py`, including a regression
+  guard that the new DATA LIMITATION does NOT fire when health samples are present. Full
+  suite: **183 passed, 2 skipped** (the 2 skips are the pre-existing real-field-data tests
+  gated on `NAMED_FIXTURE`, unrelated to this work).
+- Delivered as a zip (parser/atak.py, parser/models.py, tests/test_atak.py, 2 fixtures,
+  docs/atak_v3_early_integration_notes.md) for manual drop-in rather than a PR from this
+  session — not yet run through jenny/karen/vera in Claude Code.
+
+**2026-06-30 — docs(p6): close P6 KNOT clock skew tool-side:**
+- The P6 investigation (2026-06-15) had already concluded: constant ≈ −2h **host-clock skew** on KNOT,
+  uniform across all 50 senders, hop-independent, no buffer lag — genuine clock skew, not delivery lag.
+  A single log cannot detect or correct the offset, so there is **no parser/UI work to do**.
+- Documented the conclusion as a **`DATA LIMITATION`** in `parsing-requirements.md` (`## Known Limitations`):
+  host-clock skew is not auto-detected/corrected; timestamps are stored verbatim and must be interpreted
+  manually; distinguished from normal *sporadic* per-message negative `deliveryTimeInMillis`.
+- Marked **P6 ✅ Done (tool-side)** in `CLAUDE.md` (backlog row + P1–P7 summary) and this file (backlog row
+  + Known Data Limitations table). The **two QA questions** (which clock was correct; tz/NTP-vs-manually-wrong
+  root cause) are reframed from "blockers" to **external, non-blocking follow-ups** — they are QA field
+  actions, not codebase work. GID attribution remains resolved (2026-06-16, shared radio `PNE234200704`).
+- Docs-only change; no code, tests, parsers, or `_result_to_dict` touched.
+
 **2026-06-16 — Afternoon session wrap (parser-honesty PRs #19–#21, GID identity #27, P6 + buffer-saturation analysis):**
 - **PR #19 — `parse_errors` honesty pass (157 tests passing):** canonical `DATA LIMITATION — ` (em-dash)
   prefix normalized across all 5 parsers; diagnostic 3.1.11 callsign+GID-omission emission (data-driven,
@@ -238,7 +492,8 @@ pytest tests/test_atak.py -v  # single file verbose
   regression test. Surfaced by karen during the PR #19 gate.
 - **P6 KNOT clock skew — investigated:** constant ≈ −2h host-clock skew (uniform across all 50 senders,
   hop-independent, no buffer lag; not delivery lag). **Two QA questions documented as blockers** (see
-  `parsing-requirements.md` P6). **GID attribution resolved** — shared physical radio.
+  `parsing-requirements.md` P6). **GID attribution resolved** — shared physical radio. *(Closed tool-side
+  2026-06-30 — see entry below.)*
 - **PR #27 — GID-as-radio-identity clarification (✅ merged):** GID reflects the radio paired at
   log-export time, **not** a permanent operator identity; **callsign + serial number together are the
   reliable identity pair.** New "GID, Callsign, and Serial Number — Identity Model" section in
@@ -456,6 +711,27 @@ pytest tests/test_atak.py -v  # single file verbose
 ## What to Work On Next
 
 Based on the backlog, the most actionable items (not blocked):
+
+0. **Finish `fix-atak-v3-filename-and-health-limitation` — nothing is committed yet.**
+   The full gate ran 2026-08-04 (see Most Recent Work). Stale-base reverts, the `toMs`
+   NaN bug, the hardcoded status list, and the blank Modes tab are all fixed; the
+   COMPLETED-SET decision is made and implemented. Remaining before merge:
+   - **Push the `action`-split commit** — PR #33 is open and has the first 8 commits; the
+     9th (the GET/SET split) is committed locally but not pushed.
+   - **Review vera's additions** — she wrote 16 tests and 2 fixtures into the tree
+     (`test_atak.py` now 97 tests) beyond auditing; they haven't been reviewed.
+   - **Status-chip render order** (cosmetic) — chips reorder between slider positions; see
+     the backlog row.
+   - Note both `toMs` sites (`App.jsx:1391`, `:1564`) are now correct but **unexercised** —
+     `confirmedChanges` is `frequencyUpdated`-only, so no on-screen value feeds them an
+     SDK-2.0 `…Z` timestamp any more. There is no live coverage if the correct form drifts
+     back; consolidating the two copies into one helper would remove the risk.
+   - Smaller, from the gate: `export.py` `_CSV_TYPES` decision for the two new flat tables;
+     `_load_records` skips any non-`{` line with no `parse_errors` entry while its
+     docstring still claims it logs them; `relay_mode_enabled` null renders as confirmed
+     OFF in `ChartPanel.jsx`/`App.jsx`; `key={node.gid}` in the Modes section ignores the
+     documented GID-reuse pattern; off-palette `#3b82f6` for `relayModeUpdated`; duplicated
+     `toMs`/`fmtDur`/`rssiColor`/`fnCallsign` helpers worth hoisting to module scope.
 
 1. **P2: Protocol separation (BROADCAST/PRIVATE)** in TX/RX analysis — `messageProtocol` is already parsed, just needs UI lanes
 

@@ -21,6 +21,7 @@ html, body, #root {
   color: var(--text);
   font-family: 'Rajdhani', 'Segoe UI', sans-serif;
   font-size: 14px;
+  overscroll-behavior: none;
 }
 
 /* Backdrop applied to body */
@@ -37,8 +38,8 @@ body {
 #root {
   background: linear-gradient(
     180deg,
-    rgba(5, 8, 15, 0.45) 0%,
-    rgba(5, 8, 15, 0.75) 25%,
+    rgba(5, 8, 15, 0.72) 0%,
+    rgba(5, 8, 15, 0.85) 25%,
     rgba(5, 8, 15, 0.93) 50%,
     rgba(5, 8, 15, 0.97) 100%
   );

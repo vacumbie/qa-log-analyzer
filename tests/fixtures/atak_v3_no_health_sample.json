@@ -1,0 +1,6 @@
+[
+{"appVersion": "3.0.0 (synthetic) - [5.6.0]", "atakVersion": "5.6.0.21", "buildNumber": 1785194678, "launchTimeInMillis": 1785261944529, "deviceInfo": {"deviceModel": "Synthetic-Device-2", "apiVersion": 36}},
+{"timestampInMillis": 1785261965091, "event": {"type": "deviceConnected", "connectionType": "USB", "serialNumber": "SYN-0000-00002"}},
+{"logId": 2001, "timestampInMillis": 1785261981627, "messageTimestampInMillis": 1785261981477, "isSender": true, "senderGid": 99887, "senderCallsign": "OSPREY", "deliveryStatus": "SENT", "segmentCount": 1, "numberOfOpenSegments": 0, "retryCount": 0, "deliveryTimeInMillis": 0, "messageProtocol": "BROADCAST", "message": {"type": "pli", "interval": "30"}, "receiverGid": 0, "hopCount": 0, "rssi": 0},
+{"logId": 2002, "timestampInMillis": 1785262020047, "messageTimestampInMillis": 1785262019272, "isSender": false, "senderGid": 77665, "senderCallsign": "MERLIN", "deliveryStatus": "FULLY_RECEIVED", "segmentCount": 1, "numberOfOpenSegments": 0, "retryCount": 0, "deliveryTimeInMillis": 500, "messageProtocol": "BROADCAST", "message": {"type": "pli", "interval": "30"}, "receiverGid": 99887, "hopCount": 2, "rssi": 0}
+]

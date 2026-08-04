@@ -159,14 +159,17 @@ class AtakMessage:
     A single RF message record from an ATAK plug-in log.
 
     RSSI here is real dBm (already signed, not an unsigned byte like
-    the diagnostic format). Callsign/UUID fields are always empty strings
-    in the current log format — identity is GID-only.
+    the diagnostic format). originator_callsign/originator_uuid are always
+    empty strings in observed samples — identity for those is GID-only.
+    sender_callsign, however, IS populated starting with ATAK plugin v3.0
+    (was always "" in earlier plugin versions/samples).
     """
     timestamp: str                          # ISO 8601 converted to _TS_FMT_OUT
     log_id: Optional[int] = None           # Can be negative (signed 32-bit int)
     message_timestamp: str = ""            # Originator send time
     is_sender: bool = False
     sender_gid: Optional[int] = None
+    sender_callsign: str = ""              # "" in pre-v3.0 plugin logs; populated in v3.0+
     delivery_status: str = ""              # FULLY_RECEIVED | SENT | DELIVERED |
                                            # PARTIALLY_RECEIVED
     segment_count: int = 1
@@ -228,7 +231,7 @@ class AtakDeviceHealth:
     battery_pct: Optional[int] = None
     is_charging: bool = False
     connection_type: str = ""              # BLE
-    mode: str = ""                         # NORMAL
+    mode: str = ""                         # NORMAL | LISTEN_ONLY observed so far
     firmware_version: str = ""
     stored_messages: int = 0
     pa_temp_c: Optional[int] = None        # Celsius; UI converts to °F
@@ -248,7 +251,7 @@ class AtakEvent:
     A lifecycle or configuration event from an ATAK plug-in log.
 
     event_type covers: deviceConnected | deviceDisconnected |
-    powerLevelUpdated | pliSettingUpdated | frequencyUpdated
+    powerLevelUpdated | pliSettingUpdated | frequencyUpdated | relayModeUpdated
     """
     timestamp: str
     event_type: str = ""
@@ -276,6 +279,58 @@ class AtakEvent:
     # firmwareUpdate (enhanced log)
     update_status: str = ""                # e.g. "STARTED"
     update_time_ms: Optional[int] = None
+
+    # relayModeUpdated — observed 2026-06-04 (DARE log); not yet documented
+    # elsewhere prior to this
+    relay_mode_enabled: Optional[bool] = None
+
+
+@dataclass
+class AtakFrequencySetAttempt:
+    """
+    A frequency-set command attempt, extracted from an SDK Logging 2.0
+    clientRequest record whose rawRequest embeds a Frequency(...) command —
+    e.g. 'Frequency(channels=[Frequency: 464550000hz isControlChannel: YES,
+    ...], action=SET, ...)'.
+
+    This is the RAW RADIO COMMAND layer, distinct from the app-level
+    `frequencyUpdated` event: a SET attempt can be QUEUED, then COMPLETED,
+    FAILED, CANCELLED, and so on. A FAILED attempt would likely never produce a
+    corresponding `frequencyUpdated` event, since the app-level event only fires
+    on a confirmed change. Treat every attempt as "attempted," not "confirmed"
+    — including COMPLETED, which is a command-layer ack, NOT evidence the radio
+    is operating on that config. Confirmed frequency comes from
+    `frequencyUpdated` only; the UI deliberately does not promote a COMPLETED
+    attempt into its confirmed timeline.
+
+    Status is an open set — QUEUED, COMPLETED, FAILED, CANCELLED, and TIMEOUT
+    observed so far. Do not assume that list is exhaustive.
+    """
+    timestamp: str
+    status: str = ""                        # open set — see docstring
+    action: str = ""                        # e.g. "SET"
+    channels: list = field(default_factory=list)  # [{"frequency": float (MHz),
+                                                    #   "isControlChannel": bool}]
+
+
+@dataclass
+class AtakRadioModeQuery:
+    """
+    A NetworkMode/TetherMode clientRequest record — the app polling (GET) the
+    radio's current listen-only or tether-mode state. Distinct from
+    AtakFrequencySetAttempt: this doesn't request a change, it's asking
+    "what mode are you in right now." Observed action so far: GET only.
+
+    mode_type: "listenOnly" (from NetworkMode) or "tether" (from TetherMode).
+    Confirmed mode CHANGES (not polls) come from AtakDeviceHealth.mode
+    instead — e.g. "LISTEN_ONLY" has been observed there directly.
+    """
+    timestamp: str
+    mode_type: str = ""                     # "listenOnly" | "tether"
+    value: Optional[bool] = None
+    status: str = ""                        # QUEUED | COMPLETED | FAILED
+    battery_threshold: Optional[int] = None  # tether only
+    action: str = ""                        # e.g. "GET"
 
 
 @dataclass
@@ -598,6 +653,13 @@ class ParseResult:
     atak_events: list[AtakEvent] = field(default_factory=list)
     atak_app_launches: list[AtakAppInfo] = field(default_factory=list)
     atak_sdk_error_summary: Optional[AtakSdkErrorSummary] = None  # None if no SDK 2.0 records present
+    # Frequency SET command attempts extracted from SDK Logging 2.0
+    # clientRequest records — the raw radio-command layer, distinct from (and
+    # a superset of) confirmed frequencyUpdated app-level events. See
+    # AtakFrequencySetAttempt docstring.
+    atak_frequency_set_attempts: list[AtakFrequencySetAttempt] = field(default_factory=list)
+    # NetworkMode/TetherMode GET-poll records — see AtakRadioModeQuery
+    atak_radio_mode_queries: list[AtakRadioModeQuery] = field(default_factory=list)
 
     # RSDK only — GRIP transfer data
     grip_messages: list[GripMessage] = field(default_factory=list)

@@ -296,8 +296,16 @@ the lean stack (see "Do not add npm packages").
 ## Known data limitations
 
 Surface these honestly — never paper over them with zeros or missing fields.
-Each active limitation has a `DATA LIMITATION` entry in `parse_errors`. How that
-entry reaches the UI varies by format today: `fw_log` and `relay_manager` render
+Most active limitations have a `DATA LIMITATION` entry in `parse_errors` — but not
+all of them, and the exceptions are deliberate. A `parse_errors` entry means *data
+is missing or undecodable*. Two kinds of row below are **not** that, and correctly
+have no entry: **interpretive caveats**, where the data is parsed in full and the
+caution is about how to read it (the frequency/mode raw-command rows — nothing is
+lost, and an entry would fire on every enhanced log and dilute the real ones), and
+**transparently handled format quirks**, where the parser absorbs the oddity without
+loss (the `--- RSDK LOGS ---` divider). For those, the honesty burden sits in the UI
+copy and the model docstrings instead. How a real entry reaches the UI varies by
+format today: `fw_log` and `relay_manager` render
 the full text in a dedicated banner (`FwLogTab` and `RelayHealthTab` in
 `App.jsx`); the `rsdk` GRIP hop/RSSI gap is surfaced as a `HopsTab` note; the
 `diagnostic` 3.1.11 and `atak` `sdkError` entries currently reach `parse_errors`
@@ -319,8 +327,12 @@ project's lifecycle, not a sign something is broken.
 | `relay_manager` | Prod logs not analyzed — stage/prod behavioral differences unknown |
 | `rsdk` | GRIP hop count and RSSI only available when `GRIP_Receiver` incoming fields lines are present |
 | `diagnostic` | Firmware 3.1.11 omits callsign and GID from Received Message blocks |
-| `atak` | Callsign always empty in this format — identity is GID-only |
+| `atak` | `originatorCallsign`/`originatorUUID`/`receiverCallsign` always empty in observed samples — identity for those is GID-only. `senderCallsign` IS populated starting with ATAK plugin v3.0 (was always empty in earlier plugin versions/samples) — see `docs/atak_v3_early_integration_notes.md` |
+| `atak` | ATAK plugin v3.0 filenames drop the `ATAK_` segment (`diagnostic_<CALLSIGN>_<GID>_<DATE>_<TIME>.log`); the filename regex accepts both conventions, and `device.callsign` falls back to `senderCallsign` on the device's own sent message when the filename doesn't match either |
+| `atak` | Some early ATAK v3.0 builds emit zero `connectionState` (device-health) records for a session — no battery %, thermal, firmware version, or radio-health data available. Flagged via `DATA LIMITATION —` in `parse_errors`, fires only when a log actually has zero health records |
 | `atak` | `sdkError` (SDK Logging 2.0) total volume baseline unknown — `sdk_error_count` is aggregated and informational, not a pass/fail signal. Exception: the `ERROR\|BLE` subset of `counts_by_tag` (falling back to `deviceDisconnected` event count) feeds the BLE Health Score dimension as `ble_fail_count`; its `> 0 = fail` threshold is an initial estimate pending field validation, like the other Health Score thresholds |
+| `atak` | Frequency SET attempts and NetworkMode/TetherMode polls (`atak_frequency_set_attempts`, `atak_radio_mode_queries`) are the raw radio-command layer, not confirmed state — a `FAILED` or `QUEUED` attempt/poll should never be treated as a confirmed change. Confirmed frequency changes come from the `frequencyUpdated` event; confirmed radio mode comes from the Device Health record's own `mode` field. Status vocabulary is an open set (`QUEUED`/`COMPLETED`/`FAILED`/`CANCELLED`/`TIMEOUT` observed so far) — don't assume it's exhaustive, and never render it through a hardcoded allow-list. A `COMPLETED` SET is **not** confirmation either: it is a command-layer ack, so the UI deliberately does not promote it into the confirmed-frequency timeline (decided 2026-08-04 — see `docs/parsing-requirements.md` → "Radio Command Layer vs Confirmed State"). Consequence: enhanced logs, which emit no `frequencyUpdated`, honestly show "confirmed frequency unknown" plus attempt counts |
+| `atak` | Some field logs append a second, unwrapped section after the main JSON array closes (a `--- RSDK LOGS ---` divider followed by more bare `sdkError` records, same shape as the rest). Handled transparently — the divider line and the mid-file array-close artifact are skipped, not logged as parse errors — but worth knowing the file isn't strictly valid JSON as a whole |
 | `atak` | `numberOfOpenSegments = -99` is a sentinel (transfer cancelled before count known) — stored as null, never -99 |
 | `atak` | Receiver-side `deliveryTimeInMillis = 0` on fileTransfer is a placeholder — only meaningful when `isSender=true` and status `SUCCESS` |
 | `atak` | Device Health `serialNumber = "Unknown"` is expected during BLE reconnection, not a parser error |
@@ -387,6 +399,12 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | diagnostic 3.1.11 `parse_errors` emission (originator callsign + GID omitted) | ✅ Done (PR #19) — data-driven, fires only when a Received Message block omits both; reports "{n} of {total}" affected |
 | rsdk GRIP-availability `parse_errors` emission (no `GRIP_Receiver` incoming fields) | ✅ Done (PR #19) — hop count / RSSI unavailability surfaced honestly when no incoming GRIP fields lines are present |
 | Rename "Relay Firmware" / "Relay radio firmware" to "Firmware" throughout codebase and docs | ⏳ Pending — cosmetic/naming only; do not change variable names, function names, or key strings (fw_log stays fw_log) |
+| ATAK radio-command layer (Frequency SET attempts, NetworkMode/TetherMode queries, `relayModeUpdated`) + Modes tab | ✅ Built 2026-08-04 — uncommitted; see `docs/session_summary.md` |
+| New ATAK command/query arrays not covered by the time-window filter | ✅ Done (2026-08-04) — `atak_frequency_set_attempts`, `atak_radio_mode_queries`, `atak_events` added to `filteredResults` |
+| `current` frequency badge misattributed to the last *new* config instead of the chronologically last change | ✅ Done (2026-08-04) — `lastKey` now derived from `confirmedChanges`, not `segments` insertion order |
+| ATAK `action` GET/SET conflation | ✅ Done (2026-08-04) — both actions are still stored (dropping GETs would lose real observations); the UI splits on `action` so SET attempts, GET queries, mode polls, and mode change cmds are counted and labelled separately. Verified against the real MESMER log: 28 Frequency cmds = 16 SET + 12 GET; 2,028 mode records = 2,016 polls + 12 change cmds |
+| Rename `AtakFrequencySetAttempt`/`AtakRadioModeQuery` (they hold both actions) | ⏳ Deferred — ~69 references incl. the two serialized keys, tests, and docs; pure churn for no behavior change. Docstrings state what the fields actually hold |
+| `_CSV_TYPES` entry or JSON-only note for the two new ATAK tables | ⏳ Pending — decision not yet recorded in `api/routes/export.py` |
 
 ---
 

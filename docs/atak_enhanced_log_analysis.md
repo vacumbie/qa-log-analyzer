@@ -109,7 +109,7 @@ No new firmware-version-specific field differences detected.
 
 ### 3. `event` — AtakEvent (partially parsed ✅)
 
-All previously documented event types confirmed, plus **two new ones:**
+All previously documented event types confirmed, plus **relayModeUpdated (2026-06-04):**
 
 | event.type | Sample | Currently Parsed? |
 |-----------|--------|------------------|
@@ -118,14 +118,49 @@ All previously documented event types confirmed, plus **two new ones:**
 | `powerLevelUpdated` | `{type, power: 1.0}` | ✅ Yes |
 | `pliSettingUpdated` | `{type, isDistance, interval, isAutoSend}` | ✅ Yes |
 | `frequencyUpdated` | `{type, power, bandwidth, channels: [{frequency, isControlChannel}]}` | ✅ Yes |
-| **`firmwareUpdate`** | `{type, updateStatus: "STARTED", updateTimeInMillis}` | ❌ **New — not parsed** |
+| `firmwareUpdate` | `{type, updateStatus: "STARTED", updateTimeInMillis}` | ✅ Yes |
+| **`relayModeUpdated`** | `{type, isRelayModeEnabled: true}` | ✅ Yes (added 2026-06-04, observed on DARE) |
 
 **`firmwareUpdate` event** — observed on HOTLIPS. Fields: `updateStatus` (`"STARTED"` observed),
 `updateTimeInMillis`. This is a significant QA event — firmware update during a session
 could explain degraded behavior.
 
+**`relayModeUpdated` event** — observed on DARE (2 occurrences, both `isRelayModeEnabled: true`).
+Relay mode extends a goTenna network via a relay node. Two other known radio modes —
+Limited Mode and Tether Mode — have not been observed as `event.type` records; Tether
+Mode's *polled* (not changed) state has instead turned up via SDK Error `clientRequest`
+records — see section 4a below.
+
 **`deviceDisconnected` new field:** `location` — `{lat, long, alt}` of the device at disconnect
 time. Not in the current `AtakEvent` dataclass.
+
+---
+
+### 4a. SDK Error `clientRequest` shape — raw radio commands (2026-06-04, new)
+
+A second shape of SDK Error record, distinct from the `message.event` shape covered above.
+Instead of an app-level event, `message.clientRequest` records a **raw BLE command
+attempt** — frequency changes, mode queries — with its own `QUEUED` → `COMPLETED`/`FAILED`
+lifecycle (`CANCELLED` also observed). `rawRequest`/`sanitizedRequest` is a Java/Kotlin
+`toString()`, not JSON — parsed with regex.
+
+| Command prefix | Meaning | Parsed as | Currently Parsed? |
+|---|---|---|---|
+| `Frequency(channels=[...], action=SET, ...)` | Frequency SET attempt at the radio-command level | `AtakFrequencySetAttempt` | ✅ Yes (added 2026-06-04) |
+| `NetworkMode(listenOnly=<bool>, action=GET, ...)` | App polling current listen-only state | `AtakRadioModeQuery` (`mode_type="listenOnly"`) | ✅ Yes (added 2026-06-04) |
+| `TetherMode(enabled=<bool>, batteryThreshold=<int>, action=GET, ...)` | App polling current tether-mode state | `AtakRadioModeQuery` (`mode_type="tether"`) | ✅ Yes (added 2026-06-04) |
+
+Important distinction: every `Frequency`/`NetworkMode`/`TetherMode` sample reviewed so
+far used `action=SET` (Frequency) or `action=GET` (NetworkMode/TetherMode) exclusively —
+Frequency requests **change** something and can fail; NetworkMode/TetherMode requests
+only **ask** what the current state is. Don't conflate a failed/queued attempt with a
+confirmed change — the confirmed mode state comes from the Device Health record's own
+`mode` field instead (`NORMAL`/`LISTEN_ONLY` observed there).
+
+Also fixed alongside this: `additionalInfo` extraction previously only checked
+`message.event.additionalInfo`, silently dropping all detail from `clientRequest`-shaped
+records (including every Frequency SET failure reason) into the generic tag count. Now
+checks both shapes.
 
 ---
 
@@ -259,6 +294,15 @@ with receiver outcomes using `logId` as the join key.
 
 ## New Fields — Recommended Parser Actions
 
+> **Update 2026-06-04:** most rows below are now implemented — `sdkError`/`AtakSdkErrorSummary`,
+> `loggingUserLocation`/`transmittedLocation`, `firmwareUpdate`, `deviceDisconnected.location`
+> are all live in `parser/atak.py` as of this session. Rows are left as-is for historical
+> record; treat unmarked rows as still open unless documented elsewhere (e.g.
+> `docs/log-field-definitions.md`) as implemented. New rows added below for this session's
+> discoveries: `relayModeUpdated`, and the `clientRequest` shape (`Frequency`/`NetworkMode`/
+> `TetherMode`) — see `docs/log-field-definitions.md` § "SDK Error — clientRequest shape" for
+> full field mapping.
+
 ### High priority
 
 | Field | Location | Action |
@@ -274,11 +318,13 @@ with receiver outcomes using `logId` as the join key.
 
 | Field | Location | Action |
 |-------|----------|--------|
-| `firmwareUpdate` event | event.type | Add to `AtakEvent` handling; parse `updateStatus` and `updateTimeInMillis` |
-| `deviceDisconnected.location` | event.location | Add `location` to `AtakEvent` for disconnect events |
+| `firmwareUpdate` event | event.type | ✅ Done |
+| `deviceDisconnected.location` | event.location | ✅ Done |
 | `objectType` | `message.objectType` on mapObject | Add to `AtakMessage` |
 | `radioType` | `sdkError.message.deviceState.radioType` | Capture `"PRO_X_2"` etc. for device classification |
 | `originatorCallsign` / `originatorUUID` | message top-level | Already in AtakMessage but verify parser populates them |
+| `relayModeUpdated` event | event.type | ✅ Done (2026-06-04) — `isRelayModeEnabled` |
+| `clientRequest` shape (Frequency/NetworkMode/TetherMode) | `message.clientRequest.rawRequest` | ✅ Done (2026-06-04) — see `AtakFrequencySetAttempt`, `AtakRadioModeQuery` |
 
 ---
 

@@ -24,14 +24,18 @@ from typing import Optional
 from .models import (
     ParseResult, DeviceInfo, SystemSample, SessionGap,
     AtakMessage, AtakDeviceHealth, AtakEvent, AtakAppInfo,
-    AtakSdkErrorSummary, AtakSdkErrorSample,
+    AtakSdkErrorSummary, AtakSdkErrorSample, AtakFrequencySetAttempt,
+    AtakRadioModeQuery,
 )
 
 _TS_FMT_OUT = "%Y-%m-%d %H:%M:%S.%f"
 
 # Filename pattern: diagnostic_ATAK_<CALLSIGN>_<GID>_<YYYY-MM-DD>_<HH_MM_SS_mmm>.log
+# The ATAK_ segment is optional: plugin v3.0 dropped it from the naming
+# convention (e.g. diagnostic_BARK_65043_2026-07-28_15_09_17_944.log), while
+# older captures still include it. Accept both.
 _FILENAME_RE = re.compile(
-    r"diagnostic_ATAK_(?P<callsign>[^_]+)_(?P<gid>\d+)_"
+    r"diagnostic_(?:ATAK_)?(?P<callsign>[^_]+)_(?P<gid>\d+)_"
     r"(?P<date>\d{4}-\d{2}-\d{2})_(?P<time>\d{2}_\d{2}_\d{2}_\d+)\.log"
 )
 
@@ -167,12 +171,15 @@ def _handle_message(record: dict, result: ParseResult) -> None:
     raw_open = record.get("numberOfOpenSegments")
     open_segments = None if raw_open == -99 else raw_open
 
+    sender_callsign = record.get("senderCallsign", "")
+
     atak_msg = AtakMessage(
         timestamp=_ms_to_str(ts),
         log_id=record.get("logId"),
         message_timestamp=_ms_to_str(msg_ts) if msg_ts else "",
         is_sender=record.get("isSender", False),
         sender_gid=record.get("senderGid"),
+        sender_callsign=sender_callsign,
         delivery_status=record.get("deliveryStatus", ""),
         segment_count=record.get("segmentCount", 1),
         open_segments=open_segments,
@@ -196,6 +203,13 @@ def _handle_message(record: dict, result: ParseResult) -> None:
     # Capture device GID from first sent message
     if not result.device.gid and atak_msg.is_sender and atak_msg.sender_gid:
         result.device.gid = str(atak_msg.sender_gid)
+
+    # Callsign fallback: filename parsing is the primary source (_parse_filename),
+    # but the v3.0 plugin naming convention doesn't always yield a match (or the
+    # filename may be missing/renamed entirely). Fall back to the device's own
+    # senderCallsign on a sent message — same pattern as the GID fallback above.
+    if not result.device.callsign and atak_msg.is_sender and sender_callsign:
+        result.device.callsign = sender_callsign
 
 
 def _handle_event(record: dict, result: ParseResult) -> None:
@@ -235,6 +249,9 @@ def _handle_event(record: dict, result: ParseResult) -> None:
         atak_event.bandwidth_khz = event.get("bandwidth")
         atak_event.channels = event.get("channels", [])
 
+    elif event_type == "relayModeUpdated":
+        atak_event.relay_mode_enabled = event.get("isRelayModeEnabled")
+
     result.atak_events.append(atak_event)
 
 
@@ -261,7 +278,70 @@ def _handle_sdk_log(record: dict, result: ParseResult) -> None:
     msg = record.get("message", {})
     device_state = msg.get("deviceState", {}) if isinstance(msg, dict) else {}
     event = msg.get("event", {}) if isinstance(msg, dict) else {}
-    info = event.get("additionalInfo", "") if isinstance(event, dict) else ""
+    client_request = msg.get("clientRequest", {}) if isinstance(msg, dict) else {}
+    # additionalInfo can live under either message.event (older shape) or
+    # message.clientRequest (the raw radio-command shape, e.g. Frequency SET
+    # attempts) — checking only .event silently dropped all clientRequest
+    # detail, including every Frequency SET attempt, into the generic tag
+    # count with no visibility into what actually happened.
+    info = ""
+    if isinstance(event, dict):
+        info = event.get("additionalInfo", "")
+    if not info and isinstance(client_request, dict):
+        info = client_request.get("additionalInfo", "")
+
+    # Frequency commands — a distinct, first-class data point. Both action=SET
+    # (change the radio) and action=GET (ask what it's on) land here; `action`
+    # is stored so consumers can tell them apart, and the UI splits on it. Do
+    # not filter GETs out — dropping records would lose real observations.
+    # rawRequest is a Kotlin/Java toString(), not structured JSON, so pull
+    # the channel list out with a regex rather than trying to json.loads it.
+    if isinstance(client_request, dict):
+        raw_request = client_request.get("rawRequest", "")
+        if "Frequency(channels=" in raw_request:
+            channels = [
+                {"frequency": float(freq) / 1_000_000, "isControlChannel": ctrl == "YES"}
+                for freq, ctrl in re.findall(
+                    r"Frequency:\s*(\d+)hz\s+isControlChannel:\s*(YES|NO)", raw_request
+                )
+            ]
+            action_match = re.search(r"action=(\w+)", raw_request)
+            result.atak_frequency_set_attempts.append(AtakFrequencySetAttempt(
+                timestamp=record.get("timestamp", ""),
+                status=client_request.get("status", ""),
+                action=action_match.group(1) if action_match else "",
+                channels=channels,
+            ))
+
+        # NetworkMode / TetherMode — usually the app polling (GET) current
+        # listen-only or tether-mode state: those don't change anything, they
+        # ask "what mode are you in right now." action=SET also occurs, though,
+        # and those ARE change commands — `action` distinguishes them and the UI
+        # labels each separately. Neither is confirmed state; that comes from
+        # the Device Health record's own `mode` field.
+        elif raw_request.startswith("NetworkMode("):
+            value_match = re.search(r"listenOnly=(true|false)", raw_request, re.IGNORECASE)
+            action_match = re.search(r"action=(\w+)", raw_request)
+            result.atak_radio_mode_queries.append(AtakRadioModeQuery(
+                timestamp=record.get("timestamp", ""),
+                mode_type="listenOnly",
+                value=(value_match.group(1).lower() == "true") if value_match else None,
+                status=client_request.get("status", ""),
+                action=action_match.group(1) if action_match else "",
+            ))
+
+        elif raw_request.startswith("TetherMode("):
+            value_match = re.search(r"enabled=(true|false)", raw_request, re.IGNORECASE)
+            threshold_match = re.search(r"batteryThreshold=(\d+)", raw_request)
+            action_match = re.search(r"action=(\w+)", raw_request)
+            result.atak_radio_mode_queries.append(AtakRadioModeQuery(
+                timestamp=record.get("timestamp", ""),
+                mode_type="tether",
+                value=(value_match.group(1).lower() == "true") if value_match else None,
+                status=client_request.get("status", ""),
+                battery_threshold=int(threshold_match.group(1)) if threshold_match else None,
+                action=action_match.group(1) if action_match else "",
+            ))
 
     # Accumulate into the mutable state dict on result (cleaned up after loop)
     if not hasattr(result, "_sdk_log_state"):
@@ -380,9 +460,22 @@ def _load_records(text: str, result: ParseResult) -> list[dict]:
         text = text[:-1]
 
     for i, raw_line in enumerate(text.splitlines(), start=1):
-        line = raw_line.strip().rstrip(",")
+        line = raw_line.strip()
         if not line:
             continue
+        # Some field logs append a second, unwrapped section after the main
+        # array closes (seen as a "--- RSDK LOGS ---" divider followed by more
+        # bare JSON objects — same sdk_log record shape, just not wrapped in
+        # a second array). Lines that don't even look like a JSON object are
+        # section dividers/annotations, not parse failures — skip silently.
+        if not line.startswith("{"):
+            continue
+        line = line.rstrip(",")
+        # A trailing ']' here is the main array's closing bracket landing on
+        # the same line as the last real record, because the array doesn't
+        # close at the true end of the file when a second section follows it.
+        if line.endswith("]"):
+            line = line[:-1].rstrip(",")
         try:
             records.append(json.loads(line))
         except json.JSONDecodeError as e:
@@ -463,6 +556,18 @@ def parse_atak_log(path: Path) -> ParseResult:
         result.parse_errors.append(
             "DATA LIMITATION — sdkError (SDK Logging 2.0) volume baseline unknown: "
             "counts are aggregated and informational, not a pass/fail signal."
+        )
+
+    # Data-driven — fires only when it actually manifests. Observed in early
+    # ATAK plugin v3.0 builds (no connectionState records at all in some
+    # sessions); see docs/atak_v3_early_integration_notes.md. A log with zero
+    # health records still parses fully otherwise — this only flags that
+    # Thermal/Battery/radio-health data is unavailable for this session.
+    if records and not result.atak_health_samples:
+        result.parse_errors.append(
+            "DATA LIMITATION — no device-health (connectionState) records in "
+            "this log: battery %, thermal, firmware version, and radio-health "
+            "are unavailable for this session."
         )
 
     _detect_session_gaps(result)
