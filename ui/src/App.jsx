@@ -1336,6 +1336,27 @@ function HopsTab({ results }) {
   )
 }
 
+// Raw radio-command groupings are keyed by values from open vocabularies, so
+// their insertion order depends on which records happen to survive the time
+// window — dragging the slider would otherwise reshuffle rows and chips, with
+// SET attempts jumping above and below GET queries between positions. These
+// give a stable render order. Unrecognised values sort last (alphabetically
+// among themselves) but are never dropped: that is the whole point of treating
+// the vocabularies as open.
+const ACTION_ORDER    = ['SET', 'GET']
+const STATUS_ORDER    = ['QUEUED', 'COMPLETED', 'FAILED', 'CANCELLED', 'TIMEOUT']
+const MODE_TYPE_ORDER = ['listenOnly', 'tether']
+
+function sortedEntries(obj, order) {
+  const rank = key => {
+    const i = order.indexOf(key)
+    return i < 0 ? order.length : i
+  }
+  return Object.entries(obj).sort(
+    ([a], [b]) => rank(a) - rank(b) || a.localeCompare(b)
+  )
+}
+
 function OriginatorFrequencySection({ results }) {
   const freqNodes = React.useMemo(() => {
     const nodes = []
@@ -1377,7 +1398,9 @@ function OriginatorFrequencySection({ results }) {
       // FAILED at the radio, and a FAILED attempt likely never produces a
       // confirming frequencyUpdated event at all. Shown separately so a
       // failed attempt doesn't get confused with a confirmed change.
-      const setAttempts = (r.atak_frequency_set_attempts || [])
+      // Named freqCommands, not setAttempts: this list holds every Frequency
+      // command, GET as well as SET (the serialized key keeps its original name).
+      const freqCommands = (r.atak_frequency_set_attempts || [])
         .filter(a => a.timestamp)
         .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
       // Bucket by action, THEN status. A Frequency(...) command can be a SET
@@ -1386,7 +1409,7 @@ function OriginatorFrequencySection({ results }) {
       // Records whose action didn't parse get their own bucket rather than
       // being folded into SET, which would overstate change attempts.
       const cmdCounts = {}   // { SET: {QUEUED: n, …}, GET: {…}, '': {…} }
-      setAttempts.forEach(a => {
+      freqCommands.forEach(a => {
         const action = a.action || ''
         if (!cmdCounts[action]) cmdCounts[action] = {}
         cmdCounts[action][a.status] = (cmdCounts[action][a.status] || 0) + 1
@@ -1413,7 +1436,7 @@ function OriginatorFrequencySection({ results }) {
       // answer is "confirmed frequency unknown, N attempts observed".
       // Only a COMPLETED *SET* is worth naming in the empty state — a COMPLETED
       // GET just means a successful query and says nothing about configuration.
-      const completedSetCount = setAttempts.filter(
+      const completedSetCount = freqCommands.filter(
         a => a.status === 'COMPLETED' && a.action === 'SET'
       ).length
       const confirmedChanges = freqEvents
@@ -1444,7 +1467,7 @@ function OriginatorFrequencySection({ results }) {
         }
       })
 
-      if (!freqEvents.length && !rssiVals.length && !setAttempts.length) return  // nothing to show for this device
+      if (!freqEvents.length && !rssiVals.length && !freqCommands.length) return  // nothing to show for this device
       nodes.push({
         callsign, gid,
         hasChanges: segments.length > 1,
@@ -1459,7 +1482,11 @@ function OriginatorFrequencySection({ results }) {
           ? chKey(confirmedChanges[confirmedChanges.length - 1].channels)
           : null,
         avgRssi, medRssi, allZero, rssiCount: rssiVals.length,
-        cmdCounts, hasFailedAttempts: setAttempts.some(a => a.status === 'FAILED'),
+        // Red border means "a change attempt failed." A failed GET is a failed
+        // query — it says nothing about whether the radio was reconfigured, so
+        // it must not raise the same alarm.
+        cmdCounts,
+        hasFailedAttempts: freqCommands.some(a => a.action === 'SET' && a.status === 'FAILED'),
         completedSetCount,
       })
     })
@@ -1539,12 +1566,12 @@ function OriginatorFrequencySection({ results }) {
                     Status list within a row is built dynamically — the vocabulary
                     is an open set (QUEUED/COMPLETED/FAILED/CANCELLED/TIMEOUT
                     observed so far); a hardcoded list drops real records. */}
-                {Object.entries(node.cmdCounts).map(([action, statuses]) => (
+                {sortedEntries(node.cmdCounts, ACTION_ORDER).map(([action, statuses]) => (
                   <div key={action} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
                     <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted }}>
                       {freqCmdLabel(action)}:
                     </span>
-                    {Object.entries(statuses).map(([s, count]) => (
+                    {sortedEntries(statuses, STATUS_ORDER).map(([s, count]) => (
                       <span key={s} style={{
                         fontFamily: 'var(--mono)', fontSize: 7,
                         color: s === 'FAILED' ? C.red : s === 'COMPLETED' ? C.green : C.muted,
@@ -1755,13 +1782,13 @@ function OriginatorRadioModeSection({ results }) {
 
             {Object.keys(node.pollCounts).length > 0 && (
               <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
-                {Object.entries(node.pollCounts).flatMap(([modeType, byAction]) =>
-                  Object.entries(byAction).map(([action, statuses]) => (
+                {sortedEntries(node.pollCounts, MODE_TYPE_ORDER).flatMap(([modeType, byAction]) =>
+                  sortedEntries(byAction, ACTION_ORDER).map(([action, statuses]) => (
                     <div key={`${modeType}|${action}`} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
                       <span style={{ fontFamily: 'var(--mono)', fontSize: 7, color: C.muted }}>
                         {modeType === 'listenOnly' ? 'NetworkMode' : 'TetherMode'} {modeCmdLabel(action)}:
                       </span>
-                      {Object.entries(statuses).map(([status, count]) => (
+                      {sortedEntries(statuses, STATUS_ORDER).map(([status, count]) => (
                         <span key={status} style={{ fontFamily: 'var(--mono)', fontSize: 7, color: statusColor(status) }}>
                           {count} {status.toLowerCase()}
                         </span>

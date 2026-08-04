@@ -183,8 +183,8 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | PLI Settings "session-start" mislabeling | ✅ Done + field-verified (2026-07-29) — relabeled + gap-caveat added |
 | UI header/dropdown stacking-context bug | ✅ Done + field-verified (2026-07-29) — `overscroll-behavior: none` + header `zIndex: 100` |
 | ATAK radio-command layer — Frequency SET attempts + NetworkMode/TetherMode queries + `relayModeUpdated` | ✅ Done (2026-08-04) — 8 commits on `fix-atak-v3-filename-and-health-limitation`, not yet pushed; parser→API→UI chain verified, new Modes tab, RSSI→Freq/RSSI, field-verified by karen |
-| Status-chip **and per-action row** render order shifts as the time window changes | ⏳ Pending — insertion order depends on which records survive the window. Karen found in round 4 that this now moves whole rows, not just chips: at 12h the frequency card shows `SET attempts` above `GET queries`, at 6h they flip. Higher impact than the original chip nit, since SET attempts is the row read first. Fix by ordering rows `SET → GET → unknown` and chips by a canonical status list with unrecognised values appended (keeping the open-vocabulary property) |
-| `hasFailedAttempts` is not action-scoped — a FAILED **GET** would paint the card red | ⏳ Pending — `App.jsx:1462` uses `setAttempts.some(a => a.status === 'FAILED')`, and `setAttempts` now holds both actions despite its name. Latent, not reproducible in any current log (HOTLIPS/SYNTH4 FAILEDs are all SETs; MESMER's GET failure mode is TIMEOUT). It is the last place a GET is still read as a change attempt. Fix: `a.action === 'SET' && a.status === 'FAILED'`, and rename `setAttempts` → `freqCommands` |
+| Status-chip **and per-action row** render order shifts as the time window changes | ✅ Done (2026-08-04) — module-scope `sortedEntries(obj, order)` plus `ACTION_ORDER` / `STATUS_ORDER` / `MODE_TYPE_ORDER` give a stable render order in both card sections. Unrecognised values sort last (alphabetically among themselves) and are never dropped, preserving the open-vocabulary property |
+| `hasFailedAttempts` is not action-scoped — a FAILED **GET** would paint the card red | ✅ Done (2026-08-04) — now `a.action === 'SET' && a.status === 'FAILED'`; `setAttempts` renamed `freqCommands` since it holds both actions. This was the last place a GET was still read as a change attempt |
 | COMPLETED SET treated as confirmed frequency | ✅ Resolved (2026-08-04) — **reverted**; confirmed frequency is `frequencyUpdated` only. Enhanced logs honestly show "unknown" + attempt counts |
 | `toMs` double-`Z` → `NaN` → durations render `—` | ✅ Done (2026-08-04) — karen found live on MESMER; both sites match the correct form at `App.jsx:2744` |
 | SET-attempt status hardcoded allow-list drops real statuses | ✅ Done (2026-08-04) — dynamic; MESMER's CANCELLED + TIMEOUT no longer vanish (28 shown, was 24) |
@@ -365,9 +365,14 @@ report: the Modes poll counts look 70 short of ground truth at the default windo
 the default snaps to 10:00–22:00 while the session runs to 22:34 — clearing the window
 lands on the exact figures. Not a miscount.
 
-*Still open on this branch (see What to Work On Next):* two items karen raised in round 4
-(row/chip render order, `hasFailedAttempts` not action-scoped); model names still lag the
-data.
+*Both round-4 items fixed (2026-08-04).* Render order is now stable via a shared
+`sortedEntries` helper — rows and chips no longer reshuffle as the slider moves, while
+unrecognised values still render (sorted last) rather than being dropped. And
+`hasFailedAttempts` is action-scoped, so a failed *query* no longer paints the card red as
+though a change attempt had failed — the last place a GET was still read as a change.
+
+*Still open on this branch:* model names lag the data (`AtakFrequencySetAttempt` holds GETs);
+`export.py` `_CSV_TYPES` decision; neither `toMs` site is exercised on screen.
 
 **2026-07-29 — Originator PLI 5s-bucket bug, PLI Settings mislabeling, and a two-layer UI header/dropdown bug (all field-verified):**
 - **Originator PLI silently dropped 5s-cadence traffic:** BARK's log showed a real ~5s PLI
