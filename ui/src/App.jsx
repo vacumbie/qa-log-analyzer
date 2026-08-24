@@ -3,6 +3,7 @@ import FileUpload, { ParsingOverlay } from './components/FileUpload.jsx'
 import ChartPanel from './components/ChartPanel.jsx'
 import TakTab from './components/TakTab.jsx'
 import useLogData from './hooks/useLogData.js'
+import { useLeaflet } from './hooks/useLeaflet.js'
 
 // ── Palette & constants ───────────────────────────────────────────────────────
 const PALETTE = ['#00d4ff','#ff6b35','#ffd166','#c77dff','#00e5a0','#ff4757','#4a90e2','#ff6b9d']
@@ -98,6 +99,13 @@ function KpiRow({ results }) {
   // apply (no RF messages, PLI, chat, etc.). Show a compact relay summary instead.
   const allRelay = results.length > 0 && results.every(r => r.log_format === 'relay_manager')
   if (allRelay) return <RelayKpiRow results={results} />
+
+  // Same reasoning for TAK: a server-side stream carries no radio identity, no
+  // RF data and no thermal data, so the device cards below would render dashes
+  // and a literal "0 versions" — a zero standing in for "this format has no such
+  // concept", which is exactly what the honesty rule forbids.
+  const allTak = results.length > 0 && results.every(r => r.log_format === 'tak')
+  if (allTak) return <TakKpiRow results={results} />
 
   // Hop counts — diagnostic, ATAK, and RSDK via GRIP_Receiver incoming messages
   const allHops = results.flatMap(r => {
@@ -907,24 +915,9 @@ function HopCountMap({ results }) {
   const [selectedDevice, setSelectedDevice] = React.useState(deviceOptions[0]?.filename || '')
   const [selectedSender, setSelectedSender]  = React.useState('ALL')
   const [showLinks, setShowLinks]             = React.useState(true)
-  const [leafletReady, setLeafletReady]       = React.useState(!!window.L)
-
-  // Load Leaflet from CDN if not already present
-  React.useEffect(() => {
-    if (window.L) { setLeafletReady(true); return }
-
-    // CSS
-    const link = document.createElement('link')
-    link.rel  = 'stylesheet'
-    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
-    document.head.appendChild(link)
-
-    // JS
-    const script = document.createElement('script')
-    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
-    script.onload = () => setLeafletReady(true)
-    document.head.appendChild(script)
-  }, [])
+  // Leaflet loads from the unpkg CDN, shared with the TAK position map so the
+  // library is fetched once per page rather than once per map.
+  const leafletReady = useLeaflet()
 
   // Build map data for selected device
   const { points, senderOptions, excludedNonPliCount } = React.useMemo(() => {
@@ -2520,6 +2513,33 @@ function RelayKpiRow({ results }) {
       <KpiCard label="Device Alerts"     value={totalAlerts || '—'} sub="unsolicited pull-required alerts" color='#f59e0b' />
       <KpiCard label="Sub-Type"          value={subtypes.join(' + ') || '—'} sub="auto-detected"      color='#6366f1' />
       <KpiCard label="Environment"       value={envs.join(' / ').toUpperCase() || '—'} sub="stage confirmed · prod TBD" color={envs.includes('stage') ? '#22d3ee' : '#f59e0b'} />
+    </div>
+  )
+}
+
+function TakKpiRow({ results }) {
+  // Compact KPI strip shown in the Overview when every loaded log is a TAK
+  // server stream. The device cards don't apply: TAK is the server's view of
+  // many clients, so there is no serial, GID, firmware version, battery or
+  // temperature to report — see the tak rows in CLAUDE.md's known data
+  // limitations. Everything here is server-side or per-event.
+  const sum = key => results.reduce((n, r) => n + (r.summary?.[key] || 0), 0)
+  const totalEvents = sum('total_events')
+  const callsigns = new Set(
+    results.flatMap(r => (r.tak_events || []).map(e => e.callsign).filter(Boolean))
+  ).size
+  const serverVersions = [...new Set(results.map(r => r.tak_server_info?.server_version).filter(Boolean))]
+  const skew = sum('negative_latency_count')
+
+  return (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '12px 36px', borderBottom: '1px solid var(--border2)', background: 'rgba(5,8,15,0.75)', flexShrink: 0, backdropFilter: 'blur(4px)' }}>
+      <KpiCard label="Logs Loaded"    value={results.length} sub="TAK server stream"          color='#22d3ee' />
+      <KpiCard label="CoT Events"     value={totalEvents}    sub="all categories"             color='#22d3ee' />
+      <KpiCard label="Callsigns"      value={callsigns}      sub="observed by the server"     color='#6366f1' />
+      <KpiCard label="PLI"            value={sum('pli_count')} sub="position reports"         color='#10b981' />
+      <KpiCard label="No GPS Fix"     value={sum('no_fix_count')} sub="PLI/Marker only"       color={sum('no_fix_count') ? '#f59e0b' : '#64748b'} />
+      <KpiCard label="Clock Skew"     value={skew || '—'}    sub="events received before sent" color={skew ? '#ef4444' : '#64748b'} />
+      <KpiCard label="Server Version" value={serverVersions.join(', ') || '—'} sub="from the CoT handshake" color='#22d3ee' />
     </div>
   )
 }

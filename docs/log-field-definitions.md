@@ -772,14 +772,19 @@ Parsed into `TakEvent` records on `ParseResult.tak_events`, plus one optional
 
 > **Not extracted from `raw_cot`:** GeoChat `<remarks>` message bodies, `<status
 > battery>`, `<takv>` device/OS strings, and `<track>` speed/course. All present
-> in the XML, none promoted to fields in this version.
+> in the XML, none promoted to fields in this version. Both gaps are reported in
+> `parse_errors` as `DATA LIMITATION —` entries; the telemetry entry names only
+> the elements a given stream actually carries, with per-element counts.
 
-### Serialized but not displayed
+### Parsed but not serialized
 
-`summary.min_latency_ms` is produced by `_result_to_dict()` and recomputed on
-time-window change in `App.jsx`, but **no KPI renders it** (sample `−93 ms`).
-Either surface it or drop it — the ParseResult chain currently stops one step
-short of the UI.
+`raw_cot` is populated by the parser and declared on `TakEvent`, but
+`_result_to_dict()` **deliberately omits it** — the full CoT XML would dominate
+the payload for no consumer, and `tests/test_parse_route.py` pins the exact
+serialized key set so it can't drift back in. The practical consequence is that
+everything listed in the note above is unreachable from the UI *and* from an
+export, not merely un-promoted: surfacing any of it means extracting it in the
+parser first. Both `DATA LIMITATION` entries say so.
 
 ---
 
@@ -812,7 +817,7 @@ These fields are computed by the parser or API layer — they do not appear dire
 | `summary.pli_count` / `chat_count` / `marker_count` / `other_count` (TAK) | `category` counts | One per category | `marker_count` and `other_count` use the `is_marker` / `is_server_control` properties |
 | `summary.unique_callsigns` (TAK) | `len(tak_unique_callsigns)` | Distinct operators on the server | Not a radio count — one operator may change radios |
 | `summary.no_fix_count` (TAK) | `len(tak_no_fix_events)` | **PLI/Marker only** | ⚠️ The `parse_errors` no-fix sentence counts **all** categories, so the two numbers differ legitimately (1 vs 5 in the sample). See the parsing-requirements limitation — the error wording is an open fix |
-| `summary.avg_latency_ms` / `max_latency_ms` / `min_latency_ms` (TAK) | `tak_latency_ms_values` | Mean (1 dp) / max / min | `None` when no record has both timestamps. `min` is serialized but unrendered |
+| `summary.avg_latency_ms` / `max_latency_ms` / `min_latency_ms` (TAK) | `tak_latency_ms_values` | Mean (1 dp) / max / min | `None` when no record has both timestamps. All three are read by the TAK tab's KPI row — it must not re-derive them from `tak_events`, which is how the displayed average and the exported one came to round differently |
 | `summary.negative_latency_count` (TAK) | `latency_ms < 0` | Clock-skew indicator | Device clock ahead of server — real data, not an error (P8) |
 
 ---

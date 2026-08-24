@@ -68,6 +68,7 @@ asking anyone?* If not, simplify.
 | API | FastAPI + Uvicorn | `cd api && uvicorn main:app --reload --port 8000` |
 | UI | React 18 + Vite | `cd ui && npm run dev` → `http://localhost:5173` |
 | Charts | Chart.js 4.4 + react-chartjs-2 | Line and Bar only; annotation plugin not installed |
+| Maps | Leaflet 1.9.4 | **CDN only — not an npm dependency.** Loaded via `useLeaflet()` in `ui/src/hooks/useLeaflet.js`, shared by the Hop Count Map and the TAK position map |
 | Tests | Pytest | `pytest tests/` from repo root with venv active |
 | Fonts | Barlow Condensed, Rajdhani, Share Tech Mono | Loaded via Google Fonts `<link>` in `index.html` |
 
@@ -99,7 +100,7 @@ qa-log-analyzer/
 │   ├── components/
 │   │   ├── ChartPanel.jsx  # All Chart.js chart components + CHART_MAP registry
 │   │   ├── FileUpload.jsx  # Upload modal — uses createPortal (see architecture)
-│   │   ├── TakTab.jsx      # TAK Server tab — Leaflet map + latency chart
+│   │   ├── TakTab.jsx      # TAK Server tab — Leaflet map (chart via CHART_MAP)
 │   │   ├── DeviceSummary.jsx
 │   │   └── DataPointSelector.jsx
 │   └── hooks/
@@ -382,7 +383,7 @@ project's lifecycle, not a sign something is broken.
 | `tak` | **Server-side viewpoint — no radio identity or RF data.** No serial, GID, firmware version, battery, thermal, RSSI or hop count; identity is callsign + CoT `uid`. Excluded from the Health Score for the same reason as `relay_manager`, and contributes nothing to the device KPI row |
 | `tak` | `lat`/`lon` of exactly `(0,0)` is the CoT no-GPS-fix sentinel (paired with a `999999.0`-family `hae`/`ce`/`le`), not a real position — flagged `has_gps_fix=False`, never plotted. The parser owns this definition; see "A scoped count must state its scope" for why the UI must not re-derive it |
 | `tak` | Negative `latency_ms` (`receivedAt` before `time`) is real data, not an error — the source device's clock is ahead of the server. Preserved, never clamped, and shown red in the latency chart with that caption. 10 of 91 events in the first sample (min `−93 ms`). Server-side counterpart to P6, tracked as **P8** in `docs/parsing-requirements.md` |
-| `tak` | GeoChat (`b-t-f`) message bodies are not extracted — only the envelope (sender callsign, timestamps); the `<remarks>` text stays in `raw_cot`. Also unextracted from the raw XML: `<status battery>`, `<takv>` device/OS strings, `<track>` speed/course. Surfaced as a `DATA LIMITATION —` entry |
+| `tak` | GeoChat (`b-t-f`) message bodies are not extracted — only the envelope (sender callsign, timestamps); the `<remarks>` text stays in `raw_cot`. Also unextracted from the raw XML: `<status battery>`, `<takv>` device/OS strings, `<track>` speed/course. These are **two separate `DATA LIMITATION —` entries**: the Chat one fires only when Chat records are present, the telemetry one only for the elements a given stream actually carries (with per-element counts). Both note that `raw_cot` itself is not serialized, so none of it is reachable from the UI or an export |
 | `tak` | Two different "no GPS fix" counts exist: `summary.no_fix_count` is PLI/Marker-scoped (1 in the sample) while the `parse_errors` sentence counts all categories ("5 event(s)"). Both are correct for what they measure, but the error wording reads as 5 devices losing GPS when 1 did — the UI resolved this conflation, **the parser text has not**. Open fix |
 | `tak` | `parentCallsign` always null in observed samples, and `platform` is often absent (18 of 91, including all Chat records) even when `nodeType` is known — stored as `None`, never guessed |
 | `tak` | Single-stream validation — one real sample plus three hand-built fixtures (edge cases, clean PLI-only, zero-coordinate positions). Multi-server, multi-day and larger streams unobserved. The `lat == 0`/`lon == 0` sentinel rule **is** covered: `tak_stream_zero_coordinate_positions.json` exercises a real prime-meridian position, a real equator position, and the `(0,0)` sentinel — but no *observed* sample has ever contained one, so the fixture is hand-built, not field-confirmed |
@@ -452,11 +453,13 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | Rename `AtakFrequencySetAttempt`/`AtakRadioModeQuery` (they hold both actions) | ⏳ Deferred — ~69 references incl. the two serialized keys, tests, and docs; pure churn for no behavior change. Docstrings state what the fields actually hold |
 | `_CSV_TYPES` entry or JSON-only note for the two new ATAK tables | ⏳ Pending — decision not yet recorded in `api/routes/export.py` |
 | TAK server CoT stream — parser + TAK Server tab | ✅ Built 2026-08-24 (PR #35, open) — `karen` passed; the other 5 gate agents have not run |
-| TAK — Leaflet loaded from npm (`TakTab.jsx`) vs unpkg CDN (Hop Count Map) | ⏳ Pending decision — the two disagree; this file records CDN as the deliberate lean-stack choice, so one of them should change |
+| TAK — Leaflet loaded from npm (`TakTab.jsx`) vs unpkg CDN (Hop Count Map) | ✅ Done — resolved as **CDN only**. `leaflet` removed from `package.json`/`package-lock.json`; both maps now use the shared `useLeaflet()` hook, so the library is fetched once per page instead of bundled *and* fetched |
 | TAK — `parse_errors` no-fix wording counts all categories while `summary.no_fix_count` is PLI/Marker-scoped | ⏳ Pending — same conflation the UI already fixed |
-| TAK — `summary.min_latency_ms` serialized and time-windowed but never rendered | ⏳ Pending — ParseResult chain stops one step short of the UI; add a KPI or drop the field |
-| TAK — no format-specific KPI row on Overview | ⏳ Pending — a TAK-only session falls through to the device row and shows `NETWORK NODES —`, `PEAK TEMP —`, `APP VERSION: 0 versions`; `relay_manager` has `RelayKpiRow` for exactly this |
-| TAK — `_CSV_TYPES` entry or JSON-only note for `tak_events` | ⏳ Pending — same unrecorded decision as the ATAK command tables |
+| TAK — `summary.min_latency_ms` serialized and time-windowed but never rendered | ✅ Done — rendered as a Min Latency KPI. `TakTab` now *reads* `avg`/`max`/`min_latency_ms` and `unique_callsigns` from the summary instead of recomputing them, which also removed an API-vs-UI rounding disagreement (1 dp vs integer) |
+| TAK — no format-specific KPI row on Overview | ✅ Done — `TakKpiRow` in `App.jsx`, mirroring `RelayKpiRow`. A TAK-only session no longer falls through to the device row and its `APP VERSION: 0 versions` |
+| TAK — `_CSV_TYPES` entry or JSON-only note for `tak_events` | ✅ Done — `"tak": {"tak_events"}` in `api/routes/export.py`; it's a flat per-row table, so an entry rather than a JSON-only note. The two ATAK command tables are still undecided |
+| TAK — `TakLatencyChart` defined outside `ChartPanel.jsx`/`CHART_MAP` | ✅ Done — moved to `ChartPanel.jsx` as `tak_latency`; `TakTab` renders it via `<ChartPanel selectedPoints={['tak_latency']} />`. `ChartPanel.jsx` is again the only file importing `react-chartjs-2` |
+| TAK — `<status battery>`/`<takv>`/`<track>` documented as surfaced via `DATA LIMITATION` but no entry existed | ✅ Done — `parse_tak_log` now emits a second entry naming only the elements a given stream actually carries, with per-element counts |
 | P8: TAK server receipt latency / clock skew | ⏳ Open — defined 2026-08-24 in `docs/parsing-requirements.md` so the `parser/tak.py` and `models.py` references resolve |
 | `extractTimeRange` matches `stale=` inside embedded CoT XML — 18-min session reads as a 25-hour slider range | ⏳ Pending — pre-existing scanner behavior, newly reachable via TAK; slider can't narrow within the data |
 | TAK map legend lists unplotted callsigns; `PALETTE` collides past 10 callsigns | ⏳ Pending — cosmetic; `colorByCallsign` iterates all events rather than plotted ones |

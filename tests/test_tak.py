@@ -1,5 +1,6 @@
 """tests/test_tak.py"""
 
+import json
 from pathlib import Path
 
 from parser.tak import parse_tak_log, is_tak_log
@@ -281,14 +282,64 @@ def test_skipped_total_counts_malformed_and_missing_time_together():
 # stream is the negative control — if any of them fire here, they would fire on
 # every log and stop meaning anything.
 
-def test_clean_stream_reports_no_parse_errors_at_all():
-    result = parse_tak_log(CLEAN_FIXTURE)
-    assert result.parse_errors == []
+def test_clean_stream_reports_no_operational_parse_errors():
+    """Scoped to the operational entries — the ones that mean something went
+    wrong with this file. The unextracted-XML limitation is deliberately not in
+    that set: it fires on any stream whose records carry <status>/<takv>/<track>,
+    which a clean stream does. Asserting `parse_errors == []` here would instead
+    certify that a real, documented gap goes unreported."""
+    operational = [e for e in parse_tak_log(CLEAN_FIXTURE).parse_errors
+                   if not e.startswith("DATA LIMITATION —")]
+    assert operational == []
 
 
 def test_chat_data_limitation_silent_when_no_chat_records():
     result = parse_tak_log(CLEAN_FIXTURE)
-    assert not any(e.startswith("DATA LIMITATION —") for e in result.parse_errors)
+    assert not any("Chat message bodies" in e for e in result.parse_errors)
+
+
+# ── Unextracted raw-XML telemetry ─────────────────────────────────────────────
+# <status battery>, <takv> and <track> are parsed by nobody and live only in
+# raw_cot, which the API doesn't serialize. CLAUDE.md documented them as
+# surfaced via a DATA LIMITATION entry before one existed; these pin that it
+# does, and that it names only what a given stream actually carries.
+
+def test_unextracted_xml_limitation_fires_when_telemetry_is_present():
+    result = parse_tak_log(CLEAN_FIXTURE)
+    assert any("Telemetry present in the raw CoT XML" in e for e in result.parse_errors)
+
+
+def test_unextracted_xml_limitation_counts_each_element():
+    result = parse_tak_log(CLEAN_FIXTURE)
+    entry = next(e for e in result.parse_errors if "Telemetry present" in e)
+    assert "battery percentage (6 event(s))" in entry
+    assert "device model / OS / TAK version (6 event(s))" in entry
+    assert "speed and course (6 event(s))" in entry
+
+
+def test_unextracted_xml_limitation_names_only_what_is_present():
+    """The edge-case fixture carries one <status battery> and no <takv>/<track>,
+    so a stream must not be told telemetry was dropped that it never had."""
+    result = parse_tak_log(EDGE_FIXTURE)
+    entry = next(e for e in result.parse_errors if "Telemetry present" in e)
+    assert "battery percentage (1 event(s))" in entry
+    assert "device model" not in entry
+    assert "speed and course" not in entry
+
+
+def test_unextracted_xml_limitation_silent_when_no_telemetry(tmp_path):
+    """Envelope-only records — a bare <event><point/></event> with no <detail>
+    child — must produce no entry at all, or it would fire on every log."""
+    bare = tmp_path / "tak-stream-bare.json"
+    bare.write_text(json.dumps([{
+        "callsign": "BARE", "category": "PLI", "lat": 30.1, "lon": -85.6,
+        "nodeType": "Android", "time": "2026-07-30T19:24:54Z",
+        "receivedAt": "2026-07-30T19:24:55Z", "type": "a-f-G-U-C",
+        "uid": "ANDROID-bare",
+        "raw": '<event uid="ANDROID-bare"><point lat="30.1" lon="-85.6"/></event>',
+    }]))
+    result = parse_tak_log(bare)
+    assert not any("Telemetry present" in e for e in result.parse_errors)
 
 
 def test_no_fix_error_silent_when_every_event_has_a_fix():

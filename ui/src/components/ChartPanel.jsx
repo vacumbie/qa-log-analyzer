@@ -915,6 +915,84 @@ function GripRssiOverTime({ results }) {
   )
 }
 
+// ── TAK server ────────────────────────────────────────────────────────────────
+
+/**
+ * Server receipt latency per event — receivedAt minus the device-generated
+ * time, in chronological order.
+ *
+ * Points-only via showLine:false, the same technique BatteryOverTime uses to
+ * avoid registering a separate scatter controller. Negative values are real
+ * data (a source device whose clock runs fast relative to the server) and are
+ * drawn red rather than clamped — see the tak row in CLAUDE.md's known data
+ * limitations, and P8 in docs/parsing-requirements.md.
+ */
+function TakLatency({ results }) {
+  const events = results
+    .filter(r => r.log_format === 'tak')
+    .flatMap(r => r.tak_events || [])
+  const withLatency = events
+    .filter(e => e.latency_ms != null)
+    .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+
+  if (!withLatency.length) {
+    return (
+      <ChartCard title="Server Receipt Latency" subtitle="receivedAt − time per event">
+        <div style={{ fontFamily:'var(--mono)', fontSize:9, color:'#4a6080', padding:'20px 0', textAlign:'center' }}>
+          No events with both a device timestamp and a server receipt timestamp.
+        </div>
+      </ChartCard>
+    )
+  }
+
+  const negativeCount = withLatency.filter(e => e.latency_ms < 0).length
+
+  const data = {
+    labels: withLatency.map(e => e.timestamp.slice(11, 19)),
+    datasets: [{
+      label: 'Latency (ms)',
+      data: withLatency.map(e => e.latency_ms),
+      showLine: false,
+      pointRadius: 3,
+      pointBackgroundColor: withLatency.map(e => e.latency_ms < 0 ? '#ff4757' : '#00d4ff'),
+      borderColor: 'transparent',
+    }],
+  }
+
+  const options = {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      tooltip: {
+        ...TT_CFG,
+        callbacks: {
+          label: ctx => {
+            const e = withLatency[ctx.dataIndex]
+            return `${e.callsign || 'unknown'} · ${e.latency_ms} ms`
+          },
+        },
+      },
+      legend: { labels: { color:'#4a6080', boxWidth: 10 } },
+    },
+    scales: {
+      x: { grid: { color: GRID }, ticks: { ...TICK, maxTicksLimit: 10, maxRotation: 45 } },
+      y: {
+        grid: { color: GRID }, ticks: TICK,
+        title: { display: true, text: 'ms', color: '#2a3a52', font: { size: 9 } },
+      },
+    },
+  }
+
+  return (
+    <ChartCard
+      title="Server Receipt Latency"
+      subtitle={`receivedAt − time per event · ${negativeCount} event(s) show negative latency (red) — a fast device clock, not a data error`}
+      height={320}
+    >
+      <Line data={data} options={options} />
+    </ChartCard>
+  )
+}
+
 // ── Registry ──────────────────────────────────────────────────────────────────
 
 const CHART_MAP = {
@@ -938,6 +1016,7 @@ const CHART_MAP = {
   atak_partial_received: AtakPartialReceived,
   atak_connection_state: AtakConnectionState,
   atak_events_timeline:  AtakEventsTimeline,
+  tak_latency:           TakLatency,
 }
 
 export default function ChartPanel({ results, selectedPoints }) {

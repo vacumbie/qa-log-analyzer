@@ -1,19 +1,13 @@
 import { useEffect, useRef, useMemo } from 'react'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
-import { Line } from 'react-chartjs-2'
-import {
-  Chart as ChartJS, CategoryScale, LinearScale, LineElement, PointElement, Tooltip, Legend,
-} from 'chart.js'
-
-ChartJS.register(CategoryScale, LinearScale, LineElement, PointElement, Tooltip, Legend)
+import ChartPanel from './ChartPanel'
+import { useLeaflet } from '../hooks/useLeaflet'
 
 // ── Local style constants (mirrors App.jsx / ChartPanel.jsx dark-instrument palette) ──
+// The two extra entries past the canonical eight are deliberate: the map colours
+// one series per callsign, and real streams carry more callsigns than any chart
+// carries series. Past ten they still repeat — see the legend/palette backlog item.
 const PALETTE = ['#00d4ff', '#ff6b35', '#ffd166', '#c77dff', '#00e5a0', '#ff4757', '#4a90e2', '#ff6b9d', '#94a3b8', '#3D8BFF']
 const C = { accent: '#00d4ff', green: '#00e5a0', yellow: '#ffd166', red: '#ff4757', muted: '#4a6080', dim: '#2a3a52' }
-const GRID = '#162035'
-const TICK = { color: '#4a6080', font: { family: "'Share Tech Mono', monospace", size: 9 } }
-const TT_CFG = { backgroundColor: '#0d1428ee', titleColor: '#00d4ff', bodyColor: '#b8cfe8', borderColor: '#1e2f4a', borderWidth: 1 }
 
 function SectionHeader({ icon, title, sub }) {
   return (
@@ -82,6 +76,7 @@ function TakPositionMap({ events }) {
   const mapElRef = useRef(null)
   const mapRef = useRef(null)
   const layerGroupRef = useRef(null)
+  const leafletReady = useLeaflet()
 
   // Colors are assigned by first-seen callsign order so they stay stable
   // across re-renders even as the time window filters events in and out.
@@ -114,7 +109,8 @@ function TakPositionMap({ events }) {
   const noPositionCount = events.length - fixEvents.length - noFixCount
 
   useEffect(() => {
-    if (!mapElRef.current || mapRef.current) return
+    if (!leafletReady || !mapElRef.current || mapRef.current) return
+    const L = window.L
     mapRef.current = L.map(mapElRef.current, { attributionControl: true })
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap', maxZoom: 19,
@@ -124,12 +120,13 @@ function TakPositionMap({ events }) {
       mapRef.current?.remove()
       mapRef.current = null
     }
-  }, [])
+  }, [leafletReady])
 
   useEffect(() => {
     const map = mapRef.current
     const layerGroup = layerGroupRef.current
     if (!map || !layerGroup) return
+    const L = window.L
     layerGroup.clearLayers()
 
     if (!fixEvents.length) return
@@ -151,10 +148,13 @@ function TakPositionMap({ events }) {
     // time; the tab may have been hidden (display:none) on first mount, so
     // force a recalculation once real data arrives.
     setTimeout(() => map.invalidateSize(), 0)
-  }, [fixEvents, colorByCallsign])
+  }, [fixEvents, colorByCallsign, leafletReady])
 
   const legendEntries = Object.entries(colorByCallsign)
-  const hasPositions = fixEvents.length > 0
+  // Leaflet arrives from the CDN, so there is a window where positions exist but
+  // no map does. Showing the container then would paint the same blank near-white
+  // box the empty-state rule exists to prevent, so it waits for both.
+  const hasPositions = fixEvents.length > 0 && leafletReady
 
   return (
     <ChartCard
@@ -172,9 +172,11 @@ function TakPositionMap({ events }) {
         <div ref={mapElRef} style={{ flex: 1, borderRadius: 6, overflow: 'hidden', display: hasPositions ? 'block' : 'none' }} />
         {!hasPositions && (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 9, color: C.muted, lineHeight: 1.8 }}>
-            {events.length
-              ? 'No event in this time window carries a GPS position.'
-              : 'No TAK events in the selected time window.'}
+            {!leafletReady && fixEvents.length
+              ? 'Loading map…'
+              : events.length
+                ? 'No event in this time window carries a GPS position.'
+                : 'No TAK events in the selected time window.'}
           </div>
         )}
         {hasPositions && (
@@ -205,74 +207,6 @@ function mapSubtitle(total, plotted, noFixCount, noPositionCount) {
   return reasons.length ? `${plottedText} · excluded: ${reasons.join(', ')}` : plottedText
 }
 
-// ── Latency chart ───────────────────────────────────────────────────────────────
-// receivedAt - time, per event, in chronological order. Points-only (no
-// connecting line) via showLine:false, same technique used for BatteryOverTime
-// in ChartPanel.jsx — avoids registering a separate scatter controller.
-function TakLatencyChart({ events }) {
-  const withLatency = useMemo(
-    () => events.filter(e => e.latency_ms != null).sort((a, b) => a.timestamp.localeCompare(b.timestamp)),
-    [events]
-  )
-
-  if (!withLatency.length) {
-    return (
-      <ChartCard title="Server Receipt Latency" subtitle="receivedAt − time per event">
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted, padding: '20px 0', textAlign: 'center' }}>
-          No events with both a device timestamp and a server receipt timestamp.
-        </div>
-      </ChartCard>
-    )
-  }
-
-  const labels = withLatency.map(e => e.timestamp.slice(11, 19))
-  const negativeCount = withLatency.filter(e => e.latency_ms < 0).length
-
-  const data = {
-    labels,
-    datasets: [{
-      label: 'Latency (ms)',
-      data: withLatency.map(e => e.latency_ms),
-      showLine: false,
-      pointRadius: 3,
-      pointBackgroundColor: withLatency.map(e => e.latency_ms < 0 ? C.red : C.accent),
-      borderColor: 'transparent',
-    }],
-  }
-
-  const options = {
-    responsive: true, maintainAspectRatio: false,
-    plugins: {
-      tooltip: {
-        ...TT_CFG,
-        callbacks: {
-          label: ctx => {
-            const e = withLatency[ctx.dataIndex]
-            return `${e.callsign || 'unknown'} · ${e.latency_ms} ms`
-          },
-        },
-      },
-      legend: { labels: { color: '#4a6080', boxWidth: 10 } },
-    },
-    scales: {
-      x: { grid: { color: GRID }, ticks: { ...TICK, maxTicksLimit: 10, maxRotation: 45 } },
-      y: {
-        grid: { color: GRID }, ticks: TICK,
-        title: { display: true, text: 'ms', color: '#2a3a52', font: { size: 9 } },
-      },
-    },
-  }
-
-  return (
-    <ChartCard
-      title="Server Receipt Latency"
-      subtitle={`receivedAt − time per event · ${negativeCount} event(s) show negative latency (red) — a fast device clock, not a data error`}
-    >
-      <Line data={data} options={options} />
-    </ChartCard>
-  )
-}
-
 // ── Main tab ─────────────────────────────────────────────────────────────────────
 export default function TakTab({ results }) {
   const takResults = results.filter(r => r.log_format === 'tak')
@@ -294,10 +228,28 @@ export default function TakTab({ results }) {
     return acc
   }, { total_events: 0, pli_count: 0, chat_count: 0, marker_count: 0, other_count: 0, no_fix_count: 0, negative_latency_count: 0 })
 
+  // Latency and callsign stats come from the summary the API already computed
+  // (and App.jsx recomputes under the time window) rather than being derived a
+  // second time here — two independent derivations of the same number disagree
+  // eventually, and the avg was already rounding differently from the export.
+  // Per-file summaries are combined the way the counts above are: callsigns are
+  // unioned across files, min/max take the outer bound, and the average is
+  // weighted by each file's own latency sample count.
   const uniqueCallsigns = new Set(allEvents.map(e => e.callsign).filter(Boolean)).size
-  const latencies = allEvents.map(e => e.latency_ms).filter(v => v != null)
-  const avgLatency = latencies.length ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : null
-  const maxLatency = latencies.length ? Math.max(...latencies) : null
+  const latencyStats = takResults.reduce((acc, r) => {
+    const s = r.summary || {}
+    if (s.avg_latency_ms != null) {
+      const n = (r.tak_events || []).filter(e => e.latency_ms != null).length
+      acc.weightedSum += s.avg_latency_ms * n
+      acc.n += n
+    }
+    if (s.max_latency_ms != null) acc.max = acc.max == null ? s.max_latency_ms : Math.max(acc.max, s.max_latency_ms)
+    if (s.min_latency_ms != null) acc.min = acc.min == null ? s.min_latency_ms : Math.min(acc.min, s.min_latency_ms)
+    return acc
+  }, { weightedSum: 0, n: 0, max: null, min: null })
+  const avgLatency = latencyStats.n ? Math.round(latencyStats.weightedSum / latencyStats.n) : null
+  const maxLatency = latencyStats.max
+  const minLatency = latencyStats.min
 
   const serverVersions = [...new Set(
     takResults.map(r => r.tak_server_info?.server_version).filter(Boolean)
@@ -323,13 +275,18 @@ export default function TakTab({ results }) {
         <KpiCard label="No GPS Fix" value={summary.no_fix_count} color={summary.no_fix_count ? C.yellow : C.muted}
           sub="PLI/Marker only" />
         <KpiCard label="Avg Latency" value={avgLatency != null ? `${avgLatency} ms` : '—'} />
+        {/* A negative minimum is a device clock ahead of the server, not a fast
+            delivery — coloured red so it doesn't read as the best-case latency. */}
+        <KpiCard label="Min Latency" value={minLatency != null ? `${minLatency} ms` : '—'}
+          color={minLatency != null && minLatency < 0 ? C.red : C.green}
+          sub={minLatency != null && minLatency < 0 ? 'device clock ahead of server' : undefined} />
         <KpiCard label="Max Latency" value={maxLatency != null ? `${maxLatency} ms` : '—'} color={C.red} />
         <KpiCard label="Clock Skew Events" value={summary.negative_latency_count} color={summary.negative_latency_count ? C.red : C.muted}
           sub={summary.negative_latency_count ? 'negative latency' : undefined} />
       </div>
 
       <TakPositionMap events={allEvents} />
-      <TakLatencyChart events={allEvents} />
+      <ChartPanel results={takResults} selectedPoints={['tak_latency']} />
     </div>
   )
 }

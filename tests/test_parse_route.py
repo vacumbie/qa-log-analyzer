@@ -137,9 +137,19 @@ def test_tak_data_limitation_reaches_the_api_response():
     assert any(e.startswith("DATA LIMITATION —") for e in result["parse_errors"])
 
 
-def test_tak_clean_stream_reports_no_parse_errors_through_the_route():
+def test_tak_clean_stream_reports_no_operational_parse_errors_through_the_route():
+    """Operational entries only — the unextracted-XML DATA LIMITATION fires for
+    any stream carrying <status>/<takv>/<track>, which a clean one does."""
     result = _tak_upload("tak_stream_clean_pli_only.json")
-    assert result["parse_errors"] == []
+    operational = [e for e in result["parse_errors"]
+                   if not e.startswith("DATA LIMITATION —")]
+    assert operational == []
+
+
+def test_tak_unextracted_xml_limitation_reaches_the_api_response():
+    result = _tak_upload("tak_stream_clean_pli_only.json")
+    assert any("Telemetry present in the raw CoT XML" in e
+               for e in result["parse_errors"])
 
 
 def test_tak_null_latency_survives_serialization_as_none():

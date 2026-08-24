@@ -275,13 +275,60 @@ pytest tests/test_atak.py -v  # single file verbose
 ## Most Recent Work (Last Few PRs)
 
 **2026-08-24 — TAK server CoT event stream: 6th log format + TAK Server tab.
-→ PR #35 OPEN (`feat/tak-server-log-format`). Local suite green: 301 passed,
-2 skipped (234 at the two feature commits below; +53 from the TAK test
-expansion in `f7c2910` and the detection-collision regression tests in the
-fix described next).
-Do NOT merge yet — all 6 quality-gate agents have now run; `task-completion-validator`
-returned REJECTED and `claude-md-compliance-checker` returned FAIL, both on
-open items listed under "What to Work On Next".**
+→ PR #35 OPEN (`feat/tak-server-log-format`). Local suite green: 306 passed,
+2 skipped (234 at the two feature commits below; the rest from the TAK test
+expansion in `f7c2910`, the detection-collision regression tests, and the
+quality-gate fixes described next).
+All 6 quality-gate agents have run. `task-completion-validator` (REJECTED) and
+`claude-md-compliance-checker` (FAIL) issued their verdicts *before* the fixes
+below; every item they blocked on is now closed, but neither has re-run — and
+`karen` has not seen the new Overview KPI row or the CDN-loaded map.**
+
+**Quality-gate fixes (2026-08-24).** All six gates ran;
+`task-completion-validator` returned REJECTED and `claude-md-compliance-checker`
+returned FAIL. Everything they blocked on is now closed:
+
+- **Latency chart moved into `CHART_MAP`** as `tak_latency`. It had been a full
+  Chart.js component inside `TakTab.jsx` — the only file besides
+  `ChartPanel.jsx` importing `react-chartjs-2`, which made CLAUDE.md contradict
+  itself ("all charts are self-contained components in `ChartPanel.jsx`"). It
+  takes `{ results }` and filters for `log_format === 'tak'` like every other
+  registered chart. `ChartPanel.jsx` is again the sole importer.
+- **Leaflet is CDN-only.** Removed from `package.json`/`package-lock.json`; both
+  maps now use the shared `useLeaflet()` hook (`ui/src/hooks/useLeaflet.js`),
+  which injects the CSS/script once per page, looked up by element id so two
+  maps mounting together don't inject duplicates. Before this a session visiting
+  both tabs loaded Leaflet twice — bundled *and* from the CDN. `TakPositionMap`
+  now waits on the readiness flag and shows `Loading map…` instead of an
+  un-tiled container.
+- **`TakKpiRow` on Overview.** A TAK-only session was falling through to the
+  device KPI row and rendering `NETWORK NODES —`, `PEAK TEMP —` and a literal
+  `APP VERSION: 0 versions` on the *landing* tab.
+- **The tab reads the summary instead of re-deriving it.** `unique_callsigns`,
+  `avg/max/min_latency_ms` were all serialized, recomputed under the time
+  window, and then ignored in favour of a second local derivation — which
+  rounded to an integer where the API rounds to 1 dp, so the KPI and the export
+  disagreed. `min_latency_ms` now renders as a Min Latency KPI, red when
+  negative so it can't read as a best-case delivery time.
+- **`_CSV_TYPES` gained `"tak": {"tak_events"}`** — checklist step 9. It's a
+  flat per-row table, so an entry rather than a JSON-only note.
+- **`TakEvent` docstring corrected**: `category` is copied verbatim from the
+  server, not derived from the CoT `type`; and the field is `raw_cot`, not
+  `raw`. Also records that `raw_cot` stops at the parser.
+- **vera's High: the missing `DATA LIMITATION` entry.** CLAUDE.md claimed
+  `<status battery>`/`<takv>`/`<track>` were surfaced as a limitation; no such
+  entry existed, and `tak_stream_clean_pli_only.json` asserted
+  `parse_errors == []` — certifying the gap as correct. `parse_tak_log` now
+  emits a second entry, data-driven per element with counts, and the two
+  clean-stream tests are narrowed to *operational* errors. The edge-case
+  fixture (1 `<status battery>`, no `<takv>`/`<track>`) pins that it names only
+  what a stream actually carries.
+
+Suite: **306 passed, 2 skipped**; `npm run build` clean.
+
+Still open from the gates: the `lat`/`lon` null→`0.0` coercion, the no-fix
+wording conflation, an unrecognised `category` counting in none of the four
+buckets, and the `stale=` slider range.
 
 **Detection bug found by `jenny` and fixed (2026-08-24).** The TAK filename
 hints are substring tests, and `tak_server` is a substring of the legacy ATAK

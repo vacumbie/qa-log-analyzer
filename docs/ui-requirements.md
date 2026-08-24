@@ -21,10 +21,11 @@
 - **Framework:** React / Vite
 - **API:** FastAPI
 - **Charting:** Chart.js 4.4.1
-- **Maps:** Leaflet — loaded **two different ways**, which is a known
-  inconsistency: the Hop Count Map pulls it from the unpkg CDN, while
-  `TakTab.jsx` imports the npm package (`leaflet@^1.9.4`). See the pending
-  decision in the backlog below.
+- **Maps:** Leaflet 1.9.4 — **unpkg CDN only, never an npm dependency.** Both
+  the Hop Count Map and the TAK position map load it through the shared
+  `useLeaflet()` hook (`ui/src/hooks/useLeaflet.js`), which injects the CSS and
+  script once per page and reports readiness. A map component must wait on that
+  flag before touching `window.L`.
 - **Fonts:** Rajdhani (body), Barlow Condensed (headings/display), Share Tech Mono (monospace/data, via `var(--mono)`). All three are loaded via a Google Fonts `<link>` in `index.html` and referenced by name in `index.css` and inline styles.
 
 ---
@@ -316,14 +317,31 @@ TAK log is loaded. Data comes from `r.tak_events`, `r.tak_server_info` and
   (`tak_server_info.server_version`), omitted entirely when the stream carries
   no handshake record rather than showing "unknown".
 - **KPI row** — Total Events · PLI · Marker · Chat · Server Control · Unique
-  Callsigns · No GPS Fix · Avg Latency · Max Latency · Clock Skew Events.
+  Callsigns · No GPS Fix · Avg Latency · Min Latency · Max Latency · Clock Skew
+  Events. The latency cards **read `summary.avg/min/max_latency_ms`** rather
+  than re-deriving them from the events; deriving the same number twice is how
+  the KPI and the JSON export came to round differently. Min Latency is red
+  when negative, with the sub-label `device clock ahead of server`, so it can't
+  be misread as a best-case delivery time.
 - **Device Positions** — Leaflet map, one `circleMarker` per event with a GPS
   fix, coloured by callsign with a scrollable legend. `fitBounds` to the data;
-  popups show callsign, category, time and latency.
-- **Server Receipt Latency** — points-only Chart.js line (`showLine: false`,
-  the same technique as Battery Over Time), one point per event with both
-  timestamps, x-axis labelled `HH:MM:SS` UTC. Negative-latency points are red
-  with a caption naming a fast device clock, not a data error.
+  popups show callsign, category, time and latency. Waits on `useLeaflet()`;
+  while the CDN script is still in flight the container is hidden and the
+  placeholder reads `Loading map…` (rule 2 below applies to that window too —
+  an un-tiled container would paint the same blank box).
+- **Server Receipt Latency** — registered in `CHART_MAP` as `tak_latency` and
+  rendered via `<ChartPanel results={takResults} selectedPoints={['tak_latency']} />`,
+  like every other chart in the app. Points-only Chart.js line
+  (`showLine: false`, the same technique as Battery Over Time), one point per
+  event with both timestamps, x-axis labelled `HH:MM:SS` UTC. Negative-latency
+  points are red with a caption naming a fast device clock, not a data error.
+
+**Overview KPI row.** A session where every loaded log is `tak` gets
+`TakKpiRow` (Logs Loaded · CoT Events · Callsigns · PLI · No GPS Fix · Clock
+Skew · Server Version), mirroring `RelayKpiRow`. The device row must not be
+used: TAK carries no serial, GID, firmware version, battery or temperature, so
+it would render dashes and a literal `APP VERSION: 0 versions` — a zero
+standing in for "no such concept".
 
 **Two rules this tab establishes, both learned from live verification:**
 
@@ -459,10 +477,25 @@ TAK server CoT event streams are auto-detected (priority 2, ahead of ATAK) and p
 
 Two presentation rules came out of live verification and are now recorded in the tab spec: a scoped count must state its scope (the `No GPS Fix` KPI is PLI/Marker-only and must not be labelled as the map-exclusion count), and a map with nothing to plot must say so rather than render an un-tiled Leaflet container, which paints as a blank near-white box.
 
-**Follow-ups still open** (all listed under Known Limitations above): no TAK KPI row on Overview, `summary.min_latency_ms` serialized but never rendered, the `stale=`-inflated slider range, the legend listing unplotted callsigns, and the `PALETTE` colour collision past 10 callsigns.
+**Closed after the PR #35 quality gate** (2026-08-24): the Overview `TakKpiRow`,
+`summary.min_latency_ms` now rendered (and the other latency/callsign summary
+fields read rather than recomputed), the latency chart moved into `CHART_MAP`,
+the `_CSV_TYPES` entry for `tak_events`, and the Leaflet source decision below.
 
-### TAK Server — Leaflet dependency source ⏳ Pending decision
-`TakTab.jsx` imports Leaflet from the npm package (`leaflet@^1.9.4`, added to `ui/package.json`), while the Hop Count Map loads the same library from the unpkg CDN. `CLAUDE.md` records the CDN approach as the deliberate choice for keeping the stack lean, so **the two now disagree** and one of them should change. Options: convert `TakTab` to the CDN pattern for consistency, or adopt npm as the standard and migrate the Hop Count Map (a real improvement — the CDN load is a hard dependency on network access for a tool that otherwise runs fully local). Flagged in PR #35; not yet ratified.
+**Follow-ups still open** (listed under Known Limitations above): the
+`stale=`-inflated slider range, the legend listing unplotted callsigns, and the
+`PALETTE` colour collision past 10 callsigns.
+
+### TAK Server — Leaflet dependency source — ✅ Resolved: CDN only (2026-08-24)
+`leaflet` has been removed from `ui/package.json` and `package-lock.json`
+entirely. Both maps now load it from the unpkg CDN through the shared
+`useLeaflet()` hook. The npm import briefly added in PR #35 meant a session
+visiting both tabs loaded Leaflet 1.9.4 *twice* — bundled module plus CDN
+`window.L` — which is the opposite of the lean-stack intent that motivated the
+CDN choice. The known trade-off is unchanged and accepted: the CDN load needs
+network access. That was already true (OSM tiles come over the network either
+way, so neither approach makes the maps work offline), and the hook's readiness
+flag means a failed load now shows `Loading map…` rather than a silent blank.
 
 ### Session Persistence
 Allow a user to save a parsed session so it can be retrieved later and compared alongside other test data.

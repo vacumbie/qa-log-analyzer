@@ -1182,7 +1182,17 @@ Timestamps are normalized from ISO-8601 with a `Z` suffix to the project's
   but measured server-side — tracked as [P8](#p8--tak-server-receipt-latency-and-clock-skew-low--data-quality).
 - **Chat bodies not extracted.** Only the envelope (sender callsign,
   timestamps) is captured from `b-t-f` records; the `<remarks>` text is left in
-  `raw_cot`. Surfaced as a `DATA LIMITATION —` entry in `parse_errors`.
+  `raw_cot`. Surfaced as a `DATA LIMITATION —` entry in `parse_errors`, fired
+  only when the stream actually contains Chat records.
+- **Device telemetry in the raw XML is not extracted.** `<status battery>`,
+  `<takv>` (device model / OS / TAK version) and `<track>` (speed, course) are
+  present in most records — 57, 73 and 57 of the 91-event sample respectively —
+  and none is promoted to a field. This is a second `DATA LIMITATION —` entry,
+  data-driven per element: it names only the elements a given stream carries and
+  reports a count for each, so a stream with no `<takv>` is never told its
+  `<takv>` data was dropped. Both entries note that `raw_cot` is not serialized
+  by the API, so this data is unreachable from the UI and from exports — not
+  merely un-promoted.
 - **`parentCallsign` always null** in observed samples, like ATAK's
   `originatorCallsign`. Parsed and stored, but do not build on it yet.
 - **`platform` is often absent** (18 of 91 in the sample, including all Chat

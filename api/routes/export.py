@@ -31,6 +31,10 @@ _CSV_TYPES = {
     "diagnostic": {"received_messages", "system_samples", "tx_events", "ble_fail_events"},
     "rsdk":       {"system_samples", "tx_events", "ble_fail_events"},
     "atak":       {"atak_messages", "atak_health_samples", "atak_events", "atak_app_launches", "system_samples"},
+    # tak_events is a flat per-row table (one CoT event per row), so unlike
+    # relay_manager and fw_log it is a natural CSV export. raw_cot is not
+    # serialized by the API, so the XML column is absent by design.
+    "tak":        {"tak_events"},
 }
 
 
@@ -66,6 +70,9 @@ def export_csv(session_id: str, data_type: str = "received_messages") -> Streami
       rsdk       : system_samples | tx_events | ble_fail_events
       atak       : atak_messages | atak_health_samples | atak_events |
                    atak_app_launches | system_samples
+      tak        : tak_events
+
+    relay_manager and fw_log are JSON-only — see the note on _CSV_TYPES.
     """
     session = _store.get(session_id)
     if not session:

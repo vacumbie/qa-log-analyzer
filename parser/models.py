@@ -479,7 +479,10 @@ class TakEvent:
     """
     One Cursor-on-Target (CoT) event captured from a TAK server stream.
 
-    category is derived from the CoT `type` attribute:
+    category arrives pre-computed from the TAK server and is copied verbatim —
+    this parser derives nothing from the CoT `type` attribute. Treat the set as
+    open: an unrecognised value is stored as-is, never mapped through an
+    allow-list. The values observed so far correspond to `type` as follows:
       PLI     — a-f-G-U-* position/location report from a friendly ground unit
       Marker  — a-f-G-U-C-I "I" (icon/marker) variant, seen from WebTAK clients
       Chat    — b-t-f GeoChat text message
@@ -497,8 +500,11 @@ class TakEvent:
     clock is running fast relative to the TAK server; the sample data has
     reproduced this (see parse_errors note in parse_tak_log).
 
-    raw retains the original CoT XML for cases the derived fields don't
-    cover (e.g. WebTAK-specific detail children).
+    raw_cot retains the original CoT XML for cases the promoted fields don't
+    cover (e.g. WebTAK-specific detail children). It stops at the parser: the
+    API deliberately does not serialize it, so it is not reachable from the UI
+    or an export — see the DATA LIMITATION entry in parse_tak_log for the
+    fields that live only in there.
     """
     timestamp: str                          # event 'time' (device-generated), _TS_FMT_OUT
     category: str                           # "PLI" | "Marker" | "Chat" | "Other"

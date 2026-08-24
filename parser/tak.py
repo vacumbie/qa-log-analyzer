@@ -78,6 +78,32 @@ def is_tak_log(content: str) -> bool:
     return all(key in snippet for key in _SIGNATURE_KEYS)
 
 
+# Elements carried in the CoT XML that this parser does not promote to fields.
+# Each is real telemetry a reader could reasonably expect to find — a battery
+# percentage and a device model especially — so their absence is reported rather
+# than left for someone to discover by grepping raw_cot.
+_UNEXTRACTED_XML = (
+    ("<status battery", "battery percentage"),
+    ("<takv ", "device model / OS / TAK version"),
+    ("<track ", "speed and course"),
+)
+
+
+def _count_unextracted_xml(events) -> list:
+    """Count events whose raw CoT XML carries each unextracted element.
+
+    Data-driven on purpose: a stream with no <takv> elements should not be told
+    its <takv> data was dropped. Returns [(label, count), ...] for those
+    actually present, so the caller can stay silent when the list is empty.
+    """
+    counts = []
+    for marker, label in _UNEXTRACTED_XML:
+        n = sum(1 for e in events if marker in e.raw_cot)
+        if n:
+            counts.append((label, n))
+    return counts
+
+
 def _parse_iso(ts: Optional[str]) -> Optional[datetime]:
     if not ts:
         return None
@@ -213,6 +239,16 @@ def parse_tak_log(path: Path) -> ParseResult:
             "DATA LIMITATION — Chat message bodies not extracted: only the "
             "envelope (sender callsign, timestamps) is captured from GeoChat "
             "(b-t-f) records in this version; the <remarks> text is not parsed."
+        )
+
+    unextracted = _count_unextracted_xml(events)
+    if unextracted:
+        detail = ", ".join(f"{label} ({n} event(s))" for label, n in unextracted)
+        result.parse_errors.append(
+            "DATA LIMITATION — Telemetry present in the raw CoT XML is not "
+            f"extracted into fields: {detail}. It remains in raw_cot, which the "
+            "API does not serialize, so it is not reachable from the UI or an "
+            "export."
         )
 
     return result
