@@ -138,6 +138,41 @@ def test_tak_filename_check_does_not_capture_atak_filenames():
     ) == "atak"
 
 
+# The TAK filename hints are substring tests, so the legacy ATAK convention
+# collides whenever the callsign starts with SERVER: diagnostic_ATAK_SERVER_...
+# lowercases to a name containing "tak_server". The file is valid JSON, so the
+# TAK parser doesn't error — it skips all 10 records for a missing 'time' field
+# and reports an empty stream, losing the whole log silently. The content guard
+# is what stops it; these pin the guard.
+
+SERVER_CALLSIGN_FILENAMES = [
+    "diagnostic_ATAK_SERVER_90215634664458_2026-03-04.log",
+    "diagnostic_ATAK_SERVER1_90215634664458_2026-03-04.log",
+    "diagnostic_TAK_SERVER_90215634664458_2026-03-04.log",  # v3.0 drops ATAK_
+]
+
+
+@pytest.mark.parametrize("filename", SERVER_CALLSIGN_FILENAMES)
+def test_atak_content_wins_over_a_colliding_tak_filename(filename):
+    assert _detect_format(filename, _content("atak_sample.json")) == "atak"
+
+
+@pytest.mark.parametrize("fixture_name", ATAK_JSON_FIXTURES)
+def test_server_callsign_collision_holds_for_every_atak_fixture(fixture_name):
+    """Same collision, swept across every real ATAK fixture — the guard must not
+    depend on which markers a particular log happens to carry."""
+    assert _detect_format(
+        "diagnostic_ATAK_SERVER_90215634664458_2026-03-04.log", _content(fixture_name)
+    ) == "atak"
+
+
+def test_empty_tak_export_still_detected_by_filename():
+    """The guard refuses the filename hint only when the content is positively
+    ATAK — an empty TAK export carries no signal either way and must still
+    route to tak, not fall through to the diagnostic catch-all."""
+    assert _detect_format("tak-stream-2026-07-30T19-42-44.json", "[]") == "tak"
+
+
 # ── Fallback ──────────────────────────────────────────────────────────────────
 
 def test_unrecognized_content_falls_back_to_diagnostic():

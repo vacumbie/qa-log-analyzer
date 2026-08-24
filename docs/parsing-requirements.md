@@ -1092,6 +1092,22 @@ Both TAK and ATAK are JSON, so ordering matters — but the field sets are
 | Root | Single JSON array | Newline-delimited JSON / array |
 | Viewpoint | Server, many devices | One device, itself |
 
+**The disjointness argument covers `is_tak_log()`, not the filename hints.** The
+hints are substring tests, and `tak_server` is a substring of the legacy ATAK
+convention whenever the callsign starts with `SERVER` —
+`diagnostic_ATAK_SERVER_<GID>_<DATE>.log` lowercases to a name containing
+`tak_server`. Because the filename branch runs *before* the content check, such
+a file was routed to the TAK parser, which then found valid JSON with no `time`
+field, skipped every record, and reported an empty stream — the whole log lost,
+and lost quietly, since an empty stream is a legitimate result.
+
+The TAK filename hints are therefore guarded: they only apply when the content
+is **not** positively ATAK (`_is_atak_content()` in `api/routes/parse.py`, shared
+with the ATAK branch so the two cannot drift). The guard is deliberately a
+*negative* test rather than requiring `is_tak_log()` to pass, because a genuine
+but empty TAK export (`[]`) carries no signature keys and must still route here
+rather than falling through to the `diagnostic` catch-all.
+
 ### Record Categories
 
 `category` arrives pre-computed from the server and is derived from the CoT

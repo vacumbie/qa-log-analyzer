@@ -126,7 +126,14 @@ Six formats, auto-detected by `_detect_format()` in `api/routes/parse.py`.
 `[digits-digits, MODULE, LEVEL]` is highly distinctive and cannot match any of
 the others. `tak` must precede `atak`: both are JSON, but their field sets are
 disjoint (`receivedAt`/`nodeType`/`category` vs
-`logId`/`connectionState`/`atakVersion`). relay_manager must precede rsdk
+`logId`/`connectionState`/`atakVersion`). That disjointness covers the *content*
+check only — the `tak` **filename** hints are substring tests, and `tak_server`
+matches the legacy ATAK convention whenever the callsign starts with `SERVER`
+(`diagnostic_ATAK_SERVER_…` → misrouted, every record dropped as missing `time`,
+reported as an empty stream). The hints are guarded by `_is_atak_content()`,
+shared with the ATAK branch; the guard is a negative test, not a positive
+`is_tak_log()` requirement, so a genuine empty export (`[]`) still routes to
+`tak`. relay_manager must precede rsdk
 because both contain `AndroidBleRadio` lines; relay_manager has additional
 markers that distinguish it. `diagnostic` is always the catch-all fallback.
 

@@ -275,12 +275,33 @@ pytest tests/test_atak.py -v  # single file verbose
 ## Most Recent Work (Last Few PRs)
 
 **2026-08-24 — TAK server CoT event stream: 6th log format + TAK Server tab.
-→ PR #35 OPEN (`feat/tak-server-log-format`). Local suite green: 287 passed,
-2 skipped (was 234 at the two commits below; the rest come from the TAK test
-expansion still uncommitted in the working tree — `test_tak.py`,
-`test_detect_format.py`, `test_parse_route.py`, and the two new fixtures).
-Do NOT merge yet — `karen` and `peer-reviewer` have run; the other 4
-quality-gate agents have not.**
+→ PR #35 OPEN (`feat/tak-server-log-format`). Local suite green: 301 passed,
+2 skipped (234 at the two feature commits below; +53 from the TAK test
+expansion in `f7c2910` and the detection-collision regression tests in the
+fix described next).
+Do NOT merge yet — all 6 quality-gate agents have now run; `task-completion-validator`
+returned REJECTED and `claude-md-compliance-checker` returned FAIL, both on
+open items listed under "What to Work On Next".**
+
+**Detection bug found by `jenny` and fixed (2026-08-24).** The TAK filename
+hints are substring tests, and `tak_server` is a substring of the legacy ATAK
+convention whenever the callsign starts with `SERVER`:
+`diagnostic_ATAK_SERVER_<GID>_<DATE>.log` lowercases to a name containing
+`tak_server`, and the filename branch runs *before* the content check. Such a
+file routed to the TAK parser, which found valid JSON with no `time` field,
+skipped all records, and reported an empty stream — **the entire log lost, and
+lost quietly**, because an empty stream is a legitimate result. Reproduced
+against a real ATAK fixture: 0 of 10 records parsed.
+
+Fixed by guarding the filename hints with `_is_atak_content()` (extracted in
+`api/routes/parse.py`, shared with the ATAK branch so the two can't drift). The
+guard is a *negative* test — content must not be positively ATAK — rather than
+requiring `is_tak_log()` to pass, because a genuine empty TAK export (`[]`)
+carries no signature keys and must still route to `tak` rather than falling
+through to the `diagnostic` catch-all. Pinned by parametrized regression tests
+covering three colliding filename shapes × every ATAK fixture, plus the
+empty-export case. `docs/parsing-requirements.md` and CLAUDE.md now state that
+the disjointness argument covers the content check only.
 
 Two commits, parser-then-UI (the split used for the ATAK command work):
 

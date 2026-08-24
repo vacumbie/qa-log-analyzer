@@ -26,6 +26,18 @@ from parser.models import ParseResult
 router = APIRouter(prefix="/parse", tags=["parse"])
 
 
+def _is_atak_content(snippet: str) -> bool:
+    """ATAK plugin logs are JSON with these distinctive fields. Used both by the
+    ATAK branch below and as a guard on the TAK filename hints, so the two stay
+    in step — see the comment on the TAK branch for why the guard is needed."""
+    return (
+        '"logId"' in snippet
+        or '"connectionState"' in snippet
+        or '"atakVersion"' in snippet
+        or '"deliveryStatus"' in snippet
+    )
+
+
 def _detect_format(filename: str, content: str) -> str:
     """
     Heuristically detect log format from filename and content.
@@ -33,7 +45,8 @@ def _detect_format(filename: str, content: str) -> str:
 
     Detection order:
       1. FW Log        — bracket pattern [digits-digits, MODULE, LEVEL] with TRX/RELAY/TPORT
-      2. TAK           — filename contains 'tak-stream'/'tak_server', or content is a
+      2. TAK           — filename contains 'tak-stream'/'tak_server' AND the content
+                         is not positively ATAK, or content is a
                          JSON array of CoT event records (receivedAt/nodeType/category
                          fields). Checked before ATAK since both are JSON but use
                          disjoint field sets.
@@ -54,8 +67,16 @@ def _detect_format(filename: str, content: str) -> str:
         return "fw_log"
 
     # ── TAK server detection ──────────────────────────────────────────────────
+    # The filename hints are substring tests, and "tak_server" is a substring of
+    # the legacy ATAK convention whenever the callsign starts with SERVER —
+    # diagnostic_ATAK_SERVER_<GID>_<DATE>.log lowercases to a name containing
+    # "tak_server". Without the content guard that file routes here and the TAK
+    # parser drops every record (valid JSON, no 'time' field), losing the whole
+    # log. The guard is why TAK-before-ATAK is safe: a filename coincidence can
+    # never override content that names another format outright.
     if "tak-stream" in name or "tak_server" in name or "tak-server" in name:
-        return "tak"
+        if not _is_atak_content(snippet):
+            return "tak"
     if is_tak_log(content):
         return "tak"
 
@@ -64,13 +85,7 @@ def _detect_format(filename: str, content: str) -> str:
     # v3.0 drops the ATAK_ segment — those files match the content check below.
     if "diagnostic_atak_" in name:
         return "atak"
-    # Content: ATAK logs are JSON arrays/objects with these distinctive fields
-    if (
-        '"logId"' in snippet
-        or '"connectionState"' in snippet
-        or '"atakVersion"' in snippet
-        or '"deliveryStatus"' in snippet
-    ):
+    if _is_atak_content(snippet):
         return "atak"
 
     # ── Relay Manager detection ───────────────────────────────────────────────
