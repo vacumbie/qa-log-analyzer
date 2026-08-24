@@ -4,7 +4,7 @@
 > Each entry defines what the field means in the raw log, how it is parsed, what it becomes
 > in the data model, and any known accuracy limitations or caveats.
 >
-> Last updated: 2026-06-05
+> Last updated: 2026-08-24
 
 ---
 
@@ -16,6 +16,7 @@
   - [GRIP Transfer Lifecycle](#grip-transfer-lifecycle)
 - [Format 3: Android ATAK Plug-in Log](#format-3-android-atak-plug-in-log)
 - [Format 4: Relay Firmware (UART/USB Debug) Log](#format-4-relay-firmware-uartusb-debug-log)
+- [Format 5: TAK Server CoT Event Stream](#format-5-tak-server-cot-event-stream)
 - [Derived / Computed Fields](#derived--computed-fields)
 - [Cross-Format Notes](#cross-format-notes)
 
@@ -718,6 +719,70 @@ dataclasses live in `parser/models.py`.
 
 ---
 
+## Format 5: TAK Server CoT Event Stream
+
+**File type:** `.json`
+**Platform:** TAK server (server-side — **not** a device or app log)
+**Structure:** A single JSON array of pre-parsed Cursor-on-Target event records.
+
+> The server has already extracted the useful fields; the original CoT XML stays
+> in `raw`. This is the server's JSON export, **not** a raw multicast/UDP CoT
+> capture — that would need a separate ingestion path.
+
+Parsed into `TakEvent` records on `ParseResult.tak_events`, plus one optional
+`TakServerInfo` on `ParseResult.tak_server_info`. Both live in `parser/models.py`.
+
+### Event Fields (`TakEvent`)
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `time` | ISO-8601 → `%Y-%m-%d %H:%M:%S.%f` | `timestamp` | Device-generated event time. **Required** — record skipped and counted if missing/unparseable |
+| `receivedAt` | same normalization | `received_at` | TAK server receipt time. `""` when absent |
+| — | `round((receivedAt − time) × 1000)` | `latency_ms` | `None` when `receivedAt` absent. **Negative is valid data** — device clock ahead of server (P8) |
+| `category` | verbatim | `category` | `PLI` \| `Marker` \| `Chat` \| `Other` — pre-computed server-side. Defaults to `Other` only when the field is absent |
+| `type` | verbatim | `cot_type` | CoT type code: `a-f-G-U-C` (PLI), `a-f-G-U-C-I` (Marker), `b-t-f` (Chat), `t-x-takp-v` (handshake) |
+| `uid` | verbatim | `uid` | `ANDROID-<hex>`, bare UUID (WebTAK), or `GeoChat.ANDROID-<hex>` |
+| `callsign` | verbatim | `callsign` | `None` for server plumbing. **The only operator identity available** |
+| `nodeType` | verbatim | `node_type` | `Android` \| `WebTAK` \| `Other` |
+| `platform` | verbatim | `platform` | `ATAK-CIV` \| `WebTAK` \| `None`. Often absent (18 of 91 in sample) — never guessed |
+| `parentCallsign` | verbatim | `parent_callsign` | Always `null` in observed samples |
+| `lat` / `lon` | float, `0.0` default | `lat` / `lon` | Meaningless when `has_gps_fix` is False |
+| `lat == 0 and lon == 0` | inverted | `has_gps_fix` | CoT no-fix sentinel (paired with a `999999.0`-family `hae`/`ce`/`le` in the raw XML). **Single source of truth — the UI must not re-derive it** |
+| `raw` | verbatim | `raw_cot` | Full CoT XML. Holds everything not promoted to a field: `<status battery=…>`, `<takv device=… os=…>`, `<track speed=… course=…>`, GeoChat `<remarks>` |
+
+### Server Info (`TakServerInfo`)
+
+| Raw Source | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `serverVersion="…"` in the `raw` XML of the first `Other` record | regex | `tak_server_info.server_version` | e.g. `5.6-RELEASE-57-HEAD` |
+| `apiVersion="…"` in the same record | regex | `tak_server_info.api_version` | e.g. `3` |
+
+> A stream with no `t-x-takp-v` handshake record yields `tak_server_info = None`.
+> Both fields come from **one** record — the handshake is not repeated.
+
+### Derived Collections (`ParseResult` properties)
+
+| Property | Definition | Notes |
+|----------|-----------|-------|
+| `tak_pli_events` | `category == "PLI"` | |
+| `tak_chat_events` | `category == "Chat"` | Envelope only — bodies not extracted |
+| `tak_no_fix_events` | `not has_gps_fix` **and** `category in ("PLI", "Marker")` | **Deliberately scoped** to the categories expected to carry a position. Chat/server-control events have none to miss |
+| `tak_unique_callsigns` | distinct non-empty `callsign` | Operator count; excludes the handshake record |
+| `tak_latency_ms_values` | non-`None` `latency_ms` | Feeds avg/max/min and the negative count |
+
+> **Not extracted from `raw_cot`:** GeoChat `<remarks>` message bodies, `<status
+> battery>`, `<takv>` device/OS strings, and `<track>` speed/course. All present
+> in the XML, none promoted to fields in this version.
+
+### Serialized but not displayed
+
+`summary.min_latency_ms` is produced by `_result_to_dict()` and recomputed on
+time-window change in `App.jsx`, but **no KPI renders it** (sample `−93 ms`).
+Either surface it or drop it — the ParseResult chain currently stops one step
+short of the UI.
+
+---
+
 ## Derived / Computed Fields
 
 These fields are computed by the parser or API layer — they do not appear directly in the raw log.
@@ -743,6 +808,12 @@ These fields are computed by the parser or API layer — they do not appear dire
 | `summary.sdk_error_count` (ATAK) | `atak_sdk_error_summary.total_count` | Total sdkError records | Informational — baseline unknown |
 | `summary.radio_types` (ATAK) | `atak_sdk_error_summary.radio_types` | Sorted distinct radioType values | e.g. `["PRO_X_2"]` |
 | `summary.ble_fail_count` | ATAK: `counts_by_tag` `ERROR\|BLE` entries, else `deviceDisconnected` count only when no SDK 2.0 summary; diagnostic/rsdk: `len(ble_fail_events)`; relay_manager: absent | BLE failures for the Health Score | Feeds BLE dimension; `> 0 = fail` threshold pending validation |
+| `summary.total_events` (TAK) | `len(tak_events)` | Count of parsed CoT records | Skipped malformed records are not included |
+| `summary.pli_count` / `chat_count` / `marker_count` / `other_count` (TAK) | `category` counts | One per category | `marker_count` and `other_count` use the `is_marker` / `is_server_control` properties |
+| `summary.unique_callsigns` (TAK) | `len(tak_unique_callsigns)` | Distinct operators on the server | Not a radio count — one operator may change radios |
+| `summary.no_fix_count` (TAK) | `len(tak_no_fix_events)` | **PLI/Marker only** | ⚠️ The `parse_errors` no-fix sentence counts **all** categories, so the two numbers differ legitimately (1 vs 5 in the sample). See the parsing-requirements limitation — the error wording is an open fix |
+| `summary.avg_latency_ms` / `max_latency_ms` / `min_latency_ms` (TAK) | `tak_latency_ms_values` | Mean (1 dp) / max / min | `None` when no record has both timestamps. `min` is serialized but unrendered |
+| `summary.negative_latency_count` (TAK) | `latency_ms < 0` | Clock-skew indicator | Device clock ahead of server — real data, not an error (P8) |
 
 ---
 
@@ -761,6 +832,23 @@ These fields are computed by the parser or API layer — they do not appear dire
 | **Platform** | iOS only | iOS or Android | Android only |
 | **Timestamps include year** | ✅ | ✅ | ✅ (ATAK) / ❌ (Relay Health Manager ADB logs) |
 
+### TAK Server — why it sits outside that table
+
+The three columns above all describe **one radio's view of itself**. A TAK
+stream is the server's view of many clients, so most rows have no counterpart
+rather than a different value:
+
+| Topic | TAK Server |
+|-------|-----------|
+| **Temperature / battery / thermal** | ❌ Not present — no device telemetry at all |
+| **RSSI / hop count** | ❌ Not present — application layer, after mesh delivery |
+| **Radio identity** | ❌ No serial, GID or firmware version. Callsign + CoT `uid` only |
+| **Callsign availability** | ✅ Populated (`None` only on the server handshake record) |
+| **Sent vs received** | N/A — the server receives everything; there is no sender/receiver split |
+| **Position** | ✅ On PLI and Marker; `(0,0)` sentinel means no fix |
+| **Timestamps include year** | ✅ ISO-8601 UTC, wall clock. Two of them: device `time` and server `receivedAt` |
+| **Health Score** | ❌ Excluded (`HEALTH_FORMATS`) — carries none of the five dimension inputs |
+
 ---
 
-_Last updated: 2026-06-05_
+_Last updated: 2026-08-24_

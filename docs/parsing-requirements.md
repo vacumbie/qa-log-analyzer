@@ -13,6 +13,7 @@
 - [Pro+ Application](#pro-application)
 - [Relay Health Manager](#relay-health-manager)
 - [Relay Firmware (UART/USB Debug) Log](#relay-firmware-uartusb-debug-log)
+- [TAK Server (CoT Event Stream)](#tak-server-cot-event-stream)
 - [Shared Output Requirements](#shared-output-requirements)
 - [Known Limitations](#known-limitations)
 
@@ -29,6 +30,12 @@ The log parsing tool accepts logs from the following goTenna applications:
 | 3 | Relay Health Manager | Android *(iOS TBD)* | Android logcat (`com.gotenna.relaymanager`) | `parser/relay_manager.py` ✅ |
 | 4 | goTenna Pro+ diagnostic export | iOS, Android | Block-format diagnostic export | `parser/diagnostic.py` ✅ *(detection fallback)* |
 | 5 | Relay radio firmware | Relay radio | UART/USB serial debug console | `parser/fw_log.py` ✅ *(detection priority 1)* |
+| 6 | TAK server | Server-side (not a device) | CoT event stream, pre-parsed JSON export | `parser/tak.py` ✅ *(detection priority 2, ahead of ATAK)* |
+
+> **Format 6 is the first server-side source.** Every other format is a device or
+> app log describing one radio's own view. A TAK stream is the server's view of
+> many devices at once, so it carries no radio identity (no serial, no GID, no
+> firmware version) and contributes nothing to the Health Score.
 
 ---
 
@@ -321,11 +328,12 @@ misleading 5/5. See the Health Score spec in `ui-requirements.md` (section 10).
 - **Relay Health Manager — iOS:** Not yet confirmed whether an iOS version exists.
 - **Pro+ diagnostic (block format) — firmware 3.1.11 omits originator identity:** Some firmware-3.1.11 diagnostic logs omit the originator callsign and GID from Received Message blocks, so the sender of those messages cannot be identified. `parser/diagnostic.py` now surfaces this in `parse_errors` with a `DATA LIMITATION —` entry, emitted **only when it actually manifests** (a Received Message block carrying neither originator identity field) and reporting the affected count (`{n} of {total}`). Logs that include the fields emit nothing.
 - **Android ATAK Plug-in v3.0 — early integration (brand new FW/radio, expect churn):** Filenames drop the `ATAK_` segment (both conventions now accepted). `senderCallsign` is populated for the first time (was always empty pre-v3.0) and is used as a `device.callsign` fallback. Some early builds emit **zero device-health (`connectionState`) records** for a session — no battery/thermal/firmware/radio-health data at all; `parser/atak.py` surfaces this via a `DATA LIMITATION —` entry when it happens. RSSI has also been observed as always `0` in early v3.0 captures. See `docs/atak_v3_early_integration_notes.md` for the running baseline of what's actually available as the plugin/FW matures.
+- **TAK server — server-side viewpoint, no radio identity:** The first non-device format. No serial, GID, firmware version, battery, thermal, RSSI or hop count — identity is callsign + CoT `uid` only, so it is excluded from the Health Score. Position uses the CoT `(0,0)` no-fix sentinel; `latency_ms` can legitimately be negative (device clock ahead of server, tracked as P8); GeoChat `<remarks>` bodies are not extracted (surfaced as a `DATA LIMITATION —` entry). See [TAK Server (CoT Event Stream)](#tak-server-cot-event-stream).
 - All temperatures stored internally in Celsius and must be converted to Fahrenheit for display.
 
 ---
 
-_Last updated: 2026-07-29_
+_Last updated: 2026-08-24_
 
 ---
 
@@ -1024,6 +1032,171 @@ catch-all `diagnostic` parser never sees these because fw_log is checked first.
 
 ---
 
+## TAK Server (CoT Event Stream)
+
+### Overview
+
+A TAK server aggregates Cursor-on-Target (CoT) events from every connected
+client. This is the **first server-side log source** in the tool — every other
+format is one device describing itself. Parsed by `parser/tak.py`.
+
+Consequences of being server-side, all of which the UI must respect:
+
+- No radio identity. No serial number, no GID, no firmware version, no battery
+  or thermal telemetry. Identity is **callsign + CoT `uid`** only.
+- No radio-level RF data. No RSSI, no hop count, no TX/RX outcome — the server
+  sees application-layer events after the mesh has already delivered them.
+- Therefore **excluded from the Health Score** (not in `HEALTH_FORMATS`), for
+  the same reason `relay_manager` is: it carries none of the five dimension
+  inputs, so an unscoped card would default-pass and show a misleading 5/5.
+
+### Log Format
+
+A single JSON array of pre-parsed CoT event records:
+
+```json
+[
+  {
+    "callsign": "PICKUP", "category": "PLI",
+    "lat": 30.153289, "lon": -85.664925,
+    "nodeType": "Android", "parentCallsign": null, "platform": "ATAK-CIV",
+    "raw": "<event version=\"2.0\" uid=\"ANDROID-9c47…\" type=\"a-f-G-U-C\" …>…</event>",
+    "receivedAt": "2026-07-30T19:27:01.907Z",
+    "time": "2026-07-30T19:24:54Z",
+    "type": "a-f-G-U-C", "uid": "ANDROID-9c47b9ce85beb696"
+  }
+]
+```
+
+The server has already extracted the useful fields; the original CoT XML is
+retained in `raw` for anything the derived fields don't cover (WebTAK-specific
+`detail` children, `<status battery=…>`, `<takv>` device strings).
+
+> **This is the server's JSON export, not a raw CoT capture.** A raw
+> multicast/UDP XML stream would need a separate ingestion path — `parse_tak_log`
+> would not read it.
+
+### Detection
+
+Priority **2**, ahead of ATAK. `is_tak_log()` requires the content to start with
+`[` and to contain all three of `"receivedAt"`, `"nodeType"` and `"category"`
+within the first 4000 characters. Filenames containing `tak-stream`,
+`tak_server` or `tak-server` also route here.
+
+Both TAK and ATAK are JSON, so ordering matters — but the field sets are
+**disjoint**, which is what makes the order safe rather than lucky:
+
+| | TAK stream | ATAK plugin log |
+|---|---|---|
+| Signature keys | `receivedAt`, `nodeType`, `category` | `logId`, `connectionState`, `atakVersion` |
+| Root | Single JSON array | Newline-delimited JSON / array |
+| Viewpoint | Server, many devices | One device, itself |
+
+### Record Categories
+
+`category` arrives pre-computed from the server and is derived from the CoT
+`type` code. Four values observed:
+
+| `category` | CoT `type` | Meaning | Carries position? |
+|-----------|-----------|---------|-------------------|
+| `PLI` | `a-f-G-U-C` | Friendly ground unit position report | ✅ Yes |
+| `Marker` | `a-f-G-U-C-I` | The "I" (icon) variant, seen from WebTAK clients | ✅ Yes |
+| `Chat` | `b-t-f` | GeoChat text message | ❌ No |
+| `Other` | `t-x-takp-v` | Server plumbing — TAK protocol/version handshake | ❌ No |
+
+**`Other` is where server version comes from.** `TakServerInfo`
+(`server_version`, `api_version`) is regex-extracted from the `raw` XML of the
+first `Other` record. A stream with no handshake record yields
+`tak_server_info = None`.
+
+> Treat this as an **open set**, like the ATAK command-status vocabulary. An
+> unrecognised `category` is stored verbatim and defaults to `Other` only when
+> the field is absent — never mapped through a hardcoded allow-list.
+
+### Fields to Parse
+
+| Source field | Parsed into | Notes |
+|--------------|-------------|-------|
+| `time` | `timestamp` | Device-generated event time. **Required** — a record without a parseable `time` is skipped and reported |
+| `receivedAt` | `received_at` | TAK server receipt time. Optional |
+| `receivedAt − time` | `latency_ms` | Rounded ms. `None` when `receivedAt` is absent. **Can be negative** — see limitations |
+| `category` | `category` | Pre-computed by the server |
+| `type` | `cot_type` | Raw CoT type code |
+| `uid` | `uid` | `ANDROID-<hex>`, a bare UUID (WebTAK), or `GeoChat.ANDROID-<hex>` |
+| `callsign` | `callsign` | `None` for server plumbing |
+| `nodeType` | `node_type` | `Android`, `WebTAK`, `Other` |
+| `platform` | `platform` | `ATAK-CIV`, `WebTAK`, or `None` |
+| `parentCallsign` | `parent_callsign` | Always `null` in observed samples |
+| `lat` / `lon` | `lat` / `lon` | `0.0` default when absent |
+| `lat == 0 and lon == 0` | `has_gps_fix` (inverted) | CoT no-fix sentinel — see limitations |
+| `raw` | `raw_cot` | Original CoT XML, retained whole |
+| min/max `time` | `session_start` / `session_end` | Wall-clock UTC, unlike `fw_log` |
+
+Timestamps are normalized from ISO-8601 with a `Z` suffix to the project's
+`%Y-%m-%d %H:%M:%S.%f` output format.
+
+### Parsing Rules
+
+1. The whole file must parse as JSON. A decode failure, or a root that isn't a
+   list, is a hard stop with a `parse_errors` entry and an empty result — this
+   format has no partial-line recovery path (unlike the line-oriented formats).
+2. Records that aren't dicts, or that lack a parseable `time`, are skipped and
+   counted; the count is reported as `{skipped} of {total}`.
+3. `has_gps_fix` is `not (lat == 0 and lon == 0)`. **This single definition is
+   the contract** — the UI must not re-derive it, and specifically must not add
+   its own `lat != 0 && lon != 0` test, which would wrongly reject a real
+   position on the equator or prime meridian.
+4. `latency_ms` is preserved when negative, never clamped.
+5. `tak_no_fix_events` is scoped to **PLI and Marker** — the categories expected
+   to carry a position. Chat and server-control events have no position to
+   report and are not "missing" one.
+
+### Known Limitations — TAK Server
+
+- **No radio identity or RF data.** Callsign + `uid` only; no serial, GID,
+  firmware, battery, thermal, RSSI or hop count. Excluded from the Health Score.
+- **`lat`/`lon` of exactly (0,0) is the CoT no-fix convention,** paired with a
+  `999999.0`-family `hae`/`ce`/`le` sentinel in the raw XML. Flagged
+  `has_gps_fix=False`; never plot these and never read them as a real position
+  in the Gulf of Guinea.
+- **Negative `latency_ms` is real data, not an error.** `receivedAt` before
+  `time` means the source device's clock runs fast relative to the server. The
+  sample log reproduces it on 10 of 91 events (min `−93 ms`), mostly repeated
+  WebTAK PLI updates. Same class of question as [P6](#p6--knot-clock-skew-investigation-low--data-quality)
+  but measured server-side — tracked as [P8](#p8--tak-server-receipt-latency-and-clock-skew-low--data-quality).
+- **Chat bodies not extracted.** Only the envelope (sender callsign,
+  timestamps) is captured from `b-t-f` records; the `<remarks>` text is left in
+  `raw_cot`. Surfaced as a `DATA LIMITATION —` entry in `parse_errors`.
+- **`parentCallsign` always null** in observed samples, like ATAK's
+  `originatorCallsign`. Parsed and stored, but do not build on it yet.
+- **`platform` is often absent** (18 of 91 in the sample, including all Chat
+  records) even when `nodeType` is known. Stored as `None`, never guessed.
+- **⚠️ Two different "no GPS fix" counts exist, and their wording conflates
+  them.** `summary.no_fix_count` is PLI/Marker-scoped (1 in the sample), while
+  the `parse_errors` sentence counts **all** categories ("5 event(s) reported no
+  GPS fix"). Both numbers are correct for what they measure, but the error text
+  reads as though 5 devices lost GPS when only 1 did. The UI resolved the same
+  conflation by stating both reasons separately; the parser text has not been
+  updated to match. **Open — fix the `parse_errors` wording or scope it.**
+- **Single-stream validation.** Behavior is proven against one real sample plus
+  a hand-built edge-case fixture. Multi-server, multi-day, and larger streams
+  are unobserved. No fixture yet exercises a genuine position with `lat == 0` or
+  `lon == 0`, so rule 3 above is currently unverified by test.
+
+### Sample File Observations (tak_stream_sample.json)
+
+- 91 events over 18 minutes (19:24:15 → 19:42:26 UTC, 2026-07-30), Panama City.
+- Categories: 71 PLI · 16 Marker · 3 Chat · 1 Other. CoT types map 1:1 to those.
+- 10 unique callsigns across 74 Android + 16 WebTAK + 1 server record. One
+  record (the handshake) has no callsign.
+- Server: `5.6-RELEASE-57-HEAD`, API version `3`.
+- Latency: avg 10,096 ms · max 166,909 ms · min −93 ms · 10 negative.
+- 5 events with no GPS fix — of which **1** is a PLI/Marker (a real gap) and 4
+  are Chat/server-control (never carry a position).
+- `parentCallsign` null on all 91 records.
+
+---
+
 ## Message Protocol Architecture — Cross-Format Requirements
 
 ### Overview
@@ -1287,6 +1460,41 @@ callsign fronthauling throughout the 2026-06-04 field session.
 
 **Status:** ⏳ Deferred — analysis report available at
 `docs/poseidon_analysis_2026-06-02.md`
+
+### P8 — TAK Server Receipt Latency and Clock Skew (LOW — data quality)
+
+**Finding:** `latency_ms` (`receivedAt − time`) on TAK server CoT events is
+negative on 10 of 91 events in the first sample stream (min `−93 ms`), meaning
+those devices' clocks were running **ahead** of the TAK server. The same sample
+also shows a very wide positive spread — avg 10,096 ms against a max of
+166,909 ms — so two distinct effects are mixed into one number and cannot yet be
+told apart:
+
+1. **Clock skew** — device and server disagree on wall time. Negative values are
+   unambiguous evidence of this, and a positive skew is indistinguishable from
+   genuine delay.
+2. **Real fronthaul delay** — mesh transit plus server ingest. Expected to be
+   the bulk of the large positive outliers.
+
+This is the server-side counterpart to [P6](#p6--knot-clock-skew-investigation-low--data-quality),
+which found a constant ≈ −2 h host-clock skew in ATAK data. P6's two open QA
+questions apply here too: which clock was authoritative, and whether the cause
+is timezone/NTP configuration or a manually-set clock.
+
+**Why it is not treated as an error:** the skew is the signal of interest. The
+parser preserves negative values rather than clamping them, emits a
+`parse_errors` note when any occur, and the TAK tab colours those points red
+with an explicit "a fast device clock, not a data error" caption.
+
+**To close, needs:**
+- A stream captured alongside a known-good NTP reference, to separate skew from
+  transit delay.
+- Confirmation of whether the TAK server timestamps ingest or receipt.
+- A view that separates the two effects (e.g. per-callsign median latency as a
+  skew proxy, with deviation from it as delay) rather than one blended number.
+
+**Status:** ⏳ Open — referenced by `parser/tak.py` and `TakEvent` in
+`parser/models.py`. Documented here 2026-08-24 so those references resolve.
 
 ---
 

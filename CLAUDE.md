@@ -87,6 +87,7 @@ qa-log-analyzer/
 │   ├── diagnostic.py       # goTenna Pro+ block-format logs
 │   ├── rsdk.py             # iOS/Android SDK line-per-event logs
 │   ├── atak.py             # Android ATAK plug-in logs
+│   ├── tak.py              # TAK server CoT event stream (server-side)
 │   └── relay_manager.py    # Android logcat from com.gotenna.relaymanager
 ├── api/
 │   ├── main.py             # FastAPI app entry point + CORS config
@@ -98,6 +99,7 @@ qa-log-analyzer/
 │   ├── components/
 │   │   ├── ChartPanel.jsx  # All Chart.js chart components + CHART_MAP registry
 │   │   ├── FileUpload.jsx  # Upload modal — uses createPortal (see architecture)
+│   │   ├── TakTab.jsx      # TAK Server tab — Leaflet map + latency chart
 │   │   ├── DeviceSummary.jsx
 │   │   └── DataPointSelector.jsx
 │   └── hooks/
@@ -119,20 +121,28 @@ are the intended source of truth — keep them in sync with the code.
 
 ## Supported log formats
 
-Five formats, auto-detected by `_detect_format()` in `api/routes/parse.py`.
+Six formats, auto-detected by `_detect_format()` in `api/routes/parse.py`.
 **Detection order matters** — fw_log runs first because its bracket pattern
 `[digits-digits, MODULE, LEVEL]` is highly distinctive and cannot match any of
-the other four. relay_manager must precede rsdk because both contain
-`AndroidBleRadio` lines; relay_manager has additional markers that distinguish
-it. `diagnostic` is always the catch-all fallback.
+the others. `tak` must precede `atak`: both are JSON, but their field sets are
+disjoint (`receivedAt`/`nodeType`/`category` vs
+`logId`/`connectionState`/`atakVersion`). relay_manager must precede rsdk
+because both contain `AndroidBleRadio` lines; relay_manager has additional
+markers that distinguish it. `diagnostic` is always the catch-all fallback.
 
 | Priority | Key | Parser | Source |
 |----------|-----|--------|--------|
 | 1 | `fw_log` | `parser/fw_log.py` | goTenna relay radio firmware (UART/USB debug) |
-| 2 | `atak` | `parser/atak.py` | Android ATAK plug-in |
-| 3 | `relay_manager` | `parser/relay_manager.py` | Android logcat, `com.gotenna.relaymanager` |
-| 4 | `rsdk` | `parser/rsdk.py` | iOS/Android SDK logs |
-| 5 | `diagnostic` | `parser/diagnostic.py` | goTenna Pro+ app export (fallback) |
+| 2 | `tak` | `parser/tak.py` | TAK server CoT event stream (JSON export) |
+| 3 | `atak` | `parser/atak.py` | Android ATAK plug-in |
+| 4 | `relay_manager` | `parser/relay_manager.py` | Android logcat, `com.gotenna.relaymanager` |
+| 5 | `rsdk` | `parser/rsdk.py` | iOS/Android SDK logs |
+| 6 | `diagnostic` | `parser/diagnostic.py` | goTenna Pro+ app export (fallback) |
+
+`tak` is the only **server-side** source — the server's view of many clients,
+not a device describing itself. It carries no radio identity (no serial, GID or
+firmware version) and no RF data (no RSSI or hop count), so it is excluded from
+the Health Score and contributes nothing to the device KPI row.
 
 Every parser returns a `ParseResult` from `parser/models.py`. The API and
 UI only depend on that shape — never import parser internals into routes or
@@ -202,6 +212,28 @@ case: `avg_rssi` comes from ATAK received-message RSSI and rsdk GRIP incoming
 RSSI, but is `None` for diagnostic, so diagnostic cards score `/4`.
 All Health Score thresholds are unvalidated initial estimates — see the
 threshold-validation backlog in `docs/ui-requirements.md`.
+
+### A scoped count must state its scope
+If a KPI counts a subset, its label says which subset. The TAK `No GPS Fix` card
+counts PLI/Marker events only — the categories expected to carry a position —
+so its sub-label reads `PLI/Marker only`, **not** "excluded from map", which
+also includes Chat and server-control events that never had a position to lose.
+Where a chart excludes rows for more than one reason, name the reasons
+separately so the arithmetic reconciles on screen (`86 of 91 plotted ·
+excluded: 1 PLI/Marker with no GPS fix, 4 Chat/server-control`). A scoped count
+also renders at zero — `0` doesn't mean everything is included.
+
+Corollary: **don't re-derive a parser definition in the UI.** `has_gps_fix` is
+already `not (lat == 0 and lon == 0)`; a UI-side `lat !== 0 && lon !== 0` would
+reject a genuine position on the equator or prime meridian and make the two
+counts disagree again.
+
+### An empty map must say it's empty
+A Leaflet container that never gets `fitBounds`/`setView` loads no tiles and
+paints as a blank near-white box on the dark dashboard. Keep the container
+mounted — unmounting leaves the creation effect (deps `[]`) with no ref when
+data returns — but hide it with `display: none` and render a message in its
+place, as `TakPositionMap` does. Same rule the latency chart already followed.
 
 ---
 
@@ -305,9 +337,9 @@ lost, and an entry would fire on every enhanced log and dilute the real ones), a
 **transparently handled format quirks**, where the parser absorbs the oddity without
 loss (the `--- RSDK LOGS ---` divider). For those, the honesty burden sits in the UI
 copy and the model docstrings instead. How a real entry reaches the UI varies by
-format today: `fw_log` and `relay_manager` render
+format today: `fw_log`, `relay_manager` and `tak` render
 the full text in a dedicated banner (`FwLogTab` and `RelayHealthTab` in
-`App.jsx`); the `rsdk` GRIP hop/RSSI gap is surfaced as a `HopsTab` note; the
+`App.jsx`, `LimitationBanner` in `TakTab.jsx`); the `rsdk` GRIP hop/RSSI gap is surfaced as a `HopsTab` note; the
 `diagnostic` 3.1.11 and `atak` `sdkError` entries currently reach `parse_errors`
 (and the file-list ⚠ glyph) but have no dedicated tab banner. A general
 diagnostic/rsdk/atak limitations banner is backlogged — see the Backlog section below.
@@ -340,6 +372,13 @@ project's lifecycle, not a sign something is broken.
 | `fw_log` | Device serial number and firmware version live in the binary RHC response payload — not plaintext. Identity is shown as the origin hash only |
 | `fw_log` | Battery stabilization errors are a known firmware quirk (the routine fires even when the battery is already stable), counted separately from real errors — not indicative of hardware failure, pending field validation |
 | `fw_log` | `RSSI[]` detailed samples are DEBUG-level and skipped, so `rssi_samples`/`rssi_summary` are always empty; channel energy (`energy_samples`) is the RSSI proxy surfaced in the UI |
+| `tak` | **Server-side viewpoint — no radio identity or RF data.** No serial, GID, firmware version, battery, thermal, RSSI or hop count; identity is callsign + CoT `uid`. Excluded from the Health Score for the same reason as `relay_manager`, and contributes nothing to the device KPI row |
+| `tak` | `lat`/`lon` of exactly `(0,0)` is the CoT no-GPS-fix sentinel (paired with a `999999.0`-family `hae`/`ce`/`le`), not a real position — flagged `has_gps_fix=False`, never plotted. The parser owns this definition; see "A scoped count must state its scope" for why the UI must not re-derive it |
+| `tak` | Negative `latency_ms` (`receivedAt` before `time`) is real data, not an error — the source device's clock is ahead of the server. Preserved, never clamped, and shown red in the latency chart with that caption. 10 of 91 events in the first sample (min `−93 ms`). Server-side counterpart to P6, tracked as **P8** in `docs/parsing-requirements.md` |
+| `tak` | GeoChat (`b-t-f`) message bodies are not extracted — only the envelope (sender callsign, timestamps); the `<remarks>` text stays in `raw_cot`. Also unextracted from the raw XML: `<status battery>`, `<takv>` device/OS strings, `<track>` speed/course. Surfaced as a `DATA LIMITATION —` entry |
+| `tak` | Two different "no GPS fix" counts exist: `summary.no_fix_count` is PLI/Marker-scoped (1 in the sample) while the `parse_errors` sentence counts all categories ("5 event(s)"). Both are correct for what they measure, but the error wording reads as 5 devices losing GPS when 1 did — the UI resolved this conflation, **the parser text has not**. Open fix |
+| `tak` | `parentCallsign` always null in observed samples, and `platform` is often absent (18 of 91, including all Chat records) even when `nodeType` is known — stored as `None`, never guessed |
+| `tak` | Single-stream validation — one real sample plus one hand-built edge-case fixture. Multi-server, multi-day and larger streams unobserved. No fixture exercises a genuine `lat == 0`/`lon == 0` position, so that parser rule is documented but untested |
 
 ---
 
@@ -394,7 +433,7 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | Time-window step disabled state for unparseable timestamps | ✅ Done — `range-unavailable` step in FileUpload.jsx replaces the silent skip |
 | Min battery windowed reduce returns 0 for single-sample sets (ATAK branch) | ✅ Done — IIFE pattern: `(batPcts => batPcts.length ? Math.min(...batPcts) : null)(filtered)` |
 | `extractTimeRange` doesn't detect ATAK epoch-ms timestamps (`timestampInMillis`) — ATAK logs route to `range-unavailable`, lose the slider | ✅ Done — `extractTimeRange` returns epoch ms and unions wall-clock `TS_RE` with a key-anchored 13-digit `EPOCH_MS_RE` (`timestampInMillis`/`launchTimeInMillis`/`messageTimestampInMillis`); duration keys excluded; client-side only |
-| DATA LIMITATION prefix normalization (em-dash) across all 5 parsers | ✅ Done (PR #19) — canonical `DATA LIMITATION — ` (U+2014) in atak/fw_log/diagnostic/rsdk/relay_manager; `App.jsx` FW Log banner strip site updated to match (relay banner was already em-dash) |
+| DATA LIMITATION prefix normalization (em-dash) across all parsers | ✅ Done (PR #19) — canonical `DATA LIMITATION — ` (U+2014) in atak/fw_log/diagnostic/rsdk/relay_manager; `App.jsx` FW Log banner strip site updated to match (relay banner was already em-dash). `tak.py` was added later (PR #35) and conforms — all six parsers verified U+2014 |
 | General DATA LIMITATION banner for diagnostic/rsdk/atak tabs | ⏳ Pending — diagnostic 3.1.11 & atak sdkError `parse_errors` entries reach the API + file-list ⚠ glyph but have no dedicated tab banner (rsdk is shown via the HopsTab note); CLAUDE.md "Known data limitations" qualified accordingly |
 | diagnostic 3.1.11 `parse_errors` emission (originator callsign + GID omitted) | ✅ Done (PR #19) — data-driven, fires only when a Received Message block omits both; reports "{n} of {total}" affected |
 | rsdk GRIP-availability `parse_errors` emission (no `GRIP_Receiver` incoming fields) | ✅ Done (PR #19) — hop count / RSSI unavailability surfaced honestly when no incoming GRIP fields lines are present |
@@ -405,6 +444,15 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | ATAK `action` GET/SET conflation | ✅ Done (2026-08-04) — both actions are still stored (dropping GETs would lose real observations); the UI splits on `action` so SET attempts, GET queries, mode polls, and mode change cmds are counted and labelled separately. Verified against the real MESMER log: 28 Frequency cmds = 16 SET + 12 GET; 2,028 mode records = 2,016 polls + 12 change cmds |
 | Rename `AtakFrequencySetAttempt`/`AtakRadioModeQuery` (they hold both actions) | ⏳ Deferred — ~69 references incl. the two serialized keys, tests, and docs; pure churn for no behavior change. Docstrings state what the fields actually hold |
 | `_CSV_TYPES` entry or JSON-only note for the two new ATAK tables | ⏳ Pending — decision not yet recorded in `api/routes/export.py` |
+| TAK server CoT stream — parser + TAK Server tab | ✅ Built 2026-08-24 (PR #35, open) — `karen` passed; the other 5 gate agents have not run |
+| TAK — Leaflet loaded from npm (`TakTab.jsx`) vs unpkg CDN (Hop Count Map) | ⏳ Pending decision — the two disagree; this file records CDN as the deliberate lean-stack choice, so one of them should change |
+| TAK — `parse_errors` no-fix wording counts all categories while `summary.no_fix_count` is PLI/Marker-scoped | ⏳ Pending — same conflation the UI already fixed |
+| TAK — `summary.min_latency_ms` serialized and time-windowed but never rendered | ⏳ Pending — ParseResult chain stops one step short of the UI; add a KPI or drop the field |
+| TAK — no format-specific KPI row on Overview | ⏳ Pending — a TAK-only session falls through to the device row and shows `NETWORK NODES —`, `PEAK TEMP —`, `APP VERSION: 0 versions`; `relay_manager` has `RelayKpiRow` for exactly this |
+| TAK — `_CSV_TYPES` entry or JSON-only note for `tak_events` | ⏳ Pending — same unrecorded decision as the ATAK command tables |
+| P8: TAK server receipt latency / clock skew | ⏳ Open — defined 2026-08-24 in `docs/parsing-requirements.md` so the `parser/tak.py` and `models.py` references resolve |
+| `extractTimeRange` matches `stale=` inside embedded CoT XML — 18-min session reads as a 25-hour slider range | ⏳ Pending — pre-existing scanner behavior, newly reachable via TAK; slider can't narrow within the data |
+| TAK map legend lists unplotted callsigns; `PALETTE` collides past 10 callsigns | ⏳ Pending — cosmetic; `colorByCallsign` iterates all events rather than plotted ones |
 
 ---
 
@@ -482,6 +530,6 @@ re-check:
   e.g. `feat(parser): add relay_manager` or `fix(ui): modal z-index via createPortal`.
 - **Update docs alongside code.** Parser rule changed → update
   `parsing-requirements.md`. UI component changed → update `ui-requirements.md`.
-- **Parser requirements P1–P7** are in `docs/parsing-requirements.md`. P1 (BLE tag) and P5 (battery critical) are done. P2–P4 pending. P6 investigated 2026-06-15 (KNOT constant ≈ −2h host-clock skew; two open QA questions blocking closure — which clock was correct + tz/NTP-vs-manually-wrong root cause; GID label conflict resolved 2026-06-16 as same-radio reuse, see identity-model note above). P7 deferred. Protocol architecture (BROADCAST/PRIVATE/UNICAST normalization, GRIP, logId) also documented there.
+- **Parser requirements P1–P8** are in `docs/parsing-requirements.md`. P1 (BLE tag) and P5 (battery critical) are done. P2–P4 pending. P8 (TAK server receipt latency / clock skew — the server-side counterpart to P6) was defined 2026-08-24 to resolve references already present in `parser/tak.py` and `models.py`. P6 investigated 2026-06-15 (KNOT constant ≈ −2h host-clock skew; two open QA questions blocking closure — which clock was correct + tz/NTP-vs-manually-wrong root cause; GID label conflict resolved 2026-06-16 as same-radio reuse, see identity-model note above). P7 deferred. Protocol architecture (BROADCAST/PRIVATE/UNICAST normalization, GRIP, logId) also documented there.
 - **Do not add npm packages without justification.** Check Chart.js 4.4,
   React 18, and plain CSS first.

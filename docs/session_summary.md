@@ -1,5 +1,5 @@
 # QA Log Analyzer — Session Summary
-_Last updated: 2026-08-04_
+_Last updated: 2026-08-24_
 
 ---
 
@@ -32,17 +32,22 @@ _Last updated: 2026-08-04_
 
 ---
 
-## Log Formats — 5 Supported
+## Log Formats — 6 Supported
 
 Detection order in `_detect_format()` — ORDER MATTERS:
 
 | Priority | Key | Parser | Detection Marker |
 |----------|-----|--------|-----------------|
 | 1 | `fw_log` | `parser/fw_log.py` | `[digits-digits, MODULE, LEVEL]` bracket pattern |
-| 2 | `atak` | `parser/atak.py` | `logId` / `connectionState` / `atakVersion` JSON keys |
-| 3 | `relay_manager` | `parser/relay_manager.py` | `na.relaymanager(` or `com.gotenna.relaymanager` — MUST be before rsdk |
-| 4 | `rsdk` | `parser/rsdk.py` | `IosBleRadio` or `AndroidBleRadio` or `GRIP_SENDER` |
-| 5 | `diagnostic` | `parser/diagnostic.py` | Catch-all fallback |
+| 2 | `tak` | `parser/tak.py` | JSON array containing `receivedAt` + `nodeType` + `category` — MUST be before atak (both JSON, disjoint field sets) |
+| 3 | `atak` | `parser/atak.py` | `logId` / `connectionState` / `atakVersion` JSON keys |
+| 4 | `relay_manager` | `parser/relay_manager.py` | `na.relaymanager(` or `com.gotenna.relaymanager` — MUST be before rsdk |
+| 5 | `rsdk` | `parser/rsdk.py` | `IosBleRadio` or `AndroidBleRadio` or `GRIP_SENDER` |
+| 6 | `diagnostic` | `parser/diagnostic.py` | Catch-all fallback |
+
+**`tak` is the only server-side format.** Every other one is a device or app log
+describing one radio; a TAK stream is the server's view of many clients, so it
+carries no radio identity or RF data and is excluded from the Health Score.
 
 ---
 
@@ -86,7 +91,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 
 ---
 
-## 15 Tabs (Current State)
+## 16 Tabs (Current State)
 
 | # | Tab Key | Name | Gate | Status |
 |---|---------|------|------|--------|
@@ -105,6 +110,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | 13 | `fw-log` | FW Log | Always visible; dimmed + empty state when no fw_log loaded | ✅ |
 | 14 | `topology` | Network Topology | NOT IMPLEMENTED | ⚠️ Design spec only |
 | 15 | `modes` | Modes (α badge) | atak loaded | ✅ |
+| 16 | `tak` | TAK Server (🛰️ glyph) | Always visible; dimmed + empty state when no tak log loaded | ✅ |
 
 ---
 
@@ -135,6 +141,13 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | `fw_log` | `RSSI[]` samples are DEBUG-level and skipped — channel energy is the RSSI proxy |
 | `atak` | `deviceDisconnected` omits serial — attribution uses LIFO assumption (pending dev team confirmation) |
 | `atak`/`diagnostic` | Host-clock skew not auto-detected/corrected — a wrong phone clock offsets all `timestampInMillis` uniformly (makes `deliveryTimeInMillis` a large constant, even negative); timestamps stored verbatim, interpret manually. Confirmed: KNOT ≈ −2h. See P6 |
+| `tak` | **Server-side viewpoint — no radio identity or RF data.** No serial, GID, firmware version, battery, thermal, RSSI or hop count. Identity is callsign + CoT `uid`. Excluded from the Health Score (`HEALTH_FORMATS`) for the same reason as `relay_manager` |
+| `tak` | `lat`/`lon` of exactly `(0,0)` is the CoT **no-GPS-fix sentinel**, paired with a `999999.0`-family `hae`/`ce`/`le`. Flagged `has_gps_fix=False` — never plot, never read as a real position. The parser owns this definition; the UI must not re-derive it (a `lat != 0 && lon != 0` test would reject a genuine position on the equator or prime meridian) |
+| `tak` | Negative `latency_ms` (`receivedAt` before `time`) is **real data, not an error** — the device clock is ahead of the server. 10 of 91 events in the first sample, min `−93 ms`. Preserved, never clamped; shown red in the latency chart. Server-side counterpart to P6, tracked as **P8** |
+| `tak` | GeoChat (`b-t-f`) **message bodies not extracted** — only the envelope (sender callsign, timestamps). The `<remarks>` text stays in `raw_cot`. Surfaced as a `DATA LIMITATION —` entry |
+| `tak` | ⚠️ **Two different "no GPS fix" counts.** `summary.no_fix_count` is PLI/Marker-scoped (1 in the sample); the `parse_errors` sentence counts all categories ("5 event(s)"). Both are right for what they measure, but the error wording reads as 5 devices losing GPS when 1 did. The UI fixed this conflation; **the parser text has not** — open fix |
+| `tak` | `parentCallsign` always null, and `platform` often absent (18 of 91, including all Chat records) even when `nodeType` is known. Stored as `None`, never guessed |
+| `tak` | Single-stream validation — one real sample + one hand-built edge-case fixture. Multi-server, multi-day and larger streams unobserved. No fixture exercises a genuine `lat == 0`/`lon == 0` position, so that parser rule is untested |
 
 ---
 
@@ -146,6 +159,14 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | GRIP RSSI Line Graph Over Time | ✅ Done |
 | ATAK Enhanced Log (SDK Logging 2.0) | ✅ Done |
 | FW Log — relay firmware parser & tab | ✅ Done |
+| TAK server CoT stream — parser + TAK Server tab | ✅ Built 2026-08-24 (PR #35, **open**) — karen passed; 5 other gate agents not yet run |
+| TAK — Leaflet npm vs unpkg CDN inconsistency | ⏳ Pending decision — `TakTab.jsx` imports the npm package, Hop Count Map uses the CDN; CLAUDE.md records CDN as the deliberate choice |
+| TAK — `parse_errors` no-fix wording counts all categories while the KPI is PLI/Marker-scoped | ⏳ Pending — same conflation the UI just fixed |
+| TAK — `summary.min_latency_ms` serialized but never rendered | ⏳ Pending — ParseResult chain stops one step short of the UI |
+| TAK — no format-specific KPI row on Overview | ⏳ Pending — TAK-only session shows `NETWORK NODES —`, `PEAK TEMP —`, `APP VERSION: 0 versions` |
+| TAK — `_CSV_TYPES` entry or JSON-only note for `tak_events` | ⏳ Pending — same unrecorded decision as the two ATAK command tables |
+| P8: TAK server receipt latency / clock skew | ⏳ Open — documented 2026-08-24 so the `parser/tak.py` and `models.py` references resolve |
+| `extractTimeRange` matches `stale=` inside embedded CoT XML → 18-min session reads as a 25-h slider range | ⏳ Pending — pre-existing scanner behavior, newly reachable via TAK |
 | PLI tab overhaul + battery chart real UTC timestamps | ✅ Done (PR #6) |
 | P5: Battery critical threshold < 10% | ✅ Done |
 | P1: MESMER BLE tag profile (BLE\|DEBUG vs ERROR\|BLE) | ✅ Done (PR #4) |
@@ -252,6 +273,71 @@ pytest tests/test_atak.py -v  # single file verbose
 ---
 
 ## Most Recent Work (Last Few PRs)
+
+**2026-08-24 — TAK server CoT event stream: 6th log format + TAK Server tab.
+→ PR #35 OPEN (`feat/tak-server-log-format`). CI green: 234 passed, 2 skipped.
+Do NOT merge yet — only 1 of 6 quality-gate agents has run.**
+
+Two commits, parser-then-UI (the split used for the ATAK command work):
+
+```
+0c7fd02 feat(parser): add TAK server CoT event stream format
+baf0c18 feat(ui):     add TAK Server tab with position map and latency chart
+```
+
+*What was built (parser → API → UI, chain verified):*
+- `parser/tak.py` — `parse_tak_log` / `is_tak_log`. Input is the TAK server's
+  **pre-parsed JSON export** (array of CoT event records, original XML retained
+  in `raw`), not a raw multicast capture.
+- `TakEvent` + `TakServerInfo` in `models.py`, with derived properties
+  `tak_pli_events` / `tak_chat_events` / `tak_no_fix_events` /
+  `tak_unique_callsigns` / `tak_latency_ms_values`.
+- Detection at **priority 2, ahead of ATAK** — both are JSON but the field sets
+  are disjoint (`receivedAt`/`nodeType`/`category` vs
+  `logId`/`connectionState`/`atakVersion`). Verified with both loaded together.
+- `_result_to_dict()` serializes `tak_events` + `tak_server_info` and an 11-field
+  `tak` summary block. `tak_events` joined the time-window filter with its own
+  recompute branch; `tak_server_info` is carried over whole (single handshake
+  record, not windowable).
+- `TakTab.jsx` — KPI row, Leaflet position map coloured by callsign, and a
+  points-only receipt-latency chart with negative latency in red.
+
+*The interesting part — karen failed this feature first, on two defects:*
+
+1. **A KPI contradicted the chart next to it.** `No GPS Fix` read `1` with
+   sub-label "excluded from map" while the map read "86 of 91 events plotted".
+   Both numbers were right; the *label* was wrong. The fix generalizes:
+   **a scoped count must state its scope.** The map now names both exclusion
+   reasons separately so the arithmetic reconciles on screen, and the KPI
+   renders at zero too, because `0` doesn't mean everything is plotted.
+   Also dropped a redundant `lat !== 0 && lon !== 0` from the map filter — the
+   parser already defines `has_gps_fix` as exactly that test, and re-deriving it
+   would have rejected a real position on the equator or prime meridian.
+2. **An empty map rendered as a blank near-white box** on the dark dashboard —
+   a Leaflet container that never gets `fitBounds` loads no tiles. Container now
+   stays mounted (the creation effect needs its ref for when data returns) but
+   hides with `display: none`, message in its place. karen re-verified at pixel
+   level: mean luminance 199.9 → 20.0, and **0** pixels above 190L even with 14
+   stale tiles retained in the hidden container.
+
+*Two honest gaps in that fix, both unexercised by the fixtures:*
+- No fixture has a genuine position with `lat == 0` or `lon == 0`, so the
+  equator/prime-meridian rule is correct but **untested**.
+- The second empty-state string ("No event in this time window carries a GPS
+  position") is unreachable in the UI — all 91 sample events sit inside one hour
+  and the slider snaps to hours, so no window isolates the Chat records.
+
+*Docs updated in the same PR:* this file, `parsing-requirements.md` (new TAK
+Server section + **P8** defined so the code's dangling references resolve),
+`log-field-definitions.md` (Format 5 + TAK summary rows), `ui-requirements.md`
+(tab 16 + limitations + backlog).
+
+**What still needs deciding — see the Backlog table:** the Leaflet npm-vs-CDN
+inconsistency, the `parse_errors` no-fix wording (the parser still has the same
+conflation the UI just fixed), `min_latency_ms` serialized but unrendered, no
+TAK KPI row on Overview, and the `_CSV_TYPES` decision.
+
+---
 
 **2026-08-04 — ATAK radio-command layer (Frequency commands, NetworkMode/TetherMode
 queries, `relayModeUpdated`) + full quality-gate pass. → PR #33 MERGED (`ffadd0b`),
@@ -747,6 +833,18 @@ Based on the backlog, the most actionable items (not blocked):
      (PLI uses `gid|source_filename`); duplicate keys if two logs share a GID.
    - **Off-palette `#3b82f6`** for `relayModeUpdated` in `ChartPanel.jsx` — `#4a90e2` is
      the palette blue and is unused there.
+
+0. **Finish the PR #35 quality gate — this is the immediate next task.** Only
+   `karen` has run (and passed). Still to run, in order: `vera`,
+   `task-completion-validator`, `jenny`, `peer-reviewer`,
+   `claude-md-compliance-checker`. Expect them to land on:
+   - **`claude-md-compliance-checker`** — the `leaflet` npm dependency against
+     CLAUDE.md's "do not add npm packages" rule and the existing CDN pattern.
+   - **`vera`** — no fixture exercises a genuine `lat == 0`/`lon == 0` position,
+     and the `parse_errors` no-fix count (all categories) vs
+     `summary.no_fix_count` (PLI/Marker) discrepancy.
+   - **`jenny`** — the `_CSV_TYPES` decision for `tak_events` is still
+     unrecorded in `export.py`, matching the two ATAK command tables.
 
 1. **P2: Protocol separation (BROADCAST/PRIVATE)** in TX/RX analysis — `messageProtocol` is already parsed, just needs UI lanes
 

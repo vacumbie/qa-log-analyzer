@@ -21,6 +21,10 @@
 - **Framework:** React / Vite
 - **API:** FastAPI
 - **Charting:** Chart.js 4.4.1
+- **Maps:** Leaflet — loaded **two different ways**, which is a known
+  inconsistency: the Hop Count Map pulls it from the unpkg CDN, while
+  `TakTab.jsx` imports the npm package (`leaflet@^1.9.4`). See the pending
+  decision in the backlog below.
 - **Fonts:** Rajdhani (body), Barlow Condensed (headings/display), Share Tech Mono (monospace/data, via `var(--mono)`). All three are loaded via a Google Fonts `<link>` in `index.html` and referenced by name in `index.css` and inline styles.
 
 ---
@@ -298,6 +302,55 @@ filter unless an ATAK log is loaded. Carries the `α` alpha badge.
 - `⚠ MIXED` badge when more than one confirmed mode or relay state occurred in the session.
 - **Empty state** — the tab is `atakOnly`, so "no ATAK log" is unreachable. The real empty case is an ATAK log carrying none of the three sources, which happens on the v3.0 builds that emit zero `connectionState` records. The note names that limitation explicitly rather than rendering a blank page.
 
+### 16. TAK Server (`tak`) — TAK only
+
+`{ id:'tak', label:'TAK Server', takOnly: true }` in `TABS`, rendered by
+`ui/src/components/TakTab.jsx`. Carries a 🛰️ glyph, dimmed with the tab when no
+TAK log is loaded. Data comes from `r.tak_events`, `r.tak_server_info` and
+`r.summary`; the parser is `parser/tak.py`.
+
+- **Data Limitations banner** — the `DATA LIMITATION —` subset of `parse_errors`
+  (currently the GeoChat body limitation). Same treatment as the FW Log and
+  Relay Health banners.
+- **Header** — `TAK SERVER OVERVIEW` with the server version as a sub-line
+  (`tak_server_info.server_version`), omitted entirely when the stream carries
+  no handshake record rather than showing "unknown".
+- **KPI row** — Total Events · PLI · Marker · Chat · Server Control · Unique
+  Callsigns · No GPS Fix · Avg Latency · Max Latency · Clock Skew Events.
+- **Device Positions** — Leaflet map, one `circleMarker` per event with a GPS
+  fix, coloured by callsign with a scrollable legend. `fitBounds` to the data;
+  popups show callsign, category, time and latency.
+- **Server Receipt Latency** — points-only Chart.js line (`showLine: false`,
+  the same technique as Battery Over Time), one point per event with both
+  timestamps, x-axis labelled `HH:MM:SS` UTC. Negative-latency points are red
+  with a caption naming a fast device clock, not a data error.
+
+**Two rules this tab establishes, both learned from live verification:**
+
+> **1. A scoped count must say what it is scoped to.** The `No GPS Fix` KPI is
+> PLI/Marker-scoped, so its sub-label reads `PLI/Marker only` — it must never be
+> labelled as the map-exclusion count, which also includes Chat and
+> server-control events that never carry a position. The map subtitle states
+> both exclusion reasons separately so the arithmetic reconciles on screen
+> (`86 of 91 plotted · excluded: 1 PLI/Marker with no GPS fix, 4
+> Chat/server-control`). The KPI renders at zero too — `0` does not mean
+> everything is plotted.
+
+> **2. A map with nothing to plot must say so, not render an empty map.** A
+> Leaflet container that never gets `fitBounds` loads no tiles and paints as a
+> blank near-white box on the dark dashboard. The container stays mounted (so
+> the creation effect keeps its ref for when data returns) but is hidden with
+> `display: none`, with a centered message and the legend hidden alongside it.
+
+- **Empty state** — the tab is `takOnly`, so "no TAK log" is only reachable by
+  clicking the dimmed tab, which shows `NO TAK SERVER LOGS UPLOADED`. The real
+  empty cases are within-tab: no events in the time window, or no event
+  carrying a position.
+
+**Not on this tab, deliberately:** no Health Score contribution (TAK is outside
+`HEALTH_FORMATS` — no radio telemetry to score), no RSSI, no hop count, no
+battery or thermal. See the format limitations in `parsing-requirements.md`.
+
 ---
 
 ## Known Limitations & Open Questions
@@ -311,11 +364,16 @@ filter unless an ATAK log is loaded. Carries the `α` alpha badge.
 - **Relay Health tab — BLE payload decoding pending:** Relay health attribute values (SNR, battery %, temperature °F, uptime, firmware version) cannot be displayed until BLE protocol decoding is implemented. The tab must surface this limitation via a Data Limitations Banner rather than showing empty fields silently.
 - **Relay Health tab — prod environment:** Prod log behavior and environment badge are undefined until prod samples are analyzed.
 - **FW Log tab — energy as RSSI proxy:** Per-channel RSSI (`RSSI[]`) is DEBUG-level and skipped, so the tab shows channel energy (`energy_summary`) instead. `rssi_summary` is serialized but always empty. Identity is the origin hash only (serial/firmware in binary RHC payload). Relative-ms timestamps mean the upload Time Window step is skipped for this format.
+- **TAK Server tab — server-side data only:** No radio telemetry of any kind (no battery, thermal, RSSI, hop count, serial, GID or firmware version), so TAK is excluded from the Health Score and contributes nothing to the device KPI row. Identity is callsign + CoT `uid`. Position uses the CoT `(0,0)` no-fix sentinel; negative `latency_ms` is a fast device clock, not an error (P8); GeoChat message bodies are not extracted.
+- **TAK Server tab — no format-specific KPI row on Overview:** A TAK-only session lands on Overview and falls through to the device KPI row, showing `NETWORK NODES —`, `PEAK TEMP —`, `AVG HOP COUNT —`, `RADIO FIRMWARE —`, `CHAT MESSAGES —` and `APP VERSION: 0 versions` (a zero where N/A would be honest). `relay_manager` has a `RelayKpiRow` for exactly this reason; TAK needs the equivalent. Session Timeline and the PLI-vs-Chat chart do render TAK data correctly. ⏳ Pending.
+- **TAK Server tab — `stale=` inflates the time-window range:** `extractTimeRange` scans raw text, so it matches the `stale="…"` attribute inside the embedded CoT XML of GeoChat records. An 18-minute session is detected as a 25-hour range, and with hour-snapping the slider cannot narrow *within* the data — every reachable sub-window is either everything or nothing. No data is lost (the default window includes all events) but it is a usability trap. Pre-existing scanner behavior, newly reachable via TAK. ⏳ Pending.
+- **TAK Server tab — map legend lists unplotted callsigns:** `colorByCallsign` is built from all events rather than plotted ones, so callsigns with no GPS fix still get a legend swatch (6 swatches for 3 markers on the edge-case fixture). `PALETTE` also has 10 colours against 11 legend keys in the sample, so two callsigns share `#00d4ff`. Cosmetic; ⏳ pending.
 - **Topology tab** — Alpha/Beta feature; see Tab 14. Accuracy is inherently limited by what the logs can surface — the hardest data point in the dashboard to get right; must be clearly labeled as experimental in the UI
 - **Multi-log upload** — supported; drag-and-drop or file picker; multiple files processed simultaneously
 - **Duplicate log detection** — files with matching `radio_serial + session_start + session_end` are deduplicated automatically; only first occurrence used.
 - **GID collision** — two devices can share the same GID (observed: CL_B and gt_Sassy_B_Net share `90194071247761`, 2026-06-04). PLI `nodeMap` uses `gid|source_filename` key so both get separate cards. Dev team notified.
-- **Time window filtering** — client-side; filters these time-series arrays: `received_messages`, `system_samples`, `ble_fail_events`, `tx_events`, `atak_messages`, `atak_health_samples`, `grip_messages`, `grip_transfers`, `atak_events`, `atak_frequency_set_attempts`, `atak_radio_mode_queries`. Computable summary fields recomputed from filtered arrays; static fields retain parse-time values.
+- **Time window filtering** — client-side; filters these time-series arrays: `received_messages`, `system_samples`, `ble_fail_events`, `tx_events`, `atak_messages`, `atak_health_samples`, `grip_messages`, `grip_transfers`, `atak_events`, `atak_frequency_set_attempts`, `atak_radio_mode_queries`, `tak_events`. Computable summary fields recomputed from filtered arrays; static fields retain parse-time values.
+  > `tak_events` was added 2026-08-24 with the TAK format, along with a `tak` branch of the summary recompute. `tak_server_info` is **not** windowed — it comes from a single handshake record and is carried over whole, like `ble_fail_count`.
   > `atak_events` and the two radio-command arrays were added 2026-08-04. Before that, the Freq/RSSI and Modes cards mixed two time ranges in one card — health-derived mode segments and RSSI responded to the slider while SET-attempt counts, poll counts, and relay segments did not. `summary.ble_fail_count` is deliberately **not** recomputed from filtered `atak_events`: it derives from the SDK-error aggregate, which is not time-windowable, and is carried over whole.
 - **Chart time axis** — most line charts use per-device normalized session-progress axis (0–100%). **Exception: Battery % Over Time** uses real wall-clock UTC time on the X axis.
 
@@ -395,6 +453,16 @@ Full support for the enhanced ATAK log format. The `SdkLogSummaryCard` renders t
 
 ### FW Log — Relay Firmware Parser & Tab — ✅ Implemented
 Relay radio firmware (UART/USB debug) logs are auto-detected (detection priority 1) and parsed by `parser/fw_log.py` into `FwLogResult`. The FW Log tab (section 13) renders origin hash, RF configuration, message bucket history, relay routing decisions, channel energy (the RSSI proxy), neighbor table, and errors/warnings, with the three firmware-log `DATA LIMITATION` notes surfaced honestly. See parser spec in `parsing-requirements.md` (Relay Firmware section) and field definitions Format 4. **Note:** decoding the binary RHC payload (hash → serial, firmware version) is tracked separately below as RHC Response Field Mappings, still pending.
+
+### TAK Server Format + Tab — ✅ Implemented (2026-08-24, PR #35)
+TAK server CoT event streams are auto-detected (priority 2, ahead of ATAK) and parsed by `parser/tak.py` into `TakEvent` / `TakServerInfo`. The TAK Server tab (section 16) renders the category KPI row, a Leaflet position map coloured by callsign, and a server receipt-latency chart with negative latency called out as clock skew. `tak_events` joins the time-window filter with its own summary recompute branch, and the upload modal accepts `.json`. See the parser spec in `parsing-requirements.md` (TAK Server section) and field definitions Format 5.
+
+Two presentation rules came out of live verification and are now recorded in the tab spec: a scoped count must state its scope (the `No GPS Fix` KPI is PLI/Marker-only and must not be labelled as the map-exclusion count), and a map with nothing to plot must say so rather than render an un-tiled Leaflet container, which paints as a blank near-white box.
+
+**Follow-ups still open** (all listed under Known Limitations above): no TAK KPI row on Overview, `summary.min_latency_ms` serialized but never rendered, the `stale=`-inflated slider range, the legend listing unplotted callsigns, and the `PALETTE` colour collision past 10 callsigns.
+
+### TAK Server — Leaflet dependency source ⏳ Pending decision
+`TakTab.jsx` imports Leaflet from the npm package (`leaflet@^1.9.4`, added to `ui/package.json`), while the Hop Count Map loads the same library from the unpkg CDN. `CLAUDE.md` records the CDN approach as the deliberate choice for keeping the stack lean, so **the two now disagree** and one of them should change. Options: convert `TakTab` to the CDN pattern for consistency, or adopt npm as the standard and migrate the Hop Count Map (a real improvement — the CDN load is a hard dependency on network access for a tool that otherwise runs fully local). Flagged in PR #35; not yet ratified.
 
 ### Session Persistence
 Allow a user to save a parsed session so it can be retrieved later and compared alongside other test data.
