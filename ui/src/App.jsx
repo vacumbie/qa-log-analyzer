@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react'
 import FileUpload, { ParsingOverlay } from './components/FileUpload.jsx'
 import ChartPanel from './components/ChartPanel.jsx'
+import TakTab from './components/TakTab.jsx'
 import useLogData from './hooks/useLogData.js'
 
 // ── Palette & constants ───────────────────────────────────────────────────────
@@ -22,6 +23,7 @@ const TABS = [
   { id:'relay-health', label:'Relay Health', relayOnly: true },
   { id:'atak',      label:'ATAK', atakOnly: true },
   { id:'fw-log',    label:'FW Log', fwOnly: true },
+  { id:'tak',       label:'TAK Server', takOnly: true },
 ]
 
 // ── Shared sub-components ─────────────────────────────────────────────────────
@@ -2718,6 +2720,10 @@ function TabContent({ tab, results }) {
       if (!results.some(r => r.log_format === 'fw_log'))
         return <EmptyTabState message="No Firmware Logs Uploaded" detail="Upload a UART/USB debug log from the goTenna relay radio to analyze firmware data." />
       return <FwLogTab results={results} />
+    case 'tak':
+      if (!results.some(r => r.log_format === 'tak'))
+        return <EmptyTabState message="No TAK Server Logs Uploaded" detail="Upload a TAK server CoT event stream (.json) to analyze position and latency data." />
+      return <TakTab results={results} />
     default:          return null
   }
 }
@@ -2871,6 +2877,7 @@ export default function App() {
       // time series. `ble_fail_count` is unaffected — it comes from the
       // SDK-error aggregate and is carried over whole below.
       const atakEvts  = (r.atak_events                 || []).filter(e => inWindow(e.timestamp))
+      const takEvts   = (r.tak_events                  || []).filter(e => inWindow(e.timestamp))
 
       // Recompute summary fields that derive from the filtered arrays
       const hops     = msgs.map(m => m.hop_count).filter(Boolean)
@@ -2902,6 +2909,18 @@ export default function App() {
         session_count:    r.summary?.session_count,
         // BLE failures derive from the SDK-error aggregate — not time-windowable, carried over whole
         ble_fail_count:   r.summary?.ble_fail_count,
+      } : r.log_format === 'tak' ? {
+        total_events:             takEvts.length,
+        pli_count:                takEvts.filter(e => e.category === 'PLI').length,
+        chat_count:               takEvts.filter(e => e.category === 'Chat').length,
+        marker_count:             takEvts.filter(e => e.category === 'Marker').length,
+        other_count:              takEvts.filter(e => e.category === 'Other').length,
+        unique_callsigns:         new Set(takEvts.map(e => e.callsign).filter(Boolean)).size,
+        no_fix_count:             takEvts.filter(e => !e.has_gps_fix && (e.category === 'PLI' || e.category === 'Marker')).length,
+        avg_latency_ms:           rnd(avg(takEvts.map(e => e.latency_ms).filter(v => v != null)), 1),
+        max_latency_ms:           (vals => vals.length ? Math.max(...vals) : null)(takEvts.map(e => e.latency_ms).filter(v => v != null)),
+        min_latency_ms:           (vals => vals.length ? Math.min(...vals) : null)(takEvts.map(e => e.latency_ms).filter(v => v != null)),
+        negative_latency_count:   takEvts.filter(e => e.latency_ms != null && e.latency_ms < 0).length,
       } : {
         total_messages:     msgs.length,
         pli_count:          msgs.filter(m => m.message_type === 'location').length,
@@ -2943,6 +2962,7 @@ export default function App() {
         atak_events:                 atakEvts,
         atak_frequency_set_attempts: atakFreq,
         atak_radio_mode_queries:     atakModeQ,
+        tak_events:                  takEvts,
         summary: { ...r.summary, ...recomputed },
       }
     })
@@ -3048,7 +3068,8 @@ export default function App() {
             {visibleTabs.map(t => {
               const hasRelay = results.some(r => r.log_format === 'relay_manager')
               const hasFw    = results.some(r => r.log_format === 'fw_log')
-              const inactive = (t.relayOnly && !hasRelay) || (t.fwOnly && !hasFw)
+              const hasTak   = results.some(r => r.log_format === 'tak')
+              const inactive = (t.relayOnly && !hasRelay) || (t.fwOnly && !hasFw) || (t.takOnly && !hasTak)
               return (
                 <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
                   background: 'none', border: 'none', cursor: inactive ? 'default' : 'pointer',
@@ -3063,6 +3084,7 @@ export default function App() {
                   {t.label}
                   {t.atakOnly  && <span style={{ marginLeft: 4, fontSize: 8, color: C.yellow,   fontFamily: 'var(--mono)' }}>α</span>}
                   {t.relayOnly && <span style={{ marginLeft: 4, fontSize: 8, color: inactive ? '#2a3a52' : '#22d3ee', fontFamily: 'var(--mono)' }}>📡</span>}
+                  {t.takOnly   && <span style={{ marginLeft: 4, fontSize: 8, color: inactive ? '#2a3a52' : '#22d3ee', fontFamily: 'var(--mono)' }}>🛰️</span>}
                 </button>
               )
             })}

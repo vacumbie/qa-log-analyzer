@@ -334,6 +334,7 @@ function UploadModal({ onFiles, loading, onClose }) {
       'text/plain': ['.txt'],
       'application/octet-stream': ['.log'],
       'text/x-log': ['.log'],
+      'application/json': ['.json'],
     },
     multiple: true,
     disabled: loading || step === 'range',
@@ -368,7 +369,7 @@ function UploadModal({ onFiles, loading, onClose }) {
             </div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--muted)', marginTop: 2 }}>
               {step === 'drop'
-                ? 'Accepts .txt · .log · diagnostic, RSDK, ATAK, and Relay Manager formats'
+                ? 'Accepts .txt · .log · .json · diagnostic, RSDK, ATAK, Relay Manager, and TAK Server formats'
                 : step === 'range-unavailable'
                 ? `${pending.length} file${pending.length > 1 ? 's' : ''} · time filtering unavailable · full log will be analysed`
                 : `${pending.length} file${pending.length > 1 ? 's' : ''} · drag handles to narrow the analysis window · all times UTC`}
@@ -418,7 +419,7 @@ function UploadModal({ onFiles, loading, onClose }) {
                     Browse Files
                   </div>
                   <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--muted)', marginTop: 14 }}>
-                    Multiple files supported · .txt and .log formats
+                    Multiple files supported · .txt · .log · .json formats
                   </div>
                   <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--accent)', marginTop: 6, opacity: 0.7 }}>
                     Tip: hold Ctrl (Windows) or ⌘ Cmd (Mac) to select multiple files at once
@@ -557,7 +558,7 @@ export default function FileUpload({ onFiles, loading, error, variant = 'header'
             Upload Log Files
           </button>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--muted)', marginTop: 12 }}>
-            .txt · .log · multiple files supported
+            .txt · .log · .json · multiple files supported
           </div>
           {error && (
             <div style={{ marginTop: 16, padding: '10px 14px', background: 'var(--red)15', border: '1px solid var(--red)40', borderRadius: 6, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--red)' }}>
