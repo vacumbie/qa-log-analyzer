@@ -464,7 +464,7 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | TAK — `TakLatencyChart` defined outside `ChartPanel.jsx`/`CHART_MAP` | ✅ Done — moved to `ChartPanel.jsx` as `tak_latency`; `TakTab` renders it via `<ChartPanel selectedPoints={['tak_latency']} />`. `ChartPanel.jsx` is again the only file importing `react-chartjs-2` |
 | TAK — `<status battery>`/`<takv>`/`<track>` documented as surfaced via `DATA LIMITATION` but no entry existed | ✅ Done — `parse_tak_log` now emits a second entry naming only the elements a given stream actually carries, with per-element counts |
 | P8: TAK server receipt latency / clock skew | ⏳ Open — defined 2026-08-24 in `docs/parsing-requirements.md` so the `parser/tak.py` and `models.py` references resolve |
-| `extractTimeRange` matches `stale=` inside embedded CoT XML — 18-min session reads as a 25-hour slider range | ⏳ Pending — pre-existing scanner behavior, newly reachable via TAK; slider can't narrow within the data |
+| `extractTimeRange` matches `stale=` inside embedded CoT XML — 18-min session reads as a 25-hour slider range | ✅ Done — XML attribute timestamps (`attr="…"` / escaped `attr=\"…\"`) are stripped before the wall-clock scan; JSON members (`"time"`, `"receivedAt"`) are kept. The `=` is what tells them apart. Sample now reads 0.30 h (its true 18.2 min) instead of 24.24 h. **Hour-snapping is unchanged** — a sub-hour session still occupies one bucket, which is slider design, not this bug |
 | TAK map legend lists unplotted callsigns; `PALETTE` collides past 10 callsigns | ⏳ Pending — cosmetic; `colorByCallsign` iterates all events rather than plotted ones |
 
 ---

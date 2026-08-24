@@ -166,7 +166,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | TAK — no format-specific KPI row on Overview | ⏳ Pending — TAK-only session shows `NETWORK NODES —`, `PEAK TEMP —`, `APP VERSION: 0 versions` |
 | TAK — `_CSV_TYPES` entry or JSON-only note for `tak_events` | ⏳ Pending — same unrecorded decision as the two ATAK command tables |
 | P8: TAK server receipt latency / clock skew | ⏳ Open — documented 2026-08-24 so the `parser/tak.py` and `models.py` references resolve |
-| `extractTimeRange` matches `stale=` inside embedded CoT XML → 18-min session reads as a 25-h slider range | ⏳ Pending — pre-existing scanner behavior, newly reachable via TAK |
+| `extractTimeRange` matches `stale=` inside embedded CoT XML → 18-min session reads as a 25-h slider range | ✅ Done (2026-08-24) — XML attribute timestamps stripped before the scan; sample reads 0.30 h, its true span. Hour-snapping unchanged |
 | PLI tab overhaul + battery chart real UTC timestamps | ✅ Done (PR #6) |
 | P5: Battery critical threshold < 10% | ✅ Done |
 | P1: MESMER BLE tag profile (BLE\|DEBUG vs ERROR\|BLE) | ✅ Done (PR #4) |
@@ -375,7 +375,33 @@ on screen. New fixture `tak_stream_unknown_categories.json` (Alert, Route, a
 null category, one known PLI) and a parametrized route-level test asserting the
 five counts sum to `total_events` across every TAK fixture.
 
-Still open from the gates: the `stale=` slider range.
+**`stale=` slider inflation fixed (2026-08-24).** `extractTimeRange` scans raw
+file text, so it matched the `time`/`start`/`stale` attributes inside each TAK
+record's embedded CoT XML. `stale` is an expiry, not an observation — markers
+set it a day out — so the sample's 18.2-minute session was detected as a
+24.2-hour range that hour-snapping could never narrow back to the data.
+`XML_TS_ATTR_RE` strips attribute-form timestamps (`attr="…"`, or `attr=\"…\"`
+once escaped inside a JSON string) before the wall-clock scan; the JSON members
+`"time"` and `"receivedAt"` are the real bounds and survive, because the `=` is
+what distinguishes an XML attribute from a JSON member.
+
+Verified by extracting the shipped regexes and function out of `FileUpload.jsx`
+and running them over every fixture: the sample now reads 0.30 h (19:24:15 →
+19:42:26, exactly its JSON `time`/`receivedAt` span), and all five non-TAK
+formats produce byte-identical ranges to before, since their timestamps are
+bare and the pattern matches nothing. `npm run lint` and `npm run build` clean.
+There is no JS test runner in this project and adding one would mean new npm
+packages, so this check lives in the scratchpad rather than the repo — worth
+knowing it is not guarded by CI.
+
+**Not fixed, and not this bug:** the slider snaps to hours, so any sub-hour
+session occupies one bucket and cannot be narrowed within. That is slider
+design and applies to every format; it is also why the map's "No event in this
+time window carries a GPS position" empty state stays unreachable for the
+current sample.
+
+That closes every finding the six quality gates raised except the cosmetic
+legend/palette items.
 
 **Detection bug found by `jenny` and fixed (2026-08-24).** The TAK filename
 hints are substring tests, and `tak_server` is a substring of the legacy ATAK

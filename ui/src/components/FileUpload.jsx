@@ -78,6 +78,19 @@ const TS_RE = /\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/g
 // on the exact key name plus exactly 13 digits keeps durations and sentinels out.
 const EPOCH_MS_RE = /"(?:timestampInMillis|launchTimeInMillis|messageTimestampInMillis)"\s*:\s*(\d{13})\b/g
 
+// A TAK stream embeds a whole CoT XML document in each record's `raw` field,
+// and that XML carries its own time/start/stale attributes. `stale` is an
+// expiry, not an observation — markers routinely set it a full day out — so
+// scanning it stretched the real 18-minute sample session into a 24-hour slider
+// range the user could never narrow back down to the data.
+//
+// The session timestamps are the JSON members ("time", "receivedAt"); the XML
+// attributes are not. The `=` is what separates them: XML writes attr="…"
+// (attr=\"…\" once escaped inside the JSON string), JSON writes "key": "…".
+// Stripping the attribute form before scanning leaves the JSON members intact,
+// and matches nothing in the other five formats, whose timestamps are bare.
+const XML_TS_ATTR_RE = /\w+=\\?"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[^"\\]*/g
+
 // Returns the min/max timestamp in the text as epoch ms, or null if none found.
 // Unions wall-clock matches (diagnostic/rsdk/relay_manager, and ATAK sdkError
 // ISO timestamps) with ATAK epoch-ms matches, so a mixed enhanced log uses both.
@@ -90,7 +103,7 @@ function extractTimeRange(text) {
     if (ms > maxMs) maxMs = ms
   }
 
-  const wallclock = text.match(TS_RE)
+  const wallclock = text.replace(XML_TS_ATTR_RE, '').match(TS_RE)
   if (wallclock) {
     for (const ts of wallclock) consider(normaliseTs(ts).getTime())
   }
