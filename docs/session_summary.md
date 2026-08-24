@@ -358,8 +358,24 @@ Also folded in: because an incomplete lat/lon pair now also sets
 sentinel or an incomplete lat/lon pair") instead of claiming every one is a
 sentinel.
 
-Still open from the gates: an unrecognised `category` counting in none of the
-four buckets, and the `stale=` slider range.
+**Unrecognised `category` bucket added (2026-08-24).** The four category counts
+were computed from `is_pli`/`is_marker`/`is_chat`/`is_server_control`, so a
+value outside that set counted in none of them and they silently stopped
+summing to `total_events` — the KPI row showed four cards that no longer added
+up, with no error anywhere. `is_unrecognized_category` and a fifth
+`unrecognized_count` close it. Not folded into `other_count`, which means
+*server control* and would mislabel a new category — the same call already made
+for ATAK's unparsed `action` values. The distinct values are named in
+`parse_errors`, since which category appeared is what says whether the parser
+needs updating. Also fixed: `rec.get("category", "Other")` returned `None` for
+an explicit null, putting `None` in a field annotated `str`; now
+`rec.get("category") or "Other"`, consistent with `uid`/`node_type`. The KPI
+card renders at zero because the five cards must reconcile against Total Events
+on screen. New fixture `tak_stream_unknown_categories.json` (Alert, Route, a
+null category, one known PLI) and a parametrized route-level test asserting the
+five counts sum to `total_events` across every TAK fixture.
+
+Still open from the gates: the `stale=` slider range.
 
 **Detection bug found by `jenny` and fixed (2026-08-24).** The TAK filename
 hints are substring tests, and `tak_server` is a substring of the legacy ATAK

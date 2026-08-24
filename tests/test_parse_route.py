@@ -18,6 +18,8 @@ import asyncio
 import io
 from pathlib import Path
 
+import pytest
+
 from fastapi import UploadFile
 
 from api.routes.parse import parse_logs
@@ -144,6 +146,27 @@ def test_tak_clean_stream_reports_no_operational_parse_errors_through_the_route(
     operational = [e for e in result["parse_errors"]
                    if not e.startswith("DATA LIMITATION —")]
     assert operational == []
+
+
+@pytest.mark.parametrize("fixture_name", [
+    "tak_stream_sample.json",
+    "tak_stream_edge_cases.json",
+    "tak_stream_clean_pli_only.json",
+    "tak_stream_unknown_categories.json",
+])
+def test_tak_category_counts_reconcile_against_total_events(fixture_name):
+    """The five category counts must sum to total_events for every fixture. This
+    is the guard the unrecognized bucket exists for — without it an unknown
+    category counted in none of them and the KPI row silently stopped adding
+    up, with no error anywhere to say so."""
+    s = _tak_upload(fixture_name)["summary"]
+    assert (s["pli_count"] + s["marker_count"] + s["chat_count"]
+            + s["other_count"] + s["unrecognized_count"]) == s["total_events"]
+
+
+def test_tak_unrecognized_count_serialized():
+    s = _tak_upload("tak_stream_unknown_categories.json")["summary"]
+    assert s["unrecognized_count"] == 2
 
 
 def test_tak_missing_coordinate_serializes_as_null_not_zero():

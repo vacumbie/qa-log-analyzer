@@ -211,7 +211,10 @@ def parse_tak_log(path: Path) -> ParseResult:
 
         events.append(TakEvent(
             timestamp=_fmt(event_time),
-            category=rec.get("category", "Other"),
+            # `or "Other"` rather than a get() default: an explicit null would
+            # otherwise land None in a field annotated str and count in none of
+            # the category buckets, same as uid/node_type two lines down.
+            category=rec.get("category") or "Other",
             cot_type=rec.get("type", ""),
             uid=rec.get("uid", "") or "",
             callsign=rec.get("callsign"),
@@ -291,6 +294,17 @@ def parse_tak_log(path: Path) -> ParseResult:
             "DATA LIMITATION — Chat message bodies not extracted: only the "
             "envelope (sender callsign, timestamps) is captured from GeoChat "
             "(b-t-f) records in this version; the <remarks> text is not parsed."
+        )
+
+    # Named, not just counted: the value is the useful part when a new category
+    # appears, and it's what tells someone whether the parser needs updating.
+    unrecognized = sorted({e.category for e in events if e.is_unrecognized_category})
+    if unrecognized:
+        result.parse_errors.append(
+            f"{len(unrecognized)} unrecognised event category value(s) — "
+            f"{', '.join(repr(c) for c in unrecognized)}. These are stored "
+            "verbatim and counted in their own bucket, not folded into "
+            "'Other'; the category set is defined server-side and can grow."
         )
 
     unextracted = _count_unextracted_xml(events)

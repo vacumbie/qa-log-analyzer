@@ -544,6 +544,19 @@ class TakEvent:
     def is_server_control(self) -> bool:
         return self.category == "Other"
 
+    @property
+    def is_unrecognized_category(self) -> bool:
+        """True for a category outside the four seen so far.
+
+        The set is open — the server computes it, and a future TAK release can
+        add one. Such an event gets its own bucket rather than being folded into
+        Other, the same call made for ATAK's unparsed `action` values: folding
+        would hide a new category behind a label that says "server control",
+        and dropping it would break the arithmetic (the category counts must sum
+        to total_events).
+        """
+        return self.category not in ("PLI", "Marker", "Chat", "Other")
+
 
 @dataclass
 class TakServerInfo:

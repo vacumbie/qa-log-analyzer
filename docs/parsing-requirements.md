@@ -1127,7 +1127,18 @@ first `Other` record. A stream with no handshake record yields
 
 > Treat this as an **open set**, like the ATAK command-status vocabulary. An
 > unrecognised `category` is stored verbatim and defaults to `Other` only when
-> the field is absent — never mapped through a hardcoded allow-list.
+> the field is absent **or explicitly null** — never mapped through a hardcoded
+> allow-list.
+>
+> The summary honours that too. An unrecognised value is counted in its own
+> `unrecognized_count`, not folded into `other_count` (which means *server
+> control* and would mislabel it) and not dropped. The five category counts —
+> `pli`, `marker`, `chat`, `other`, `unrecognized` — **must sum to
+> `total_events`**, and a route-level test asserts that across every fixture.
+> Before the bucket existed an unknown category counted in none of them and the
+> KPI row silently stopped reconciling, with no error to say so. The distinct
+> values are also named in `parse_errors` when present: which new category
+> appeared is what tells a maintainer whether the parser needs updating.
 
 ### Fields to Parse
 

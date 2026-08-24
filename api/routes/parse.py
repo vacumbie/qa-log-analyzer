@@ -664,6 +664,10 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             "chat_count":         len(r.tak_chat_events),
             "marker_count":       sum(1 for e in r.tak_events if e.is_marker),
             "other_count":        sum(1 for e in r.tak_events if e.is_server_control),
+            # The five category counts must sum to total_events. Without this
+            # bucket an unrecognised category counted in none of them and the
+            # KPI row silently stopped reconciling.
+            "unrecognized_count": sum(1 for e in r.tak_events if e.is_unrecognized_category),
             "unique_callsigns":   len(r.tak_unique_callsigns),
             "no_fix_count":       len(r.tak_no_fix_events),
             "avg_latency_ms":     round(sum(latencies) / len(latencies), 1) if latencies else None,

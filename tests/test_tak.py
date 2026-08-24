@@ -11,6 +11,7 @@ EDGE_FIXTURE = FIXTURE_DIR / "tak_stream_edge_cases.json"
 CLEAN_FIXTURE = FIXTURE_DIR / "tak_stream_clean_pli_only.json"
 ZERO_COORD_FIXTURE = FIXTURE_DIR / "tak_stream_zero_coordinate_positions.json"
 PARTIAL_COORD_FIXTURE = FIXTURE_DIR / "tak_stream_partial_coordinates.json"
+UNKNOWN_CAT_FIXTURE = FIXTURE_DIR / "tak_stream_unknown_categories.json"
 ATAK_FIXTURE = FIXTURE_DIR / "atak_sample.json"
 
 
@@ -263,6 +264,52 @@ def test_chat_only_no_position_reports_nothing():
                    if not e.has_gps_fix and e.category == "Chat"]
     assert chat_no_fix, "fixture must contain no-position Chat records"
     assert not any(e.startswith(f"{len(chat_no_fix)} Chat") for e in result.parse_errors)
+
+
+# ── Unrecognised categories ───────────────────────────────────────────────────
+# The category set is computed server-side and can grow. An unrecognised value
+# used to count in none of the four buckets, so they silently stopped summing to
+# total_events — the KPI row showed 4 category cards that no longer added up.
+
+def test_unrecognized_category_is_stored_verbatim():
+    """Never mapped through an allow-list — the value is the useful part."""
+    result = parse_tak_log(UNKNOWN_CAT_FIXTURE)
+    categories = {e.category for e in result.tak_events}
+    assert "Alert" in categories and "Route" in categories
+
+
+def test_unrecognized_category_gets_its_own_bucket():
+    result = parse_tak_log(UNKNOWN_CAT_FIXTURE)
+    unrecognized = [e for e in result.tak_events if e.is_unrecognized_category]
+    assert {e.callsign for e in unrecognized} == {"ALERTER", "ROUTEMAKER"}
+
+
+def test_unrecognized_category_is_not_folded_into_server_control():
+    """Folding would hide a new category behind a label reading 'server
+    control' — the same call already made for ATAK's unparsed action values."""
+    result = parse_tak_log(UNKNOWN_CAT_FIXTURE)
+    assert not any(e.is_server_control for e in result.tak_events
+                   if e.callsign in ("ALERTER", "ROUTEMAKER"))
+
+
+def test_null_category_falls_back_to_other_not_none():
+    """An explicit null would otherwise put None in a field annotated str and
+    count in no bucket at all."""
+    result = parse_tak_log(UNKNOWN_CAT_FIXTURE)
+    event = next(e for e in result.tak_events if e.callsign == "NULLCAT")
+    assert event.category == "Other"
+    assert event.is_unrecognized_category is False
+
+
+def test_unrecognized_category_error_names_the_values():
+    result = parse_tak_log(UNKNOWN_CAT_FIXTURE)
+    entry = next(e for e in result.parse_errors if "unrecognised event category" in e)
+    assert "'Alert'" in entry and "'Route'" in entry
+
+
+def test_unrecognized_category_error_silent_on_a_known_only_stream():
+    result = parse_tak_log(CLEAN_FIXTURE)
+    assert not any("unrecognised event category" in e for e in result.parse_errors)
 
 
 # ── Partial coordinate pairs ──────────────────────────────────────────────────

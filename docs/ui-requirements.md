@@ -316,9 +316,14 @@ TAK log is loaded. Data comes from `r.tak_events`, `r.tak_server_info` and
 - **Header** — `TAK SERVER OVERVIEW` with the server version as a sub-line
   (`tak_server_info.server_version`), omitted entirely when the stream carries
   no handshake record rather than showing "unknown".
-- **KPI row** — Total Events · PLI · Marker · Chat · Server Control · Unique
-  Callsigns · No GPS Fix · Avg Latency · Min Latency · Max Latency · Clock Skew
-  Events. The latency cards **read `summary.avg/min/max_latency_ms`** rather
+- **KPI row** — Total Events · PLI · Marker · Chat · Server Control ·
+  Unrecognized · Unique Callsigns · No GPS Fix · Avg Latency · Min Latency ·
+  Max Latency · Clock Skew Events. The five category cards (PLI, Marker, Chat,
+  Server Control, Unrecognized) **must sum to Total Events on screen** —
+  `Unrecognized` renders at zero for that reason, since a card that appeared
+  only when non-zero would leave the arithmetic silently short the rest of the
+  time. It turns yellow with `new category — see limitations` when a stream
+  carries a category outside the four known ones. The latency cards **read `summary.avg/min/max_latency_ms`** rather
   than re-deriving them from the events; deriving the same number twice is how
   the KPI and the JSON export came to round differently. Min Latency is red
   when negative, with the sub-label `device clock ahead of server`, so it can't

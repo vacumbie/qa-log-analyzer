@@ -223,10 +223,11 @@ export default function TakTab({ results }) {
     acc.chat_count += s.chat_count || 0
     acc.marker_count += s.marker_count || 0
     acc.other_count += s.other_count || 0
+    acc.unrecognized_count += s.unrecognized_count || 0
     acc.no_fix_count += s.no_fix_count || 0
     acc.negative_latency_count += s.negative_latency_count || 0
     return acc
-  }, { total_events: 0, pli_count: 0, chat_count: 0, marker_count: 0, other_count: 0, no_fix_count: 0, negative_latency_count: 0 })
+  }, { total_events: 0, pli_count: 0, chat_count: 0, marker_count: 0, other_count: 0, unrecognized_count: 0, no_fix_count: 0, negative_latency_count: 0 })
 
   // Latency and callsign stats come from the summary the API already computed
   // (and App.jsx recomputes under the time window) rather than being derived a
@@ -268,6 +269,12 @@ export default function TakTab({ results }) {
         <KpiCard label="Marker" value={summary.marker_count} color={C.accent} />
         <KpiCard label="Chat" value={summary.chat_count} color={C.yellow} />
         <KpiCard label="Server Control" value={summary.other_count} color={C.muted} />
+        {/* Renders at zero on purpose: the five category cards have to sum to
+            Total Events on screen, and a card that appears only when non-zero
+            would leave the arithmetic silently short the rest of the time. */}
+        <KpiCard label="Unrecognized" value={summary.unrecognized_count}
+          color={summary.unrecognized_count ? C.yellow : C.muted}
+          sub={summary.unrecognized_count ? 'new category — see limitations' : 'category outside the 4 known'} />
         <KpiCard label="Unique Callsigns" value={uniqueCallsigns} />
         {/* Scoped to PLI/Marker — the categories expected to carry a position.
             The sub-label states that scope rather than claiming to be the
