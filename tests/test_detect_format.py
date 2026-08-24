@@ -52,6 +52,14 @@ def test_detects_diagnostic_from_fixture():
     ) == "diagnostic"
 
 
+def test_detects_tak_from_fixture():
+    # tak_stream_sample.json has no filename hint here, so this exercises the
+    # content path (receivedAt / nodeType / category markers).
+    assert _detect_format(
+        "tak_stream_sample.json", _content("tak_stream_sample.json")
+    ) == "tak"
+
+
 # ── Filename signals ──────────────────────────────────────────────────────────
 
 def test_atak_detected_by_filename_prefix():
@@ -61,6 +69,12 @@ def test_atak_detected_by_filename_prefix():
 
 def test_atak_filename_match_is_case_insensitive():
     assert _detect_format("DIAGNOSTIC_ATAK_HOTEL_90215634664458_2026-03-04.LOG", "{}") == "atak"
+
+
+def test_tak_detected_by_filename_convention():
+    # Bare "[]" is a valid-but-empty JSON array, so content detection alone
+    # would fail here — the filename convention is what carries it.
+    assert _detect_format("tak-stream-2026-07-30T19-42-44.json", "[]") == "tak"
 
 
 # ── Ordering rules (the part that breaks silently) ────────────────────────────

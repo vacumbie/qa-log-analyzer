@@ -20,6 +20,7 @@ from parser.rsdk import parse_rsdk_log
 from parser.atak import parse_atak_log
 from parser.relay_manager import parse_relay_manager_log
 from parser.fw_log import parse_fw_log, is_fw_log
+from parser.tak import parse_tak_log, is_tak_log
 from parser.models import ParseResult
 
 router = APIRouter(prefix="/parse", tags=["parse"])
@@ -28,18 +29,22 @@ router = APIRouter(prefix="/parse", tags=["parse"])
 def _detect_format(filename: str, content: str) -> str:
     """
     Heuristically detect log format from filename and content.
-    Returns 'fw_log', 'atak', 'relay_manager', 'rsdk', or 'diagnostic'.
+    Returns 'fw_log', 'tak', 'atak', 'relay_manager', 'rsdk', or 'diagnostic'.
 
     Detection order:
       1. FW Log        — bracket pattern [digits-digits, MODULE, LEVEL] with TRX/RELAY/TPORT
-      2. ATAK          — filename starts with 'diagnostic_ATAK_' (legacy), or
+      2. TAK           — filename contains 'tak-stream'/'tak_server', or content is a
+                         JSON array of CoT event records (receivedAt/nodeType/category
+                         fields). Checked before ATAK since both are JSON but use
+                         disjoint field sets.
+      3. ATAK          — filename starts with 'diagnostic_ATAK_' (legacy), or
                          content is JSON with ATAK-specific fields (logId,
                          connectionState, atakVersion, deliveryStatus). ATAK
                          plugin v3.0 filenames drop the 'ATAK_' segment, so
                          those are detected by content here, not by filename.
-      3. Relay Manager — filename or content signals the goTenna Relay Manager app
-      4. RSDK          — filename contains 'rsdk' or content has RSDK line markers
-      5. Diagnostic    — fallback (goTenna Pro+ block format)
+      4. Relay Manager — filename or content signals the goTenna Relay Manager app
+      5. RSDK          — filename contains 'rsdk' or content has RSDK line markers
+      6. Diagnostic    — fallback (goTenna Pro+ block format)
     """
     name = filename.lower()
     snippet = content[:2000]   # wider window for relay manager detection
@@ -47,6 +52,12 @@ def _detect_format(filename: str, content: str) -> str:
     # ── FW Log detection — first (most distinctive) ──────────────────────────
     if is_fw_log(content):
         return "fw_log"
+
+    # ── TAK server detection ──────────────────────────────────────────────────
+    if "tak-stream" in name or "tak_server" in name or "tak-server" in name:
+        return "tak"
+    if is_tak_log(content):
+        return "tak"
 
     # ── ATAK detection ────────────────────────────────────────────────────────
     # Filename convention (legacy): diagnostic_ATAK_<CALLSIGN>_<GID>_<DATE>.log
@@ -431,6 +442,31 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             ],
         }
 
+    # ── TAK server-specific fields ─────────────────────────────────────────────
+    if r.log_format == "tak":
+        base["tak_server_info"] = {
+            "server_version": r.tak_server_info.server_version,
+            "api_version":    r.tak_server_info.api_version,
+        } if r.tak_server_info else None
+        base["tak_events"] = [
+            {
+                "timestamp":        e.timestamp,
+                "category":         e.category,
+                "cot_type":         e.cot_type,
+                "uid":              e.uid,
+                "callsign":         e.callsign,
+                "node_type":        e.node_type,
+                "platform":         e.platform,
+                "parent_callsign":  e.parent_callsign,
+                "lat":              e.lat,
+                "lon":              e.lon,
+                "has_gps_fix":      e.has_gps_fix,
+                "received_at":      e.received_at,
+                "latency_ms":       e.latency_ms,
+            }
+            for e in r.tak_events
+        ]
+
     # ── Computed summaries for the UI ─────────────────────────────────────────
     if r.log_format == "atak":
         atak_received = r.atak_received_messages
@@ -605,6 +641,22 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             "total_notifications":       sum(ncounts.values()),
         }
 
+    elif r.log_format == "tak":
+        latencies = r.tak_latency_ms_values
+        base["summary"] = {
+            "total_events":       len(r.tak_events),
+            "pli_count":          len(r.tak_pli_events),
+            "chat_count":         len(r.tak_chat_events),
+            "marker_count":       sum(1 for e in r.tak_events if e.is_marker),
+            "other_count":        sum(1 for e in r.tak_events if e.is_server_control),
+            "unique_callsigns":   len(r.tak_unique_callsigns),
+            "no_fix_count":       len(r.tak_no_fix_events),
+            "avg_latency_ms":     round(sum(latencies) / len(latencies), 1) if latencies else None,
+            "max_latency_ms":     max(latencies) if latencies else None,
+            "min_latency_ms":     min(latencies) if latencies else None,
+            "negative_latency_count": sum(1 for v in latencies if v < 0),
+        }
+
     else:
         # GRIP incoming RSSI is the genuine RF signal for diagnostic/rsdk. It feeds
         # both the RSSI tab (grip_avg_rssi) and the Health Score RSSI dimension
@@ -698,6 +750,8 @@ async def parse_logs(files: list[UploadFile] = File(...)) -> dict:
         try:
             if fmt == "fw_log":
                 result = parse_fw_log(tmp_path)
+            elif fmt == "tak":
+                result = parse_tak_log(tmp_path)
             elif fmt == "rsdk":
                 result = parse_rsdk_log(tmp_path)
             elif fmt == "atak":

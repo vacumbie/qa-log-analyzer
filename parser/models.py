@@ -472,6 +472,76 @@ class RelayManagerEvent:
     raw_message: str = ""
 
 
+# ── TAK server primitives ──────────────────────────────────────────────────────
+
+@dataclass
+class TakEvent:
+    """
+    One Cursor-on-Target (CoT) event captured from a TAK server stream.
+
+    category is derived from the CoT `type` attribute:
+      PLI     — a-f-G-U-* position/location report from a friendly ground unit
+      Marker  — a-f-G-U-C-I "I" (icon/marker) variant, seen from WebTAK clients
+      Chat    — b-t-f GeoChat text message
+      Other   — server plumbing (e.g. t-x-takp-v TAK protocol/version handshake);
+                carries no device identity or position
+
+    has_gps_fix is False when lat/lon are the 0.0/0.0 sentinel pair paired
+    with a 9999999.0-family hae/ce/le placeholder — this is the CoT convention
+    for "no GPS fix", not a real position at (0,0). Treat lat/lon as
+    meaningless when this is False.
+
+    latency_ms is receivedAt (TAK server receipt time) minus time (device-
+    generated event time) — the KNOT-style cross-device skew backlog item
+    (P8), but measured server-side. Can be negative if the source device's
+    clock is running fast relative to the TAK server; the sample data has
+    reproduced this (see parse_errors note in parse_tak_log).
+
+    raw retains the original CoT XML for cases the derived fields don't
+    cover (e.g. WebTAK-specific detail children).
+    """
+    timestamp: str                          # event 'time' (device-generated), _TS_FMT_OUT
+    category: str                           # "PLI" | "Marker" | "Chat" | "Other"
+    cot_type: str                           # raw CoT type code, e.g. "a-f-G-U-C"
+    uid: str = ""
+    callsign: Optional[str] = None          # None for server plumbing / some chat senders
+    node_type: str = ""                     # "Android" | "WebTAK" | "Other"
+    platform: Optional[str] = None          # "ATAK-CIV" | "WebTAK" | None
+    parent_callsign: Optional[str] = None
+    lat: float = 0.0
+    lon: float = 0.0
+    has_gps_fix: bool = True
+    received_at: str = ""                   # TAK server receipt timestamp, _TS_FMT_OUT
+    latency_ms: Optional[int] = None
+    raw_cot: str = ""
+
+    @property
+    def is_pli(self) -> bool:
+        return self.category == "PLI"
+
+    @property
+    def is_chat(self) -> bool:
+        return self.category == "Chat"
+
+    @property
+    def is_marker(self) -> bool:
+        return self.category == "Marker"
+
+    @property
+    def is_server_control(self) -> bool:
+        return self.category == "Other"
+
+
+@dataclass
+class TakServerInfo:
+    """
+    TAK server identity, extracted from a t-x-takp-v TakControl/
+    TakServerVersionInfo handshake record, if present in the stream.
+    """
+    server_version: str = ""    # e.g. "5.6-RELEASE-57-HEAD"
+    api_version: str = ""       # e.g. "3"
+
+
 # ── GRIP transfer primitives ──────────────────────────────────────────────────
 
 @dataclass
@@ -677,6 +747,10 @@ class ParseResult:
     relay_manager_app_pid: str = ""       # Android process ID of com.gotenna.relaymanager
     relay_manager_ble_address: str = ""   # BLE MAC of the connected relay node
 
+    # TAK server only
+    tak_events: list[TakEvent] = field(default_factory=list)
+    tak_server_info: Optional[TakServerInfo] = None
+
     # ── Convenience properties ────────────────────────────────────────────────
 
     @property
@@ -725,6 +799,29 @@ class ParseResult:
     @property
     def atak_received_messages(self) -> list[AtakMessage]:
         return [m for m in self.atak_messages if not m.is_sender]
+
+    # ── TAK convenience properties ────────────────────────────────────────────
+
+    @property
+    def tak_pli_events(self) -> list[TakEvent]:
+        return [e for e in self.tak_events if e.is_pli]
+
+    @property
+    def tak_chat_events(self) -> list[TakEvent]:
+        return [e for e in self.tak_events if e.is_chat]
+
+    @property
+    def tak_no_fix_events(self) -> list[TakEvent]:
+        """PLI/Marker events reporting a position but with no real GPS fix."""
+        return [e for e in self.tak_events if not e.has_gps_fix and e.category in ("PLI", "Marker")]
+
+    @property
+    def tak_unique_callsigns(self) -> set[str]:
+        return {e.callsign for e in self.tak_events if e.callsign}
+
+    @property
+    def tak_latency_ms_values(self) -> list[int]:
+        return [e.latency_ms for e in self.tak_events if e.latency_ms is not None]
 
     @property
     def atak_sent_messages(self) -> list[AtakMessage]:
