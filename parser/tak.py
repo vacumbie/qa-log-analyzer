@@ -169,7 +169,6 @@ def parse_tak_log(path: Path) -> ParseResult:
 
     events: list[TakEvent] = []
     skipped = 0
-    no_fix_count = 0
     missing_coord_count = 0
     negative_latency_count = 0
     server_info: Optional[TakServerInfo] = None
@@ -201,8 +200,6 @@ def parse_tak_log(path: Path) -> ParseResult:
             missing_coord_count += 1
         else:
             has_fix = not (lat == 0 and lon == 0)
-            if not has_fix:
-                no_fix_count += 1
 
         latency_ms = None
         if received_at is not None:
@@ -256,12 +253,30 @@ def parse_tak_log(path: Path) -> ParseResult:
             "coordinate was not defaulted to 0. These are excluded from the map "
             "alongside no-fix events."
         )
-    if no_fix_count:
-        result.parse_errors.append(
-            f"{no_fix_count} event(s) reported no GPS fix (lat/lon sentinel "
-            "0.0/0.0) — position for these is not meaningful and should not "
-            "be plotted."
+    # Scoped, and derived from the same property summary.no_fix_count uses, so
+    # the sentence and the KPI cannot drift apart. PLI and Marker are the
+    # categories expected to carry a position, so a missing one there is a real
+    # gap; Chat and server-control records carry the same sentinel but never had
+    # a position to lose. Counting them in one number read as five devices
+    # losing GPS when one did — the conflation the UI fixed first.
+    positional_no_fix = len(result.tak_no_fix_events)
+    other_no_fix = sum(
+        1 for e in events
+        if not e.has_gps_fix and e.category not in ("PLI", "Marker")
+    )
+    if positional_no_fix:
+        sentence = (
+            f"{positional_no_fix} PLI/Marker event(s) have no usable position "
+            "— either the CoT 0.0/0.0 no-fix sentinel or an incomplete lat/lon "
+            "pair. These are not plotted."
         )
+        if other_no_fix:
+            sentence += (
+                f" A further {other_no_fix} Chat/server-control event(s) also "
+                "carry no position, but those categories never carry one, so "
+                "that is not a lost GPS fix."
+            )
+        result.parse_errors.append(sentence)
     if negative_latency_count:
         result.parse_errors.append(
             f"{negative_latency_count} event(s) show negative server latency "

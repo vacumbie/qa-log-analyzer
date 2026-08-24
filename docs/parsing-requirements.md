@@ -1209,16 +1209,24 @@ Timestamps are normalized from ISO-8601 with a `Z` suffix to the project's
   `originatorCallsign`. Parsed and stored, but do not build on it yet.
 - **`platform` is often absent** (18 of 91 in the sample, including all Chat
   records) even when `nodeType` is known. Stored as `None`, never guessed.
-- **⚠️ Two different "no GPS fix" counts exist, and their wording conflates
-  them.** `summary.no_fix_count` is PLI/Marker-scoped (1 in the sample), while
-  the `parse_errors` sentence counts **all** categories ("5 event(s) reported no
-  GPS fix"). Both numbers are correct for what they measure, but the error text
-  reads as though 5 devices lost GPS when only 1 did. The UI resolved the same
-  conflation by stating both reasons separately; the parser text has not been
-  updated to match. **Open — fix the `parse_errors` wording or scope it.**
+- **The no-position count is scoped, and scoped once.** The `parse_errors`
+  sentence is derived from `tak_no_fix_events` — the same property
+  `summary.no_fix_count` serializes — so the number in the text and the number
+  on the KPI are the same value, not two derivations that can drift. It reads
+  `1 PLI/Marker event(s) have no usable position … A further 4
+  Chat/server-control event(s) also carry no position, but those categories
+  never carry one, so that is not a lost GPS fix.` Both causes of "no usable
+  position" (the `(0,0)` sentinel and an incomplete pair, rule 3a) are named,
+  and the trailing clause is omitted entirely when no other category is
+  affected rather than reading "A further 0". Previously the sentence counted
+  all categories ("5 event(s) reported no GPS fix") against a KPI showing 1 —
+  both correct for what they measured, but the text read as five devices
+  losing GPS when one did. A test asserts the sentence's leading number equals
+  `len(tak_no_fix_events)`, so the conflation cannot return silently.
 - **Single-stream validation.** Behavior is proven against one real sample plus
-  three hand-built fixtures (`tak_stream_edge_cases.json`,
-  `tak_stream_clean_pli_only.json`, `tak_stream_zero_coordinate_positions.json`).
+  four hand-built fixtures (`tak_stream_edge_cases.json`,
+  `tak_stream_clean_pli_only.json`, `tak_stream_zero_coordinate_positions.json`,
+  `tak_stream_partial_coordinates.json`).
   Multi-server, multi-day, and larger streams are unobserved.
 - **Rule 3 is covered by test, but not by field data.**
   `tak_stream_zero_coordinate_positions.json` exercises all three cases — a real

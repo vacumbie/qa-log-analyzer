@@ -145,7 +145,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | `tak` | `lat`/`lon` of exactly `(0,0)` is the CoT **no-GPS-fix sentinel**, paired with a `999999.0`-family `hae`/`ce`/`le`. Flagged `has_gps_fix=False` — never plot, never read as a real position. The parser owns this definition; the UI must not re-derive it (a `lat != 0 && lon != 0` test would reject a genuine position on the equator or prime meridian) |
 | `tak` | Negative `latency_ms` (`receivedAt` before `time`) is **real data, not an error** — the device clock is ahead of the server. 10 of 91 events in the first sample, min `−93 ms`. Preserved, never clamped; shown red in the latency chart. Server-side counterpart to P6, tracked as **P8** |
 | `tak` | GeoChat (`b-t-f`) **message bodies not extracted** — only the envelope (sender callsign, timestamps). The `<remarks>` text stays in `raw_cot`. Surfaced as a `DATA LIMITATION —` entry |
-| `tak` | ⚠️ **Two different "no GPS fix" counts.** `summary.no_fix_count` is PLI/Marker-scoped (1 in the sample); the `parse_errors` sentence counts all categories ("5 event(s)"). Both are right for what they measure, but the error wording reads as 5 devices losing GPS when 1 did. The UI fixed this conflation; **the parser text has not** — open fix |
+| `tak` | ✅ **No-fix count conflation resolved (2026-08-24).** The `parse_errors` sentence is now derived from `tak_no_fix_events`, the same property `summary.no_fix_count` serializes, so text and KPI share one definition. Other categories are named separately (`1 PLI/Marker … A further 4 Chat/server-control …`) rather than folded into one number that read as 5 devices losing GPS when 1 did |
 | `tak` | `parentCallsign` always null, and `platform` often absent (18 of 91, including all Chat records) even when `nodeType` is known. Stored as `None`, never guessed |
 | `tak` | Single-stream validation — one real sample + three hand-built fixtures (edge cases, clean PLI-only, zero-coordinate positions). Multi-server, multi-day and larger streams unobserved. The `lat == 0`/`lon == 0` rule is now covered by `tak_stream_zero_coordinate_positions.json`, but that fixture is hand-built — no observed stream has carried a genuine zero coordinate |
 
@@ -161,7 +161,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | FW Log — relay firmware parser & tab | ✅ Done |
 | TAK server CoT stream — parser + TAK Server tab | ✅ Built 2026-08-24 (PR #35, **open**) — karen passed; 5 other gate agents not yet run |
 | TAK — Leaflet npm vs unpkg CDN inconsistency | ⏳ Pending decision — `TakTab.jsx` imports the npm package, Hop Count Map uses the CDN; CLAUDE.md records CDN as the deliberate choice |
-| TAK — `parse_errors` no-fix wording counts all categories while the KPI is PLI/Marker-scoped | ⏳ Pending — same conflation the UI just fixed |
+| TAK — `parse_errors` no-fix wording counts all categories while the KPI is PLI/Marker-scoped | ✅ Done (2026-08-24) — sentence derived from `tak_no_fix_events`; regression test asserts its leading number equals `len(tak_no_fix_events)` |
 | TAK — `summary.min_latency_ms` serialized but never rendered | ⏳ Pending — ParseResult chain stops one step short of the UI |
 | TAK — no format-specific KPI row on Overview | ⏳ Pending — TAK-only session shows `NETWORK NODES —`, `PEAK TEMP —`, `APP VERSION: 0 versions` |
 | TAK — `_CSV_TYPES` entry or JSON-only note for `tak_events` | ⏳ Pending — same unrecorded decision as the two ATAK command tables |
@@ -340,8 +340,26 @@ no-fix sentence, because an incomplete record is not a device losing GPS. New
 fixture `tak_stream_partial_coordinates.json` (null lat, absent lon, non-numeric
 lat, one good fix) plus a route-level test that it serializes as `null`, not `0`.
 
-Still open from the gates: the no-fix wording conflation, an unrecognised
-`category` counting in none of the four buckets, and the `stale=` slider range.
+**No-fix wording conflation fixed (2026-08-24).** The `parse_errors` sentence
+counted every category ("5 event(s) reported no GPS fix") while
+`summary.no_fix_count` counted only PLI/Marker (1). Both were right for what
+they measured; the text read as five devices losing GPS when one did. Root
+cause was two independent derivations of the same idea, so the fix removes one:
+the sentence is now derived from `tak_no_fix_events` — the property
+`summary.no_fix_count` already serializes — and a test asserts its leading
+number equals `len(tak_no_fix_events)`, so the two cannot drift again. The other
+categories are still reported (dropping them would trade a misleading number for
+a missing one) in a trailing clause naming them as categories that never carry a
+position; the clause is omitted entirely rather than reading "A further 0".
+Verified across all four fixtures: 1/1, 2/2, 1/1, 3/3.
+
+Also folded in: because an incomplete lat/lon pair now also sets
+`has_gps_fix=False`, the sentence names both causes ("the CoT 0.0/0.0 no-fix
+sentinel or an incomplete lat/lon pair") instead of claiming every one is a
+sentinel.
+
+Still open from the gates: an unrecognised `category` counting in none of the
+four buckets, and the `stale=` slider range.
 
 **Detection bug found by `jenny` and fixed (2026-08-24).** The TAK filename
 hints are substring tests, and `tak_server` is a substring of the legacy ATAK

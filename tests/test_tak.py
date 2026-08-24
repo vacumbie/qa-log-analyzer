@@ -120,7 +120,7 @@ def test_chat_data_limitation_surfaced():
 
 def test_no_fix_and_negative_latency_counts_surfaced():
     result = parse_tak_log(EDGE_FIXTURE)
-    assert any("no GPS fix" in e for e in result.parse_errors)
+    assert any("no usable position" in e for e in result.parse_errors)
     assert any("negative server latency" in e for e in result.parse_errors)
 
 
@@ -217,8 +217,52 @@ def test_single_zero_coordinates_are_not_counted_as_no_fix():
 
 def test_single_zero_coordinates_do_not_inflate_no_fix_parse_error():
     result = parse_tak_log(ZERO_COORD_FIXTURE)
-    no_fix_errors = [e for e in result.parse_errors if "no GPS fix" in e]
-    assert no_fix_errors[0].startswith("1 event(s)")
+    entry = next(e for e in result.parse_errors if "no usable position" in e)
+    assert entry.startswith("1 PLI/Marker event(s)")
+
+
+# ── The no-fix sentence is scoped, and scoped the same way as the KPI ──────────
+# It used to count every category ("5 event(s) reported no GPS fix") while
+# summary.no_fix_count counted only PLI/Marker (1). Both numbers were right for
+# what they measured, but the sentence read as five devices losing GPS when one
+# did. The UI fixed its half first; these pin the parser's.
+
+def test_no_fix_sentence_count_matches_the_summary_scope():
+    """The regression guard that matters: the sentence's leading number and
+    len(tak_no_fix_events) — which is what summary.no_fix_count serializes —
+    must be the same number, whatever the fixture."""
+    result = parse_tak_log(FIXTURE)
+    entry = next(e for e in result.parse_errors if "no usable position" in e)
+    assert entry.startswith(f"{len(result.tak_no_fix_events)} PLI/Marker event(s)")
+
+
+def test_no_fix_sentence_names_the_other_categories_separately():
+    """The 4 Chat/server-control events are still reported — dropping them would
+    trade one misleading number for a missing one — but named as a category that
+    never carries a position, not as lost fixes."""
+    result = parse_tak_log(FIXTURE)
+    entry = next(e for e in result.parse_errors if "no usable position" in e)
+    assert "1 PLI/Marker event(s)" in entry
+    assert "A further 4 Chat/server-control event(s)" in entry
+    assert "not a lost GPS fix" in entry
+
+
+def test_no_fix_sentence_omits_the_other_clause_when_there_are_none():
+    """The zero-coordinate fixture is PLI-only, so the trailing clause must not
+    appear at all rather than reading 'A further 0'."""
+    result = parse_tak_log(ZERO_COORD_FIXTURE)
+    entry = next(e for e in result.parse_errors if "no usable position" in e)
+    assert "A further" not in entry
+
+
+def test_chat_only_no_position_reports_nothing():
+    """Every Chat record lacks a position; an entry firing on that alone would
+    appear in every log with chat in it and stop meaning anything."""
+    result = parse_tak_log(FIXTURE)
+    chat_no_fix = [e for e in result.tak_events
+                   if not e.has_gps_fix and e.category == "Chat"]
+    assert chat_no_fix, "fixture must contain no-position Chat records"
+    assert not any(e.startswith(f"{len(chat_no_fix)} Chat") for e in result.parse_errors)
 
 
 # ── Partial coordinate pairs ──────────────────────────────────────────────────
@@ -277,11 +321,22 @@ def test_real_fix_alongside_partial_records_keeps_its_position():
 
 def test_missing_coordinates_reported_separately_from_the_no_fix_sentinel():
     """A (0,0) sentinel means the device had no fix; a missing coordinate means
-    the record was incomplete. Folding them together would misattribute a
-    malformed export to GPS trouble in the field."""
+    the record was incomplete. Two distinct entries, so a malformed export is
+    never misattributed to GPS trouble in the field — even though both make
+    has_gps_fix False and both are excluded from the map."""
     result = parse_tak_log(PARTIAL_COORD_FIXTURE)
     assert any("carry only one of lat/lon" in e for e in result.parse_errors)
-    assert not any("lat/lon sentinel" in e for e in result.parse_errors)
+    assert any("no usable position" in e for e in result.parse_errors)
+
+
+def test_incomplete_pairs_count_toward_the_positional_no_fix_total():
+    """All three partial records are PLI/Marker, so they belong in the same
+    PLI/Marker-scoped total the KPI shows — the sentence names both causes
+    rather than claiming they were all sentinels."""
+    result = parse_tak_log(PARTIAL_COORD_FIXTURE)
+    entry = next(e for e in result.parse_errors if "no usable position" in e)
+    assert entry.startswith("3 PLI/Marker event(s)")
+    assert "incomplete lat/lon pair" in entry
 
 
 def test_missing_coordinate_error_counts_every_affected_record():
