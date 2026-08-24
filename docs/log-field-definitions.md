@@ -4,7 +4,7 @@
 > Each entry defines what the field means in the raw log, how it is parsed, what it becomes
 > in the data model, and any known accuracy limitations or caveats.
 >
-> Last updated: 2026-06-05
+> Last updated: 2026-08-24
 
 ---
 
@@ -16,6 +16,8 @@
   - [GRIP Transfer Lifecycle](#grip-transfer-lifecycle)
 - [Format 3: Android ATAK Plug-in Log](#format-3-android-atak-plug-in-log)
 - [Format 4: Relay Firmware (UART/USB Debug) Log](#format-4-relay-firmware-uartusb-debug-log)
+- [Format 5: Next-Gen Radio — Modem (ht-modem) Log](#format-5-next-gen-radio--modem-ht-modem-log)
+- [Format 6: Next-Gen Radio — Router (ht-router) Log](#format-6-next-gen-radio--router-ht-router-log)
 - [Derived / Computed Fields](#derived--computed-fields)
 - [Cross-Format Notes](#cross-format-notes)
 
@@ -715,6 +717,134 @@ dataclasses live in `parser/models.py`.
 > **Serialized but not displayed:** `rssi_summary` and `summary.rssi_ch0/ch1_avg_dbm`
 > exist in the `_result_to_dict()` output but are always empty/`None` because
 > `rssi_samples` is (RSSI[] is DEBUG-only). The UI shows channel energy instead.
+
+---
+
+## Format 5: Next-Gen Radio — Modem (ht-modem) Log
+
+> **File type:** `.log` (stdout capture, ctime-prefixed text)
+> **Platform:** Next-gen radio, SDR/RF layer (AD936X transceiver + Zynq FPGA/PL)
+> **Structure:** `<ctime timestamp> : <message>`, free-text message with several
+> recurring structured shapes.
+>
+> **Status: spec only — not yet implemented.** No `HtModemResult` model, no
+> parser, no tests exist yet. Field mappings below are the target design.
+
+> Timestamps are **wall-clock `ctime()` format**, second precision, no
+> timezone. This is a distinct timestamp style from every currently
+> implemented format. See `parsing-requirements.md` → Next-Gen Radio — Modem
+> for the full field-by-field parsing rules.
+
+Would be parsed into a new `HtModemResult` (attached to
+`ParseResult.htmodem_result`, name TBD when implemented). All new dataclasses
+would live in `parser/models.py` alongside the existing `Fw*` models.
+
+### Identity & Session
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `Start of log <ctime>` | timestamp string | `session_start` | First line of the file |
+| `FPGA Version is correct` | bool | `fpga_version_ok` | Absence is itself a signal — not currently modeled as a `parse_errors` entry, should be |
+| min/max message timestamps | timestamps | `session_start` / `session_end` | Wall-clock, unlike `fw_log`'s relative ms |
+
+### Radio Init (`ad936x_init_errors`, `libiio_version`, `gpsd_connect_error`)
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `LIBIIO : version <v> detected` | string | `libiio_version` | |
+| `Setting filter bank to <name> <range>MHZ` | string, string | `filter_bank`, `filter_range_mhz` | |
+| `Could not find the AD936X PHY device` + cascading `ERROR : problem …` run | count | `ad936x_init_errors_count` | **Collapsed to one count**, not stored per-line — see parsing rule in `parsing-requirements.md` |
+| `Setting clock calibration offset to <n>` | int | `clock_cal_offset` | |
+| `Read an SI4460 calibration offset of <n>` | int | `si4460_cal_offset` | Confirms an SI4460 is still present on this platform alongside the AD936X |
+| `Error connecting to gpsd` | bool | `gpsd_connect_error` | |
+
+### RF Control (`freq_changes`, `power_changes`, `control_packets`)
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `Received Control packet, control type = <n>` | int | `control_packets[].control_type` | `control type = 10` alone does not disambiguate the command — the following line does |
+| `Setting TX power level mode to fixed, Xmit level to <n>.00` | float | `power_changes[].xmit_level` | |
+| `Setting RX freq = <hz>.00` / `Setting TX freq = <hz>.00` | int, direction | `freq_changes[].hz`, `.direction` | |
+
+### TX Packets (`TxPacket`)
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `Received packet for encoding : packetID = <n> chdesc = <n> modMode = <n> FECMode = <n> priority = <n> localFlag = <n> dataLength = <n> bytes` | ints | `tx_packets[]` (`packet_id`, `chdesc`, `mod_mode`, `fec_mode`, `priority`, `local_flag`, `data_length`) | |
+| `symbol count (I/Q Pairs) after postamble = <n>, sample count = <n>, encoded Len = <n>, BCH Val = 0x<hex>` | ints, hex | `tx_packets[].symbol_count`, `.sample_count`, `.encoded_len`, `.bch_val` | Attaches to the packet from the immediately preceding line |
+| `Extended the payload length from <a> to <b>` | ints | `tx_packets[].payload_extended_from/to` | |
+| `Added packet to xmit queue numinqueue = <n>` | bool, int | `tx_packets[].queued = True`, `.numinqueue` | |
+| `ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet` | bool, count | `tx_packets[].queued = False`, `dropped_count` | **Packet-loss metric.** No `packetID` on this line — attributed to the most recently seen TX packet block |
+
+### Thermal (`temp_samples`)
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `LPD Temp = <f>   FPD Temp = <f>   PL Temp = <f>` | floats (°C in raw log) | `temp_samples[]` (`timestamp`, `lpd_c`, `fpd_c`, `pl_c`) | Convert to °F per project-wide temperature rule. Distinct sensor set from the existing platform's `NRF52`/`Si4460`/`PA` — do not reuse that chart's field names |
+
+---
+
+## Format 6: Next-Gen Radio — Router (ht-router) Log
+
+> **File type:** `.log` (stdout capture, ISO8601-prefixed text)
+> **Platform:** Next-gen radio, network/link layer — spawns and monitors `ht-modem`
+> **Structure:** Two interleaved shapes — discrete `<ISO8601>Z: <message>` event
+> lines, and a repeating ~20-line periodic counter snapshot block.
+>
+> **Status: spec only — not yet implemented.** No `HtRouterResult` model, no
+> parser, no tests exist yet. Field mappings below are the target design.
+
+> Timestamps are **ISO8601 with microseconds, `Z`-suffixed (UTC)** — the same
+> style as the TAK server format, distinct from `ht-modem`'s `ctime` style
+> above. See `parsing-requirements.md` → Next-Gen Radio — Router for the full
+> field-by-field parsing rules, including how snapshot blocks are grouped.
+
+Would be parsed into a new `HtRouterResult` (attached to
+`ParseResult.htrouter_result`, name TBD when implemented).
+
+### Identity & Session
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `Starting ht-router (<path>)...` / `ht-router started (pid <n>)` | string, int | `session_start`, `router_pid` | |
+| `nb_modem_start: started ht-modem pid <n>` | int | `modem_pid` | Potential cross-format correlation key to a loaded `ht-modem` session — needs confirmation before relying on it |
+| `reopened log file` | marker | `rotation_markers[]` | Counters reset after this line; treat as a new sub-session boundary, not continuous data |
+
+### Sockets & Protocol Messages
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `local UDP socket <ip>:<port>` | string | `udp_sockets[]` | |
+| `us_warn @ udp_write.486: sendto: (22) Invalid argument` | count | `socket_warnings_count` | Repeats identically at startup in both samples — semantics not yet confirmed |
+| `ag_warn @ aghub_init.401: created aghub_tick event, aghub <addr>` | string | `aghub_init_addr` | |
+| `client-hdr versflags version <n>, options <y/n>, next-proto <proto> \| mgt-hdr dst <addr>, src <addr>, version <n>, type <type>` | struct | `protocol_messages[]` (`dst`, `src`, `version`, `type`) | Whether `dst`/`src` map onto the existing GID/callsign identity model (see Identity model notes below) is **unconfirmed** |
+| `mgt_hub_forward.548: request type <n> for <addr>: sent to <n> client(s), skipped <n> with no session` | struct | `forward_events[]` | |
+
+### Periodic Stat Snapshot (`RouterStatSnapshot`)
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `input.total_frames` / `input.total_bytes` / `input.total_m2m` | ints | `stat_snapshots[].input_*` | |
+| `input.m2m_by_type[m2m_type_xmit\|control\|recv\|status\|xmit_status]` | ints | `stat_snapshots[].input_m2m_by_type{}` | |
+| `output.traffic[aggr_next_proto_ag].ok/fail`, `.ctl.ok/fail`, `.sts.ok/fail` | ints | `stat_snapshots[].output_*` | |
+| `output.aggregation.subframes/frames`, `.total_bytes` | ints | `stat_snapshots[].output_aggregation_*` | |
+| `output.time_outs`, `output.bottom.timed_out` | ints | `stat_snapshots[].timeouts`, `.bottom_timed_out` | |
+| `output.modem_xmit_failed` | int | `stat_snapshots[].modem_xmit_failed` | Clearest cross-reference point to `ht-modem`'s `CSMA QUEUE is Full` drops — correlation feature is future scope, not this parser |
+| `output.overhead[N] ([min, max] bytes) <n>` | struct | `stat_snapshots[].overhead_histogram` | |
+| `output.xmit_completion[N] ([min, max] ms) <n>` | struct | `stat_snapshots[].xmit_completion_histogram` | |
+| `connected <0\|1>` | bool | `stat_snapshots[].connected` | Terminates each snapshot block; also usable standalone as a connection-state timeline |
+
+> **Grouping requirement:** the ~20 lines above are **one measurement**, not
+> 20 independent events — they must be parsed into a single
+> `RouterStatSnapshot` record per block (grouped by timestamp proximity,
+> ending at `connected`), never stored as flat per-line records. See
+> `parsing-requirements.md` Parsing Rule 1 for this format.
+
+> **Open design question — retention vs. downsampling:** sample captures run
+> 24k–62k lines at ~20 lines/snapshot every ~10s, meaning thousands of
+> snapshot records per session. Whether all are retained or downsampled at
+> parse time is undecided — flag to Valerie before implementation, not a
+> silent default.
 
 ---
 

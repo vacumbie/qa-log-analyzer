@@ -101,6 +101,19 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
 
 ## Tabs
 
+> **Tab grouping (new requirement, 2026-08-24):** Next-Gen Radio tabs
+> (`ht-modem`, `ht-router` — sections 16–17) are visually separated from the
+> rest of the tab bar, not simply another dimmed/badged entry mixed into the
+> existing flat row alongside `atakOnly`/`relayOnly`/`fwOnly`/`takOnly` tabs.
+> This is a deliberate product decision: the next-gen radio is a different
+> hardware platform from everything else the tool parses, and a QA engineer
+> working a next-gen radio issue should not have to visually filter those
+> tabs out of the same row as the legacy-platform tabs. Exact treatment
+> (a second tab-bar row, a divider + label within the same row, or a
+> collapsible group) is an open implementation decision — not yet designed
+> in detail — but "same row, same styling, just another badge" does **not**
+> satisfy this requirement.
+
 ### 1. Overview (`overview`)
 - **KPI Row** — rendered at top of this tab only (see KPI Header Row section)
 - **Session Timeline** — active windows per device; horizontal bar per log showing start → end with gap count
@@ -300,6 +313,69 @@ filter unless an ATAK log is loaded. Carries the `α` alpha badge.
 
 ---
 
+### 16. Next-Gen Modem (`ht-modem`) — ⏳ Not Yet Implemented
+
+> Spec drafted 2026-08-24 alongside the parsing requirements for this format.
+> No parser, models, tab component, or tests exist yet — this section
+> describes the target design.
+
+`ht-modem`-only tab — appears only when a next-gen modem log is loaded, in
+the visually separated Next-Gen Radio tab group (see grouping requirement
+above), not the main tab row.
+
+- **Data Limitations Banner** — surfaces the AD936X init-failure cascade
+  (collapsed count, not 20+ rows), the ambiguous `Found <N> devices`
+  parse, and the not-yet-implemented status itself while this remains
+  spec-only
+- **Session header** — session start/end, FPGA version check result
+  (pass/fail badge), LIBIIO version, filter bank
+- **RF Control Timeline** — frequency changes and power level changes
+  over time, with the originating control packet
+- **TX Packet Activity** — packets encoded vs. queued vs. **dropped**
+  (`CSMA QUEUE is Full`) as a KPI row, plus a timeline chart; dropped-packet
+  rate is the headline QA metric for this tab, analogous to how the FW Log
+  tab headlines relay routing counts
+- **Thermal** — `LPD`/`FPD`/`PL` temperature chart over time, °F display
+  per the project-wide temperature rule, same charting pattern as the
+  existing Thermal tab but a distinct sensor set (do not merge with
+  `NRF52`/`Si4460`/`PA` data)
+- **GPS/Clock** — `gpsd` connection status, clock calibration offset,
+  SI4460 calibration offset (surfaced as informational, not necessarily a
+  fault)
+
+### 17. Next-Gen Router (`ht-router`) — ⏳ Not Yet Implemented
+
+> Spec drafted 2026-08-24 alongside the parsing requirements for this format.
+> No parser, models, tab component, or tests exist yet — this section
+> describes the target design.
+
+`ht-router`-only tab — appears only when a next-gen router log is loaded, in
+the same visually separated Next-Gen Radio tab group as `ht-modem` (section
+16), but as its own distinct tab, not merged into one.
+
+- **Data Limitations Banner** — surfaces the not-yet-implemented status,
+  the unconfirmed `dst`/`src` identity-space question, unconfirmed socket
+  warning semantics, and the open retention-vs-downsampling decision for
+  snapshot data
+- **Session header** — router PID, spawned modem PID (cross-links to a
+  loaded `ht-modem` session by PID when both are present in the same
+  upload), session start, rotation markers (`reopened log file`) shown as
+  boundaries rather than hidden
+- **Connection Timeline** — `connected` 0/1 over time, derived from the
+  periodic snapshot blocks
+- **Throughput & Reliability** — `output.modem_xmit_failed`,
+  `output.time_outs`, `output.bottom.timed_out` as time series; this is
+  the router-side counterpart to the modem tab's dropped-packet metric,
+  and the two should be visually comparable when both logs are loaded
+  together (not necessarily merged, just presented so a QA engineer can
+  eyeball correlation)
+- **Protocol Message Activity** — breakdown of `client-hdr`/`mgt-hdr`
+  message types and `mgt_hub_forward` send/skip counts
+- **Socket Warnings** — count and first-seen timestamp of `us_warn`
+  entries, flagged for follow-up rather than treated as fully understood
+
+---
+
 ## Known Limitations & Open Questions
 
 - **Temperature** must always be converted from Celsius (source) to Fahrenheit (display) — never show raw °C values
@@ -392,6 +468,21 @@ no behavior change.
 
 ### ATAK Enhanced Log (SDK Logging 2.0) — ✅ Implemented
 Full support for the enhanced ATAK log format. The `SdkLogSummaryCard` renders the aggregated `atak_sdk_error_summary` (counts by tag and by `additionalInfo`, distinct radio types, and a retained sample) — high-volume `sdkError` records are aggregated, never rendered per-record, with the volume-baseline `DATA LIMITATION` surfaced in the banner. Also covers the enhanced message/event fields: `loggingUserLocation` / `transmittedLocation`, `originatorUUID`, the `-99` open-segments sentinel shown as `unknown`, `firmwareUpdate` events, and `deviceDisconnected` location. See ATAK tab spec (section 12).
+
+### Next-Gen Radio — Modem & Router Parsers & Tabs — ⏳ Spec drafted, not implemented (2026-08-24)
+Two new formats scoped from raw sample logs (`ht-modem.log`, `ht-router.log`,
+`ht-router__1_.log`): `ht-modem` (SDR/RF layer, ctime timestamps, TX packet
+lifecycle including `CSMA QUEUE is Full` drops, `LPD`/`FPD`/`PL` thermal) and
+`ht-router` (network/link layer, ISO8601 timestamps, spawns/monitors the
+modem process, periodic ~20-line counter snapshot blocks requiring
+block-grouping at parse time). Full field mappings in
+`log-field-definitions.md` Formats 5–6; parsing rules and known open
+questions in `parsing-requirements.md`. **New UI requirement carried by this
+work:** Next-Gen Radio tabs must be visually grouped separately from the
+existing tab row, not just another dimmed/badged tab mixed in — see the
+Tabs section intro above. Open decisions before implementation: exact
+tab-grouping treatment, and whether router stat snapshots are fully
+retained or downsampled given sample files run 24k–62k lines.
 
 ### FW Log — Relay Firmware Parser & Tab — ✅ Implemented
 Relay radio firmware (UART/USB debug) logs are auto-detected (detection priority 1) and parsed by `parser/fw_log.py` into `FwLogResult`. The FW Log tab (section 13) renders origin hash, RF configuration, message bucket history, relay routing decisions, channel energy (the RSSI proxy), neighbor table, and errors/warnings, with the three firmware-log `DATA LIMITATION` notes surfaced honestly. See parser spec in `parsing-requirements.md` (Relay Firmware section) and field definitions Format 4. **Note:** decoding the binary RHC payload (hash → serial, firmware version) is tracked separately below as RHC Response Field Mappings, still pending.

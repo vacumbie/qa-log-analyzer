@@ -138,6 +138,15 @@ Every parser returns a `ParseResult` from `parser/models.py`. The API and
 UI only depend on that shape — never import parser internals into routes or
 UI components.
 
+**Two more formats in design (not yet implemented, no detection priority
+assigned):** `ht-modem` and `ht-router` — a next-gen radio platform
+(SDR/FPGA, distinct hardware from the goTenna Pro+ radio the five formats
+above cover). Full requirements are drafted in `docs/parsing-requirements.md`
+and `docs/log-field-definitions.md` (Formats 5–6); no `parser/htmodem.py` or
+`parser/htrouter.py` exists yet. **New UI rule that will apply once built:**
+these two get a visually separate tab group, not just another dimmed/badged
+tab in the existing row — see `docs/ui-requirements.md` Tabs section intro.
+
 ---
 
 ## Architecture decisions worth knowing
@@ -405,6 +414,8 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | ATAK `action` GET/SET conflation | ✅ Done (2026-08-04) — both actions are still stored (dropping GETs would lose real observations); the UI splits on `action` so SET attempts, GET queries, mode polls, and mode change cmds are counted and labelled separately. Verified against the real MESMER log: 28 Frequency cmds = 16 SET + 12 GET; 2,028 mode records = 2,016 polls + 12 change cmds |
 | Rename `AtakFrequencySetAttempt`/`AtakRadioModeQuery` (they hold both actions) | ⏳ Deferred — ~69 references incl. the two serialized keys, tests, and docs; pure churn for no behavior change. Docstrings state what the fields actually hold |
 | `_CSV_TYPES` entry or JSON-only note for the two new ATAK tables | ⏳ Pending — decision not yet recorded in `api/routes/export.py` |
+| Next-Gen Radio — `ht-modem` format (SDR/RF layer: TX packets, CSMA drops, LPD/FPD/PL thermal) | Pending — requirements drafted 2026-08-24, no parser yet |
+| Next-Gen Radio — `ht-router` format (network/link layer: periodic stat snapshots, connection state, spawns ht-modem) | Pending — requirements drafted 2026-08-24, no parser yet; snapshot retention-vs-downsampling strategy undecided |
 
 ---
 
