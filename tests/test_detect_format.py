@@ -15,6 +15,8 @@ The per-format detection tests above use the real fixtures.
 
 from pathlib import Path
 
+import pytest
+
 from api.routes.parse import _detect_format
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
@@ -105,6 +107,35 @@ def test_android_ble_alone_is_rsdk():
     """Without any relay_manager marker, an AndroidBleRadio line is an rsdk log."""
     content = "2026-03-03T15:16:13.515351Z DEBUG Device - PNE1 AndroidBleRadio: connected\n"
     assert _detect_format("capture.txt", content) == "rsdk"
+
+
+# TAK is checked before ATAK, but only because both are JSON — the two content
+# heuristics look at disjoint key sets, so the ordering is defensive rather than
+# load-bearing. What IS load-bearing is that disjointness: TAK's signature keys
+# (receivedAt/nodeType/category) must not appear in any real ATAK log, or every
+# ATAK upload would silently route to the TAK parser and lose its whole dataset.
+# These tests pin that, so widening _SIGNATURE_KEYS in parser/tak.py fails loudly.
+
+ATAK_JSON_FIXTURES = sorted(f.name for f in FIXTURE_DIR.glob("atak_*.json"))
+
+
+def test_atak_fixture_discovery_is_not_empty():
+    """The parametrized guard below is only worth anything if the glob matched —
+    an empty list would silently collect zero tests."""
+    assert len(ATAK_JSON_FIXTURES) >= 5
+
+
+@pytest.mark.parametrize("fixture_name", ATAK_JSON_FIXTURES)
+def test_tak_content_check_does_not_capture_atak_logs(fixture_name):
+    assert _detect_format(fixture_name, _content(fixture_name)) == "atak"
+
+
+def test_tak_filename_check_does_not_capture_atak_filenames():
+    """The TAK filename hints run before the ATAK ones — 'diagnostic_ATAK_...'
+    contains the substring 'atak' but none of 'tak-stream'/'tak_server'."""
+    assert _detect_format(
+        "diagnostic_ATAK_HOTEL_90215634664458_2026-03-04.log", "[]"
+    ) == "atak"
 
 
 # ── Fallback ──────────────────────────────────────────────────────────────────

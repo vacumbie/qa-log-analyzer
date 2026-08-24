@@ -52,3 +52,113 @@ def test_crlf_and_lf_uploads_agree():
     crlf = _post("diagnostic_sample.txt", _diagnostic_bytes("\r\n"))["results"][0]
     lf = _post("diagnostic_sample.txt", _diagnostic_bytes("\n"))["results"][0]
     assert len(crlf["received_messages"]) == len(lf["received_messages"]) == 2
+
+
+# ── TAK server stream ─────────────────────────────────────────────────────────
+# The TAK parser tests call parse_tak_log(path) directly, which never touches
+# _result_to_dict(). Everything the TAK tab reads is produced there, so a field
+# dropped from the serializer would pass the parser suite and break the UI.
+
+def _tak_upload(fixture_name: str) -> dict:
+    return _post(fixture_name, (FIXTURE_DIR / fixture_name).read_bytes())["results"][0]
+
+
+def test_tak_stream_upload_routes_to_the_tak_parser():
+    result = _tak_upload("tak_stream_sample.json")
+    assert result["log_format"] == "tak"
+
+
+def test_tak_stream_upload_serializes_every_event():
+    result = _tak_upload("tak_stream_sample.json")
+    assert len(result["tak_events"]) == 91
+
+
+def test_tak_event_serialization_exposes_the_expected_field_set():
+    """raw_cot is deliberately not serialized — the CoT XML is large and nothing
+    in the UI reads it. Pinning the exact key set catches both a dropped field
+    and an accidental payload bloat."""
+    result = _tak_upload("tak_stream_sample.json")
+    assert set(result["tak_events"][0]) == {
+        "timestamp", "category", "cot_type", "uid", "callsign", "node_type",
+        "platform", "parent_callsign", "lat", "lon", "has_gps_fix",
+        "received_at", "latency_ms",
+    }
+
+
+def test_tak_summary_counts_match_the_capture():
+    result = _tak_upload("tak_stream_sample.json")
+    summary = result["summary"]
+    assert (
+        summary["total_events"], summary["pli_count"], summary["marker_count"],
+        summary["chat_count"], summary["other_count"],
+    ) == (91, 71, 16, 3, 1)
+
+
+def test_tak_summary_reports_unique_callsigns():
+    result = _tak_upload("tak_stream_sample.json")
+    assert result["summary"]["unique_callsigns"] == 10
+
+
+def test_tak_summary_no_fix_count_is_position_scoped():
+    """summary.no_fix_count counts PLI/Marker only — the Chat and control
+    records that also carry 0/0 are not missing positions."""
+    result = _tak_upload("tak_stream_sample.json")
+    assert result["summary"]["no_fix_count"] == 1
+
+
+def test_tak_summary_latency_stats_keep_the_negative_minimum():
+    """Clock skew shows up as a negative min latency; clamping it to 0 would
+    hide the exact signal this format was added to surface."""
+    summary = _tak_upload("tak_stream_sample.json")["summary"]
+    assert summary["min_latency_ms"] == -93
+    assert summary["max_latency_ms"] == 166909
+
+
+def test_tak_summary_negative_latency_count_serialized():
+    result = _tak_upload("tak_stream_sample.json")
+    assert result["summary"]["negative_latency_count"] == 10
+
+
+def test_tak_server_info_serialized_from_the_handshake_record():
+    result = _tak_upload("tak_stream_sample.json")
+    assert result["tak_server_info"] == {
+        "server_version": "5.6-RELEASE-57-HEAD",
+        "api_version": "3",
+    }
+
+
+def test_tak_server_info_is_null_without_a_handshake_record():
+    result = _tak_upload("tak_stream_clean_pli_only.json")
+    assert result["tak_server_info"] is None
+
+
+def test_tak_data_limitation_reaches_the_api_response():
+    result = _tak_upload("tak_stream_sample.json")
+    assert any(e.startswith("DATA LIMITATION —") for e in result["parse_errors"])
+
+
+def test_tak_clean_stream_reports_no_parse_errors_through_the_route():
+    result = _tak_upload("tak_stream_clean_pli_only.json")
+    assert result["parse_errors"] == []
+
+
+def test_tak_null_latency_survives_serialization_as_none():
+    """A missing receivedAt must serialize to null, not 0 — a 0 would land in
+    the latency chart as a perfect-delivery data point."""
+    result = _tak_upload("tak_stream_edge_cases.json")
+    event = next(e for e in result["tak_events"] if e["callsign"] == "NORECEIPT")
+    assert event["latency_ms"] is None
+
+
+def test_tak_no_fix_flag_survives_serialization():
+    """TakTab.jsx plots on has_gps_fix alone; if the serializer dropped it the
+    sentinel positions would be plotted at (0,0) off the coast of Africa."""
+    result = _tak_upload("tak_stream_edge_cases.json")
+    leon = next(e for e in result["tak_events"] if e["callsign"] == "LEON")
+    assert leon["has_gps_fix"] is False
+
+
+def test_tak_single_zero_coordinate_serializes_as_a_real_fix():
+    result = _tak_upload("tak_stream_zero_coordinate_positions.json")
+    tema = next(e for e in result["tak_events"] if e["callsign"] == "TEMA")
+    assert (tema["has_gps_fix"], tema["lat"], tema["lon"]) == (True, 5.626081, 0.0)

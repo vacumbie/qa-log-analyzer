@@ -90,5 +90,47 @@
     "raw": "<event version=\"2.0\" uid=\"ANDROID-notime\" type=\"a-f-G-U-C\"><point lat=\"30.0\" lon=\"-85.0\"/></event>",
     "receivedAt": "2026-07-30T19:33:00.000Z",
     "uid": "ANDROID-notime"
-  }
+  },
+  {
+    "callsign": "smmWebTak",
+    "category": "Marker",
+    "lat": 0,
+    "lon": 0,
+    "nodeType": "WebTAK",
+    "parentCallsign": null,
+    "platform": "WebTAK",
+    "raw": "<event version=\"2.0\" uid=\"3c0b19ad-88f1-4f6b-9c02-71d2a0e5b4cf\" type=\"a-f-G-U-C-I\" how=\"h-g-i-g-o\" time=\"2026-07-30T19:34:02Z\"><point lat=\"0.0\" lon=\"0.0\" hae=\"999999.0\" ce=\"999999.0\" le=\"999999.0\"/><detail><contact callsign=\"smmWebTak\"/><archive/></detail></event>",
+    "receivedAt": "2026-07-30T19:34:02.311Z",
+    "time": "2026-07-30T19:34:02Z",
+    "type": "a-f-G-U-C-I",
+    "uid": "3c0b19ad-88f1-4f6b-9c02-71d2a0e5b4cf"
+  },
+  {
+    "callsign": "NORECEIPT",
+    "category": "PLI",
+    "lat": 30.153401,
+    "lon": -85.664712,
+    "nodeType": "Android",
+    "parentCallsign": null,
+    "platform": "ATAK-CIV",
+    "raw": "<event version=\"2.0\" uid=\"ANDROID-noreceipt\" type=\"a-f-G-U-C\" how=\"m-g\" time=\"2026-07-30T19:35:40Z\"><point lat=\"30.153401\" lon=\"-85.664712\" hae=\"4.512\" ce=\"14.9\" le=\"9999999.0\"/><detail><contact callsign=\"NORECEIPT\" endpoint=\"*:-1:stcp\"/><status battery=\"55\"/></detail></event>",
+    "time": "2026-07-30T19:35:40Z",
+    "type": "a-f-G-U-C",
+    "uid": "ANDROID-noreceipt"
+  },
+  {
+    "callsign": "BADCLOCK",
+    "category": "PLI",
+    "lat": 30.153118,
+    "lon": -85.664903,
+    "nodeType": "Android",
+    "parentCallsign": null,
+    "platform": "ATAK-CIV",
+    "raw": "<event version=\"2.0\" uid=\"ANDROID-badclock\" type=\"a-f-G-U-C\" how=\"m-g\" time=\"30/07/2026 19:36:12\"><point lat=\"30.153118\" lon=\"-85.664903\" hae=\"7.101\" ce=\"20.2\" le=\"9999999.0\"/></event>",
+    "receivedAt": "2026-07-30T19:36:13.004Z",
+    "time": "30/07/2026 19:36:12",
+    "type": "a-f-G-U-C",
+    "uid": "ANDROID-badclock"
+  },
+  null
 ]

@@ -1,0 +1,44 @@
+[
+  {
+    "callsign": "TEMA",
+    "category": "PLI",
+    "lat": 5.626081,
+    "lon": 0.0,
+    "nodeType": "Android",
+    "parentCallsign": null,
+    "platform": "ATAK-CIV",
+    "raw": "<event version=\"2.0\" uid=\"ANDROID-3d81c0f4a1e7bb02\" type=\"a-f-G-U-C\" how=\"m-g\" time=\"2026-08-12T14:02:31Z\" start=\"2026-08-12T14:02:31Z\" stale=\"2026-08-12T14:08:46Z\" access=\"Undefined\"><point lat=\"5.626081\" lon=\"0.0\" hae=\"11.204\" ce=\"18.3\" le=\"9999999.0\"/><detail><contact callsign=\"TEMA\" endpoint=\"*:-1:stcp\"/><__group name=\"Cyan\" role=\"Team Member\"/><precisionlocation geopointsrc=\"GPS\" altsrc=\"GPS\"/><status battery=\"88\"/><takv device=\"SAMSUNG SM-S931U1\" platform=\"ATAK-CIV\" os=\"36\" version=\"5.6.0.21 (04e80b5c).1782866849-CIV\"/><track speed=\"0.4\" course=\"91.2277713450211\"/><uid Droid=\"TEMA\"/></detail></event>",
+    "receivedAt": "2026-08-12T14:02:32.418Z",
+    "time": "2026-08-12T14:02:31Z",
+    "type": "a-f-G-U-C",
+    "uid": "ANDROID-3d81c0f4a1e7bb02"
+  },
+  {
+    "callsign": "SAO TOME",
+    "category": "PLI",
+    "lat": 0.0,
+    "lon": 6.545217,
+    "nodeType": "Android",
+    "parentCallsign": null,
+    "platform": "ATAK-CIV",
+    "raw": "<event version=\"2.0\" uid=\"ANDROID-b09fd7c4e5518a31\" type=\"a-f-G-U-C\" how=\"m-g\" time=\"2026-08-12T14:03:04Z\" start=\"2026-08-12T14:03:04Z\" stale=\"2026-08-12T14:09:19Z\" access=\"Undefined\"><point lat=\"0.0\" lon=\"6.545217\" hae=\"2.318\" ce=\"26.9\" le=\"9999999.0\"/><detail><contact callsign=\"SAO TOME\" endpoint=\"*:-1:stcp\"/><__group name=\"Cyan\" role=\"Team Member\"/><precisionlocation geopointsrc=\"GPS\" altsrc=\"GPS\"/><status battery=\"73\"/><takv device=\"SAMSUNG SM-G990U1\" platform=\"ATAK-CIV\" os=\"36\" version=\"5.6.0.21 (04e80b5c).1782866849-CIV\"/><track speed=\"3.1\" course=\"188.4008212772116\"/><uid Droid=\"SAO TOME\"/></detail></event>",
+    "receivedAt": "2026-08-12T14:03:05.220Z",
+    "time": "2026-08-12T14:03:04Z",
+    "type": "a-f-G-U-C",
+    "uid": "ANDROID-b09fd7c4e5518a31"
+  },
+  {
+    "callsign": "OSU",
+    "category": "PLI",
+    "lat": 0.0,
+    "lon": 0.0,
+    "nodeType": "Android",
+    "parentCallsign": null,
+    "platform": "ATAK-CIV",
+    "raw": "<event version=\"2.0\" uid=\"ANDROID-7ae2c1b6d90f4437\" type=\"a-f-G-U-C\" how=\"h-e\" time=\"2026-08-12T14:03:22Z\" start=\"2026-08-12T14:03:22Z\" stale=\"2026-08-12T14:09:37Z\" access=\"Undefined\"><point lat=\"0.0\" lon=\"0.0\" hae=\"9999999.0\" ce=\"9999999.0\" le=\"9999999.0\"/><detail><contact callsign=\"OSU\" endpoint=\"*:-1:stcp\"/><__group name=\"Cyan\" role=\"Team Member\"/><precisionlocation geopointsrc=\"???\" altsrc=\"???\"/><status battery=\"41\"/><takv device=\"SAMSUNG SM-S931U1\" platform=\"ATAK-CIV\" os=\"36\" version=\"5.6.0.21 (04e80b5c).1782866849-CIV\"/><uid Droid=\"OSU\"/></detail></event>",
+    "receivedAt": "2026-08-12T14:03:23.106Z",
+    "time": "2026-08-12T14:03:22Z",
+    "type": "a-f-G-U-C",
+    "uid": "ANDROID-7ae2c1b6d90f4437"
+  }
+]
