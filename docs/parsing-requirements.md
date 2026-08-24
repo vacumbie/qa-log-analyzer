@@ -1154,7 +1154,7 @@ first `Other` record. A stream with no handshake record yields
 | `nodeType` | `node_type` | `Android`, `WebTAK`, `Other` |
 | `platform` | `platform` | `ATAK-CIV`, `WebTAK`, or `None` |
 | `parentCallsign` | `parent_callsign` | Always `null` in observed samples |
-| `lat` / `lon` | `lat` / `lon` | `0.0` default when absent |
+| `lat` / `lon` | `lat` / `lon` | Read both-or-neither — `None` when either is absent, null or non-numeric; never defaulted to `0.0` (see rule 3a) |
 | `lat == 0 and lon == 0` | `has_gps_fix` (inverted) | CoT no-fix sentinel — see limitations |
 | `raw` | `raw_cot` | Original CoT XML, retained whole |
 | min/max `time` | `session_start` / `session_end` | Wall-clock UTC, unlike `fw_log` |

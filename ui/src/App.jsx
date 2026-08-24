@@ -2538,7 +2538,10 @@ function TakKpiRow({ results }) {
       <KpiCard label="Callsigns"      value={callsigns}      sub="observed by the server"     color='#6366f1' />
       <KpiCard label="PLI"            value={sum('pli_count')} sub="position reports"         color='#10b981' />
       <KpiCard label="No GPS Fix"     value={sum('no_fix_count')} sub="PLI/Marker only"       color={sum('no_fix_count') ? '#f59e0b' : '#64748b'} />
-      <KpiCard label="Clock Skew"     value={skew || '—'}    sub="events received before sent" color={skew ? '#ef4444' : '#64748b'} />
+      {/* Renders 0, not a dash: no clock skew is the healthy case, and a dash
+          would read as "not measured". Server Version below keeps its dash
+          because a stream genuinely can arrive with no handshake record. */}
+      <KpiCard label="Clock Skew"     value={skew}           sub="events received before sent" color={skew ? '#ef4444' : '#64748b'} />
       <KpiCard label="Server Version" value={serverVersions.join(', ') || '—'} sub="from the CoT handshake" color='#22d3ee' />
     </div>
   )
@@ -2935,6 +2938,10 @@ export default function App() {
         chat_count:               takEvts.filter(e => e.category === 'Chat').length,
         marker_count:             takEvts.filter(e => e.category === 'Marker').length,
         other_count:              takEvts.filter(e => e.category === 'Other').length,
+        // Filters on the serialized flag, not on a category list repeated here —
+        // the parser owns which values count as unrecognised, same reason the
+        // map filters on has_gps_fix rather than re-testing lat/lon.
+        unrecognized_count:       takEvts.filter(e => e.is_unrecognized_category).length,
         unique_callsigns:         new Set(takEvts.map(e => e.callsign).filter(Boolean)).size,
         no_fix_count:             takEvts.filter(e => !e.has_gps_fix && (e.category === 'PLI' || e.category === 'Marker')).length,
         avg_latency_ms:           rnd(avg(takEvts.map(e => e.latency_ms).filter(v => v != null)), 1),

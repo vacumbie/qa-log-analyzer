@@ -104,7 +104,8 @@ qa-log-analyzer/
 │   │   ├── DeviceSummary.jsx
 │   │   └── DataPointSelector.jsx
 │   └── hooks/
-│       └── useLogData.js
+│       ├── useLogData.js
+│       └── useLeaflet.js   # Leaflet CDN loader — shared by both maps
 ├── tests/
 │   ├── fixtures/           # Sample log snippets — one per format
 │   └── test_*.py
@@ -404,6 +405,10 @@ const C = {
   dim:    '#2a3a52',
 }
 const PALETTE = ['#00d4ff','#ff6b35','#ffd166','#c77dff','#00e5a0','#ff4757','#4a90e2','#ff6b9d']
+// Two deliberate extensions, both for maps rather than charts: MAP_HOP_COLORS
+// (Hop Count Map — higher contrast against OSM tiles) and TakTab's 10-entry
+// PALETTE (one colour per callsign, and streams carry more callsigns than a
+// chart carries series). Extending for a chart is not covered by either.
 ```
 
 Backgrounds: `#060d16` page · `#080e18` panel · `#0f1923` card.

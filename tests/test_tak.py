@@ -12,6 +12,7 @@ CLEAN_FIXTURE = FIXTURE_DIR / "tak_stream_clean_pli_only.json"
 ZERO_COORD_FIXTURE = FIXTURE_DIR / "tak_stream_zero_coordinate_positions.json"
 PARTIAL_COORD_FIXTURE = FIXTURE_DIR / "tak_stream_partial_coordinates.json"
 UNKNOWN_CAT_FIXTURE = FIXTURE_DIR / "tak_stream_unknown_categories.json"
+ENVELOPE_FIXTURE = FIXTURE_DIR / "tak_stream_envelope_only.json"
 ATAK_FIXTURE = FIXTURE_DIR / "atak_sample.json"
 
 
@@ -504,24 +505,17 @@ def test_unextracted_xml_limitation_names_only_what_is_present():
     assert "speed and course" not in entry
 
 
-def test_unextracted_xml_limitation_silent_when_no_telemetry(tmp_path):
-    """Envelope-only records — a bare <event><point/></event> with no <detail>
-    child — must produce no entry at all, or it would fire on every log."""
-    bare = tmp_path / "tak-stream-bare.json"
-    bare.write_text(json.dumps([{
-        "callsign": "BARE", "category": "PLI", "lat": 30.1, "lon": -85.6,
-        "nodeType": "Android", "time": "2026-07-30T19:24:54Z",
-        "receivedAt": "2026-07-30T19:24:55Z", "type": "a-f-G-U-C",
-        "uid": "ANDROID-bare",
-        "raw": '<event uid="ANDROID-bare"><point lat="30.1" lon="-85.6"/></event>',
-    }]))
-    result = parse_tak_log(bare)
+def test_unextracted_xml_limitation_silent_when_no_telemetry():
+    """Envelope-only records — a <point/> and at most a <contact/>, with no
+    <status>/<takv>/<track> — must produce no entry at all, or it would fire on
+    every log and stop meaning anything."""
+    result = parse_tak_log(ENVELOPE_FIXTURE)
     assert not any("Telemetry present" in e for e in result.parse_errors)
 
 
 def test_no_fix_error_silent_when_every_event_has_a_fix():
     result = parse_tak_log(CLEAN_FIXTURE)
-    assert not any("no GPS fix" in e for e in result.parse_errors)
+    assert not any("no usable position" in e for e in result.parse_errors)
 
 
 def test_negative_latency_error_silent_when_no_clock_skew():

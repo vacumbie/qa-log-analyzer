@@ -40,19 +40,39 @@ function KpiCard({ label, value, sub, color = C.accent }) {
   )
 }
 
+// Two groups, because the entries mean different things. A DATA LIMITATION is
+// "this parser doesn't extract X" — a standing property of the format. The rest
+// are observations about *this* file: records skipped, coordinates incomplete, a
+// category nobody has seen before. Those used to reach only the file-list ⚠
+// glyph, which shows a count and no text — so the named values that tell you
+// whether the parser needs updating appeared nowhere a reader would find them.
 function LimitationBanner({ parseErrors }) {
-  const limits = (parseErrors || []).filter(e => e.startsWith('DATA LIMITATION'))
-  if (!limits.length) return null
-  return (
-    <div style={{ background: '#1c1400', border: '1px solid #854d0e', borderRadius: 8, padding: '12px 16px', marginBottom: 20 }}>
-      <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#fbbf24', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>
-        ⚠️ Data Limitations
+  const all = parseErrors || []
+  const limits = all.filter(e => e.startsWith('DATA LIMITATION'))
+  const notes = all.filter(e => !e.startsWith('DATA LIMITATION'))
+  if (!limits.length && !notes.length) return null
+
+  const Group = ({ title, items, color, strip }) => (
+    <>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>
+        {title}
       </div>
-      {limits.map((item, i) => (
-        <div key={i} style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#d97706', marginBottom: i < limits.length - 1 ? 6 : 0, paddingLeft: 12 }}>
-          • {item.replace('DATA LIMITATION — ', '')}
+      {items.map((item, i) => (
+        <div key={i} style={{ fontFamily: 'var(--mono)', fontSize: 9, color: '#d97706', marginBottom: i < items.length - 1 ? 6 : 0, paddingLeft: 12 }}>
+          • {strip ? item.replace('DATA LIMITATION — ', '') : item}
         </div>
       ))}
+    </>
+  )
+
+  return (
+    <div style={{ background: '#1c1400', border: '1px solid #854d0e', borderRadius: 8, padding: '12px 16px', marginBottom: 20 }}>
+      {limits.length > 0 && <Group title="⚠️ Data Limitations" items={limits} color="#fbbf24" strip />}
+      {notes.length > 0 && (
+        <div style={{ marginTop: limits.length ? 12 : 0 }}>
+          <Group title="⚠️ Notes On This File" items={notes} color="#fbbf24" />
+        </div>
+      )}
     </div>
   )
 }
@@ -229,13 +249,18 @@ export default function TakTab({ results }) {
     return acc
   }, { total_events: 0, pli_count: 0, chat_count: 0, marker_count: 0, other_count: 0, unrecognized_count: 0, no_fix_count: 0, negative_latency_count: 0 })
 
-  // Latency and callsign stats come from the summary the API already computed
-  // (and App.jsx recomputes under the time window) rather than being derived a
-  // second time here — two independent derivations of the same number disagree
+  // The three latency stats come from the summary the API already computed (and
+  // App.jsx recomputes under the time window) rather than being derived a second
+  // time here — two independent derivations of the same number disagree
   // eventually, and the avg was already rounding differently from the export.
-  // Per-file summaries are combined the way the counts above are: callsigns are
-  // unioned across files, min/max take the outer bound, and the average is
-  // weighted by each file's own latency sample count.
+  // Min/max take the outer bound across files; the average is weighted by each
+  // file's own latency sample count, since a plain mean of per-file averages
+  // would be wrong whenever the files differ in size.
+  //
+  // unique_callsigns is the exception and must stay derived from events: the
+  // summary carries a per-file *count*, and counts can't be unioned — only the
+  // underlying sets can. Summing them would double-count any callsign the
+  // server saw in two loaded streams.
   const uniqueCallsigns = new Set(allEvents.map(e => e.callsign).filter(Boolean)).size
   const latencyStats = takResults.reduce((acc, r) => {
     const s = r.summary || {}
@@ -274,7 +299,7 @@ export default function TakTab({ results }) {
             would leave the arithmetic silently short the rest of the time. */}
         <KpiCard label="Unrecognized" value={summary.unrecognized_count}
           color={summary.unrecognized_count ? C.yellow : C.muted}
-          sub={summary.unrecognized_count ? 'new category — see limitations' : 'category outside the 4 known'} />
+          sub={summary.unrecognized_count ? 'new category — named in notes above' : 'category outside the 4 known'} />
         <KpiCard label="Unique Callsigns" value={uniqueCallsigns} />
         {/* Scoped to PLI/Marker — the categories expected to carry a position.
             The sub-label states that scope rather than claiming to be the

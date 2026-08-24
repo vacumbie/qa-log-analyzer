@@ -83,8 +83,17 @@ def test_tak_event_serialization_exposes_the_expected_field_set():
     assert set(result["tak_events"][0]) == {
         "timestamp", "category", "cot_type", "uid", "callsign", "node_type",
         "platform", "parent_callsign", "lat", "lon", "has_gps_fix",
-        "received_at", "latency_ms",
+        "is_unrecognized_category", "received_at", "latency_ms",
     }
+
+
+def test_tak_unrecognized_flag_serialized_per_event():
+    """The UI's time-window recompute re-buckets categories, and must filter on
+    this flag rather than repeating the parser's category list — the same reason
+    has_gps_fix is serialized per event instead of being re-derived from lat/lon."""
+    result = _tak_upload("tak_stream_unknown_categories.json")
+    flagged = {e["callsign"] for e in result["tak_events"] if e["is_unrecognized_category"]}
+    assert flagged == {"ALERTER", "ROUTEMAKER"}
 
 
 def test_tak_summary_counts_match_the_capture():
@@ -148,12 +157,9 @@ def test_tak_clean_stream_reports_no_operational_parse_errors_through_the_route(
     assert operational == []
 
 
-@pytest.mark.parametrize("fixture_name", [
-    "tak_stream_sample.json",
-    "tak_stream_edge_cases.json",
-    "tak_stream_clean_pli_only.json",
-    "tak_stream_unknown_categories.json",
-])
+@pytest.mark.parametrize("fixture_name", sorted(
+    f.name for f in (Path(__file__).parent / "fixtures").glob("tak_stream_*.json")
+))
 def test_tak_category_counts_reconcile_against_total_events(fixture_name):
     """The five category counts must sum to total_events for every fixture. This
     is the guard the unrecognized bucket exists for — without it an unknown

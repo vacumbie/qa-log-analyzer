@@ -385,14 +385,16 @@ once escaped inside a JSON string) before the wall-clock scan; the JSON members
 `"time"` and `"receivedAt"` are the real bounds and survive, because the `=` is
 what distinguishes an XML attribute from a JSON member.
 
-Verified by extracting the shipped regexes and function out of `FileUpload.jsx`
-and running them over every fixture: the sample now reads 0.30 h (19:24:15 →
-19:42:26, exactly its JSON `time`/`receivedAt` span), and all five non-TAK
-formats produce byte-identical ranges to before, since their timestamps are
-bare and the pattern matches nothing. `npm run lint` and `npm run build` clean.
-There is no JS test runner in this project and adding one would mean new npm
-packages, so this check lives in the scratchpad rather than the repo — worth
-knowing it is not guarded by CI.
+**Guarded in CI at zero dependency cost.** `tests/test_time_range_scan.py` reads
+the regex literals out of `FileUpload.jsx` by name and re-runs them in Python —
+no JS test runner, no new npm packages. It pins the sample at under an hour
+(19:24:15 → 19:42:26, exactly its JSON `time`/`receivedAt` span), asserts all
+182 = 91×2 JSON timestamp members survive the strip, and parametrizes over every
+non-TAK fixture asserting the strip is a no-op there. If someone rewrites a
+pattern using a JS-only construct the translation fails loudly rather than
+silently testing nothing. The initial version of this fix shipped unguarded and
+said so here; `claude-md-compliance-checker` pointed out the Python-side guard
+was possible, which was right.
 
 **Not fixed, and not this bug:** the slider snaps to hours, so any sub-hour
 session occupies one bucket and cannot be narrowed within. That is slider
@@ -400,8 +402,50 @@ design and applies to every format; it is also why the map's "No event in this
 time window carries a GPS position" empty state stays unreachable for the
 current sample.
 
-That closes every finding the six quality gates raised except the cosmetic
-legend/palette items.
+**Re-run gate findings, all fixed (2026-08-24).** `task-completion-validator`,
+`claude-md-compliance-checker` and `karen` were re-run after the fixes above and
+each found one more real defect:
+
+- **`unrecognized_count` was missing from the time-window recompute** in
+  `App.jsx`, and since the summary merges `{...r.summary, ...recomputed}` the
+  unwindowed value survived — so the five category cards stopped summing to
+  Total Events as the slider moved, the exact invariant the bucket was added to
+  hold. Found by both validators independently. The first fix filtered on a
+  category list in `App.jsx`, which `claude-md-compliance-checker` correctly
+  called out as re-deriving a parser definition in the UI — the corollary this
+  feature is the reference implementation for. Fixed properly by serializing
+  `is_unrecognized_category` per event (like `has_gps_fix`) and filtering on
+  that. The route test pinning the exact serialized key set caught the new field
+  immediately, which is what it exists for.
+- **`karen`: Clock Skew rendered `—` at zero** in `TakKpiRow` (`skew || '—'`),
+  sitting beside five `0`s and contradicting the TAK tab's own card for the same
+  number. No clock skew is the *healthy* case; a dash reads as "not measured".
+  Same rule this branch spent the session enforcing elsewhere. Server Version
+  keeps its dash — a stream genuinely can arrive with no handshake record.
+- The `Unrecognized` KPI's sub-label pointed at a banner that filters on the
+  `DATA LIMITATION` prefix and would never have shown the entry. `LimitationBanner`
+  now renders a second **Notes On This File** group for the non-prefixed entries
+  (skipped records, incomplete coordinates, unrecognised categories), so the
+  named values reach the UI instead of only the file-list ⚠ glyph.
+- Doc/test hygiene: the `lat`/`lon` row in `parsing-requirements.md` still said
+  "`0.0` default when absent", contradicting rule 3a twenty lines below it; the
+  category-reconciliation test claimed "every fixture" but parametrized four of
+  six (now globs the directory); a `"no GPS fix"` matcher passed vacuously after
+  the wording change (now `"no usable position"`); the envelope-only fixture was
+  inlined as a string instead of living in `tests/fixtures/`; and CLAUDE.md's
+  project map and `PALETTE` token block didn't mention `useLeaflet.js` or the
+  two deliberate map-palette extensions.
+
+Suite: **359 passed, 2 skipped**.
+
+Everything the six gates raised is now closed except two cosmetic items — the
+map legend listing unplotted callsigns, and `PALETTE` repeating past 10
+callsigns.
+
+**Environment note for the next session:** `karen` found the uvicorn on port
+8000 was a stale process serving pre-`7bff7a6` code despite `--reload`, and it
+could not be signalled from an agent shell. If manual browser checking shows old
+parser output, restart that uvicorn from your own terminal first.
 
 **Detection bug found by `jenny` and fixed (2026-08-24).** The TAK filename
 hints are substring tests, and `tak_server` is a substring of the legacy ATAK

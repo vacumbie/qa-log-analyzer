@@ -476,6 +476,11 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
                 "lat":              e.lat,
                 "lon":              e.lon,
                 "has_gps_fix":      e.has_gps_fix,
+                # Serialized per event for the same reason has_gps_fix is: the
+                # time-window recompute in App.jsx needs to re-bucket categories,
+                # and the parser must stay the only place that decides which
+                # values are unrecognised.
+                "is_unrecognized_category": e.is_unrecognized_category,
                 "received_at":      e.received_at,
                 "latency_ms":       e.latency_ms,
             }
