@@ -326,9 +326,22 @@ returned FAIL. Everything they blocked on is now closed:
 
 Suite: **306 passed, 2 skipped**; `npm run build` clean.
 
-Still open from the gates: the `lat`/`lon` null→`0.0` coercion, the no-fix
-wording conflation, an unrecognised `category` counting in none of the four
-buckets, and the `stale=` slider range.
+**`lat`/`lon` null coercion fixed (2026-08-24).** Flagged by all four reviewers.
+`rec.get("lat", 0.0) or 0.0` made a record with one coordinate into a position
+in the Gulf of Guinea that *passed* the `(0,0)` sentinel test — the pair test
+only fires when both are zero — and plotted as a real fix with no error. The
+zero-coordinate work made this worse rather than better: once `lat == 0` became
+a legitimate equator position, nothing distinguished the fabrication from a real
+one. Coordinates are now read both-or-neither via `_read_coordinates()`; either
+side absent, null or non-numeric yields `lat = lon = None`, and `TakEvent.lat/lon`
+are `Optional[float]`. The event is still parsed — callsign, category and timing
+stay usable — and the count is reported in `parse_errors` **separately** from the
+no-fix sentence, because an incomplete record is not a device losing GPS. New
+fixture `tak_stream_partial_coordinates.json` (null lat, absent lon, non-numeric
+lat, one good fix) plus a route-level test that it serializes as `null`, not `0`.
+
+Still open from the gates: the no-fix wording conflation, an unrecognised
+`category` counting in none of the four buckets, and the `stale=` slider range.
 
 **Detection bug found by `jenny` and fixed (2026-08-24).** The TAK filename
 hints are substring tests, and `tak_server` is a substring of the legacy ATAK

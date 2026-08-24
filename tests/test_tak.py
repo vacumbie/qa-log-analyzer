@@ -10,6 +10,7 @@ FIXTURE = FIXTURE_DIR / "tak_stream_sample.json"
 EDGE_FIXTURE = FIXTURE_DIR / "tak_stream_edge_cases.json"
 CLEAN_FIXTURE = FIXTURE_DIR / "tak_stream_clean_pli_only.json"
 ZERO_COORD_FIXTURE = FIXTURE_DIR / "tak_stream_zero_coordinate_positions.json"
+PARTIAL_COORD_FIXTURE = FIXTURE_DIR / "tak_stream_partial_coordinates.json"
 ATAK_FIXTURE = FIXTURE_DIR / "atak_sample.json"
 
 
@@ -218,6 +219,80 @@ def test_single_zero_coordinates_do_not_inflate_no_fix_parse_error():
     result = parse_tak_log(ZERO_COORD_FIXTURE)
     no_fix_errors = [e for e in result.parse_errors if "no GPS fix" in e]
     assert no_fix_errors[0].startswith("1 event(s)")
+
+
+# ── Partial coordinate pairs ──────────────────────────────────────────────────
+# A CoT <point> carries lat and lon together. One without the other used to be
+# coerced to 0.0, which produced a position in the Gulf of Guinea that passed
+# the (0,0)-pair sentinel test and was plotted as a real fix — the exact bug the
+# zero-coordinate rule above makes invisible, since lat == 0 is now legitimate.
+
+def test_null_latitude_with_real_longitude_is_not_a_fix():
+    result = parse_tak_log(PARTIAL_COORD_FIXTURE)
+    event = next(e for e in result.tak_events if e.callsign == "HALFLAT")
+    assert event.has_gps_fix is False
+
+
+def test_null_latitude_is_not_defaulted_to_zero():
+    """The whole point: 0.0 here would be a fabricated position on the equator,
+    indistinguishable from the genuine equator positions the parser must keep."""
+    result = parse_tak_log(PARTIAL_COORD_FIXTURE)
+    event = next(e for e in result.tak_events if e.callsign == "HALFLAT")
+    assert event.lat is None
+
+
+def test_absent_longitude_key_is_not_a_fix():
+    result = parse_tak_log(PARTIAL_COORD_FIXTURE)
+    event = next(e for e in result.tak_events if e.callsign == "NOLON")
+    assert event.has_gps_fix is False and event.lon is None
+
+
+def test_present_coordinate_is_discarded_with_its_missing_partner():
+    """Keeping the half that arrived would imply a position the record doesn't
+    describe — a longitude line, not a point."""
+    result = parse_tak_log(PARTIAL_COORD_FIXTURE)
+    event = next(e for e in result.tak_events if e.callsign == "NOLON")
+    assert event.lat is None
+
+
+def test_non_numeric_coordinate_is_treated_as_missing():
+    result = parse_tak_log(PARTIAL_COORD_FIXTURE)
+    event = next(e for e in result.tak_events if e.callsign == "BADCOORD")
+    assert event.has_gps_fix is False and event.lat is None
+
+
+def test_partial_coordinate_records_are_still_parsed():
+    """The position is unusable; the event itself — callsign, category, timing —
+    is not, and dropping the record would lose real observations."""
+    result = parse_tak_log(PARTIAL_COORD_FIXTURE)
+    assert len(result.tak_events) == 4
+
+
+def test_real_fix_alongside_partial_records_keeps_its_position():
+    result = parse_tak_log(PARTIAL_COORD_FIXTURE)
+    event = next(e for e in result.tak_events if e.callsign == "GOODFIX")
+    assert event.has_gps_fix is True
+    assert (event.lat, event.lon) == (30.153401, -85.664712)
+
+
+def test_missing_coordinates_reported_separately_from_the_no_fix_sentinel():
+    """A (0,0) sentinel means the device had no fix; a missing coordinate means
+    the record was incomplete. Folding them together would misattribute a
+    malformed export to GPS trouble in the field."""
+    result = parse_tak_log(PARTIAL_COORD_FIXTURE)
+    assert any("carry only one of lat/lon" in e for e in result.parse_errors)
+    assert not any("lat/lon sentinel" in e for e in result.parse_errors)
+
+
+def test_missing_coordinate_error_counts_every_affected_record():
+    result = parse_tak_log(PARTIAL_COORD_FIXTURE)
+    entry = next(e for e in result.parse_errors if "carry only one of lat/lon" in e)
+    assert entry.startswith("3 event(s)")
+
+
+def test_missing_coordinate_error_silent_when_every_pair_is_complete():
+    result = parse_tak_log(CLEAN_FIXTURE)
+    assert not any("carry only one of lat/lon" in e for e in result.parse_errors)
 
 
 # ── Missing server receipt time ───────────────────────────────────────────────

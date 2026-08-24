@@ -489,10 +489,17 @@ class TakEvent:
       Other   — server plumbing (e.g. t-x-takp-v TAK protocol/version handshake);
                 carries no device identity or position
 
-    has_gps_fix is False when lat/lon are the 0.0/0.0 sentinel pair paired
-    with a 9999999.0-family hae/ce/le placeholder — this is the CoT convention
-    for "no GPS fix", not a real position at (0,0). Treat lat/lon as
-    meaningless when this is False.
+    has_gps_fix is False in two cases, and consumers should treat lat/lon as
+    meaningless in both:
+      - the 0.0/0.0 sentinel pair, paired with a 9999999.0-family hae/ce/le
+        placeholder — the CoT convention for "no GPS fix", not a real position
+        at (0,0). A *single* zero coordinate is a real position (the equator or
+        the prime meridian) and keeps its fix.
+      - lat/lon is None because the record carried only one of them, or a
+        non-numeric value. The missing half is never defaulted to 0.0, which
+        would fabricate a position and pass the sentinel test above.
+    The two are counted separately in parse_errors: a sentinel means the device
+    had no fix, a None means the record was incomplete.
 
     latency_ms is receivedAt (TAK server receipt time) minus time (device-
     generated event time) — the KNOT-style cross-device skew backlog item
@@ -514,8 +521,8 @@ class TakEvent:
     node_type: str = ""                     # "Android" | "WebTAK" | "Other"
     platform: Optional[str] = None          # "ATAK-CIV" | "WebTAK" | None
     parent_callsign: Optional[str] = None
-    lat: float = 0.0
-    lon: float = 0.0
+    lat: Optional[float] = None            # None when the record carried no usable pair
+    lon: Optional[float] = None
     has_gps_fix: bool = True
     received_at: str = ""                   # TAK server receipt timestamp, _TS_FMT_OUT
     latency_ms: Optional[int] = None

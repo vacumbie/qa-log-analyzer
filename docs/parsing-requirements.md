@@ -1158,10 +1158,22 @@ Timestamps are normalized from ISO-8601 with a `Z` suffix to the project's
    format has no partial-line recovery path (unlike the line-oriented formats).
 2. Records that aren't dicts, or that lack a parseable `time`, are skipped and
    counted; the count is reported as `{skipped} of {total}`.
-3. `has_gps_fix` is `not (lat == 0 and lon == 0)`. **This single definition is
-   the contract** — the UI must not re-derive it, and specifically must not add
-   its own `lat != 0 && lon != 0` test, which would wrongly reject a real
-   position on the equator or prime meridian.
+3. `has_gps_fix` is `not (lat == 0 and lon == 0)` when both coordinates are
+   present, and `False` when either is missing. **This single definition is the
+   contract** — the UI must not re-derive it, and specifically must not add its
+   own `lat != 0 && lon != 0` test, which would wrongly reject a real position
+   on the equator or prime meridian.
+3a. **Coordinates are read both-or-neither.** A record carrying only one of
+   `lat`/`lon`, or a non-numeric value, yields `lat = lon = None` — the missing
+   half is never defaulted to `0.0`. Defaulting fabricated a position in the
+   Gulf of Guinea that *passed* rule 3, because the sentinel test fires only on
+   the `(0,0)` pair; and once a single zero coordinate became a legitimate
+   position, nothing distinguished the fabrication from a real equator fix. The
+   event itself is still parsed — callsign, category and timing are usable even
+   when the position isn't. Reported in `parse_errors` **separately** from the
+   no-fix count: a sentinel means the device had no fix, a `None` means the
+   record was incomplete, and folding them together would misattribute a
+   malformed export to GPS trouble in the field.
 4. `latency_ms` is preserved when negative, never clamped.
 5. `tak_no_fix_events` is scoped to **PLI and Marker** — the categories expected
    to carry a position. Chat and server-control events have no position to

@@ -146,6 +146,14 @@ def test_tak_clean_stream_reports_no_operational_parse_errors_through_the_route(
     assert operational == []
 
 
+def test_tak_missing_coordinate_serializes_as_null_not_zero():
+    """A fabricated 0.0 would reach the map as a plottable equator position; the
+    UI filters on has_gps_fix, but the exported CSV/JSON has no such guard."""
+    result = _tak_upload("tak_stream_partial_coordinates.json")
+    event = next(e for e in result["tak_events"] if e["callsign"] == "HALFLAT")
+    assert event["lat"] is None and event["has_gps_fix"] is False
+
+
 def test_tak_unextracted_xml_limitation_reaches_the_api_response():
     result = _tak_upload("tak_stream_clean_pli_only.json")
     assert any("Telemetry present in the raw CoT XML" in e

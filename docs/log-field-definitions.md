@@ -746,7 +746,7 @@ Parsed into `TakEvent` records on `ParseResult.tak_events`, plus one optional
 | `nodeType` | verbatim | `node_type` | `Android` \| `WebTAK` \| `Other` |
 | `platform` | verbatim | `platform` | `ATAK-CIV` \| `WebTAK` \| `None`. Often absent (18 of 91 in sample) — never guessed |
 | `parentCallsign` | verbatim | `parent_callsign` | Always `null` in observed samples |
-| `lat` / `lon` | float, `0.0` default | `lat` / `lon` | Meaningless when `has_gps_fix` is False |
+| `lat` / `lon` | float, or `None` | `lat` / `lon` | Read both-or-neither: if either is absent, null or non-numeric, **both** become `None` — the missing half is never defaulted to `0.0`, which would fabricate a position that passes the `(0,0)` sentinel test. Meaningless when `has_gps_fix` is False |
 | `lat == 0 and lon == 0` | inverted | `has_gps_fix` | CoT no-fix sentinel (paired with a `999999.0`-family `hae`/`ce`/`le` in the raw XML). **Single source of truth — the UI must not re-derive it** |
 | `raw` | verbatim | `raw_cot` | Full CoT XML. Holds everything not promoted to a field: `<status battery=…>`, `<takv device=… os=…>`, `<track speed=… course=…>`, GeoChat `<remarks>` |
 

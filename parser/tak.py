@@ -89,6 +89,23 @@ _UNEXTRACTED_XML = (
 )
 
 
+def _read_coordinates(rec: dict):
+    """Return (lat, lon) as floats, or (None, None) if either is unusable.
+
+    Both-or-neither on purpose: a record carrying one coordinate has no position,
+    and the missing half must not become 0.0 — see the caller. A non-numeric
+    value is treated the same way as an absent one; 0 and 0.0 are real values and
+    pass through, since (0,0) is the CoT no-fix sentinel the caller tests for.
+    """
+    lat, lon = rec.get("lat"), rec.get("lon")
+    if lat is None or lon is None:
+        return None, None
+    try:
+        return float(lat), float(lon)
+    except (TypeError, ValueError):
+        return None, None
+
+
 def _count_unextracted_xml(events) -> list:
     """Count events whose raw CoT XML carries each unextracted element.
 
@@ -153,6 +170,7 @@ def parse_tak_log(path: Path) -> ParseResult:
     events: list[TakEvent] = []
     skipped = 0
     no_fix_count = 0
+    missing_coord_count = 0
     negative_latency_count = 0
     server_info: Optional[TakServerInfo] = None
     all_times: list[datetime] = []
@@ -172,11 +190,19 @@ def parse_tak_log(path: Path) -> ParseResult:
 
         received_at = _parse_iso(rec.get("receivedAt"))
 
-        lat = rec.get("lat", 0.0) or 0.0
-        lon = rec.get("lon", 0.0) or 0.0
-        has_fix = not (lat == 0 and lon == 0)
-        if not has_fix:
-            no_fix_count += 1
+        # A CoT <point> carries lat and lon together, so a record with only one
+        # of them is malformed rather than positioned. Coercing the missing half
+        # to 0.0 would invent a coordinate on the equator or prime meridian and
+        # — because the sentinel test below only fires on the (0,0) *pair* —
+        # would mark that fabricated position as a real fix. Both stay None.
+        lat, lon = _read_coordinates(rec)
+        if lat is None or lon is None:
+            has_fix = False
+            missing_coord_count += 1
+        else:
+            has_fix = not (lat == 0 and lon == 0)
+            if not has_fix:
+                no_fix_count += 1
 
         latency_ms = None
         if received_at is not None:
@@ -195,8 +221,8 @@ def parse_tak_log(path: Path) -> ParseResult:
             node_type=rec.get("nodeType", "") or "",
             platform=rec.get("platform"),
             parent_callsign=rec.get("parentCallsign"),
-            lat=float(lat),
-            lon=float(lon),
+            lat=lat,
+            lon=lon,
             has_gps_fix=has_fix,
             received_at=_fmt(received_at),
             latency_ms=latency_ms,
@@ -218,6 +244,17 @@ def parse_tak_log(path: Path) -> ParseResult:
         result.parse_errors.append(
             f"{skipped} of {len(records)} record(s) were malformed or missing a "
             "'time' field and were skipped."
+        )
+    # Reported separately from the no-fix count below: a (0,0) sentinel is a
+    # device saying "I have no fix", while a missing coordinate is the record
+    # itself being incomplete. Folding them together would misattribute a
+    # malformed export to GPS trouble in the field.
+    if missing_coord_count:
+        result.parse_errors.append(
+            f"{missing_coord_count} event(s) carry only one of lat/lon (or a "
+            "non-numeric value) — no position could be read, and the missing "
+            "coordinate was not defaulted to 0. These are excluded from the map "
+            "alongside no-fix events."
         )
     if no_fix_count:
         result.parse_errors.append(
