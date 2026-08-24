@@ -1179,9 +1179,17 @@ Timestamps are normalized from ISO-8601 with a `Z` suffix to the project's
   conflation by stating both reasons separately; the parser text has not been
   updated to match. **Open — fix the `parse_errors` wording or scope it.**
 - **Single-stream validation.** Behavior is proven against one real sample plus
-  a hand-built edge-case fixture. Multi-server, multi-day, and larger streams
-  are unobserved. No fixture yet exercises a genuine position with `lat == 0` or
-  `lon == 0`, so rule 3 above is currently unverified by test.
+  three hand-built fixtures (`tak_stream_edge_cases.json`,
+  `tak_stream_clean_pli_only.json`, `tak_stream_zero_coordinate_positions.json`).
+  Multi-server, multi-day, and larger streams are unobserved.
+- **Rule 3 is covered by test, but not by field data.**
+  `tak_stream_zero_coordinate_positions.json` exercises all three cases — a real
+  position on the prime meridian (`lon == 0`), a real position on the equator
+  (`lat == 0`), and the `(0,0)` sentinel — and asserts that only the sentinel
+  sets `has_gps_fix=False` and only it reaches `tak_no_fix_events` and the
+  `parse_errors` count. The fixture is hand-built: no *observed* TAK stream has
+  yet contained a genuine zero coordinate, so the rule is verified against the
+  CoT spec's intent rather than against a captured sample.
 
 ### Sample File Observations (tak_stream_sample.json)
 

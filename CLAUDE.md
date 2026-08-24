@@ -378,7 +378,7 @@ project's lifecycle, not a sign something is broken.
 | `tak` | GeoChat (`b-t-f`) message bodies are not extracted — only the envelope (sender callsign, timestamps); the `<remarks>` text stays in `raw_cot`. Also unextracted from the raw XML: `<status battery>`, `<takv>` device/OS strings, `<track>` speed/course. Surfaced as a `DATA LIMITATION —` entry |
 | `tak` | Two different "no GPS fix" counts exist: `summary.no_fix_count` is PLI/Marker-scoped (1 in the sample) while the `parse_errors` sentence counts all categories ("5 event(s)"). Both are correct for what they measure, but the error wording reads as 5 devices losing GPS when 1 did — the UI resolved this conflation, **the parser text has not**. Open fix |
 | `tak` | `parentCallsign` always null in observed samples, and `platform` is often absent (18 of 91, including all Chat records) even when `nodeType` is known — stored as `None`, never guessed |
-| `tak` | Single-stream validation — one real sample plus one hand-built edge-case fixture. Multi-server, multi-day and larger streams unobserved. No fixture exercises a genuine `lat == 0`/`lon == 0` position, so that parser rule is documented but untested |
+| `tak` | Single-stream validation — one real sample plus three hand-built fixtures (edge cases, clean PLI-only, zero-coordinate positions). Multi-server, multi-day and larger streams unobserved. The `lat == 0`/`lon == 0` sentinel rule **is** covered: `tak_stream_zero_coordinate_positions.json` exercises a real prime-meridian position, a real equator position, and the `(0,0)` sentinel — but no *observed* sample has ever contained one, so the fixture is hand-built, not field-confirmed |
 
 ---
 

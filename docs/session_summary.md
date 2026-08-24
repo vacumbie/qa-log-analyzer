@@ -147,7 +147,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | `tak` | GeoChat (`b-t-f`) **message bodies not extracted** — only the envelope (sender callsign, timestamps). The `<remarks>` text stays in `raw_cot`. Surfaced as a `DATA LIMITATION —` entry |
 | `tak` | ⚠️ **Two different "no GPS fix" counts.** `summary.no_fix_count` is PLI/Marker-scoped (1 in the sample); the `parse_errors` sentence counts all categories ("5 event(s)"). Both are right for what they measure, but the error wording reads as 5 devices losing GPS when 1 did. The UI fixed this conflation; **the parser text has not** — open fix |
 | `tak` | `parentCallsign` always null, and `platform` often absent (18 of 91, including all Chat records) even when `nodeType` is known. Stored as `None`, never guessed |
-| `tak` | Single-stream validation — one real sample + one hand-built edge-case fixture. Multi-server, multi-day and larger streams unobserved. No fixture exercises a genuine `lat == 0`/`lon == 0` position, so that parser rule is untested |
+| `tak` | Single-stream validation — one real sample + three hand-built fixtures (edge cases, clean PLI-only, zero-coordinate positions). Multi-server, multi-day and larger streams unobserved. The `lat == 0`/`lon == 0` rule is now covered by `tak_stream_zero_coordinate_positions.json`, but that fixture is hand-built — no observed stream has carried a genuine zero coordinate |
 
 ---
 
@@ -275,8 +275,12 @@ pytest tests/test_atak.py -v  # single file verbose
 ## Most Recent Work (Last Few PRs)
 
 **2026-08-24 — TAK server CoT event stream: 6th log format + TAK Server tab.
-→ PR #35 OPEN (`feat/tak-server-log-format`). CI green: 234 passed, 2 skipped.
-Do NOT merge yet — only 1 of 6 quality-gate agents has run.**
+→ PR #35 OPEN (`feat/tak-server-log-format`). Local suite green: 287 passed,
+2 skipped (was 234 at the two commits below; the rest come from the TAK test
+expansion still uncommitted in the working tree — `test_tak.py`,
+`test_detect_format.py`, `test_parse_route.py`, and the two new fixtures).
+Do NOT merge yet — `karen` and `peer-reviewer` have run; the other 4
+quality-gate agents have not.**
 
 Two commits, parser-then-UI (the split used for the ATAK command work):
 
@@ -320,12 +324,18 @@ baf0c18 feat(ui):     add TAK Server tab with position map and latency chart
    level: mean luminance 199.9 → 20.0, and **0** pixels above 190L even with 14
    stale tiles retained in the hidden container.
 
-*Two honest gaps in that fix, both unexercised by the fixtures:*
-- No fixture has a genuine position with `lat == 0` or `lon == 0`, so the
-  equator/prime-meridian rule is correct but **untested**.
+*Two honest gaps were left in that fix. One is now closed:*
+- ~~No fixture has a genuine position with `lat == 0` or `lon == 0`~~ —
+  **closed.** `tak_stream_zero_coordinate_positions.json` now covers a real
+  prime-meridian position (TEMA, `lon == 0`), a real equator position
+  (SAO TOME, `lat == 0`), and the `(0,0)` sentinel (OSU), with tests asserting
+  only the sentinel loses its fix and only it is counted in
+  `tak_no_fix_events` and the `parse_errors` no-fix sentence. Still hand-built,
+  not field-observed.
 - The second empty-state string ("No event in this time window carries a GPS
   position") is unreachable in the UI — all 91 sample events sit inside one hour
   and the slider snaps to hours, so no window isolates the Chat records.
+  **Still open.**
 
 *Docs updated in the same PR:* this file, `parsing-requirements.md` (new TAK
 Server section + **P8** defined so the code's dangling references resolve),
@@ -834,15 +844,18 @@ Based on the backlog, the most actionable items (not blocked):
    - **Off-palette `#3b82f6`** for `relayModeUpdated` in `ChartPanel.jsx` — `#4a90e2` is
      the palette blue and is unused there.
 
-0. **Finish the PR #35 quality gate — this is the immediate next task.** Only
-   `karen` has run (and passed). Still to run, in order: `vera`,
-   `task-completion-validator`, `jenny`, `peer-reviewer`,
+0. **Finish the PR #35 quality gate — this is the immediate next task.**
+   `karen` has run (passed). `peer-reviewer` has run (2026-08-24): **no Critical
+   or High findings**; its one Medium was that these docs still called the
+   zero-coordinate rule untested after the fixture landed — fixed above. Still
+   to run: `vera`, `task-completion-validator`, `jenny`,
    `claude-md-compliance-checker`. Expect them to land on:
    - **`claude-md-compliance-checker`** — the `leaflet` npm dependency against
      CLAUDE.md's "do not add npm packages" rule and the existing CDN pattern.
-   - **`vera`** — no fixture exercises a genuine `lat == 0`/`lon == 0` position,
-     and the `parse_errors` no-fix count (all categories) vs
-     `summary.no_fix_count` (PLI/Marker) discrepancy.
+   - **`vera`** — the `parse_errors` no-fix count (all categories) vs
+     `summary.no_fix_count` (PLI/Marker) discrepancy. The zero-coordinate gap it
+     would previously have flagged is now covered by
+     `tak_stream_zero_coordinate_positions.json`.
    - **`jenny`** — the `_CSV_TYPES` decision for `tak_events` is still
      unrecorded in `export.py`, matching the two ATAK command tables.
 
