@@ -1,0 +1,652 @@
+Start of log Wed Aug 12 05:13:23 2026
+
+
+
+Wed Aug 12 05:13:23 2026 : FPGA Version is correct
+Wed Aug 12 05:13:23 2026 : Setting filter bank to BFTC-415+  330-500MHZ
+Wed Aug 12 05:13:23 2026 : LIBIIO : version 0.26  detected
+Wed Aug 12 05:13:23 2026 : Found 4 devices
+Wed Aug 12 05:13:23 2026 : Could not find the AD936X PHY device
+Wed Aug 12 05:13:23 2026 : ERROR : AD936X may not be initialized
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting ENSM mode
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting Calibration mode
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting the CLKOUT mode
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting TX channel 0 to use port A
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting TX channel 1 to use port A
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting RX channel 0 to use port A_BALANCED
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting RX channel 1 to use port A_BALANCED
+Wed Aug 12 05:13:23 2026 : ERROR : problem enabling RX Quadrature tracking
+Wed Aug 12 05:13:23 2026 : ERROR : problem enabling RX RF DC tracking
+Wed Aug 12 05:13:23 2026 : ERROR : problem enabling RX Baseband DC tracking
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting the oversampling rate mode to nominal
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting RSSI mode
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting RSSI mode
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting RSSI mode
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting RSSI mode
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting RSSI mode
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting GPIOs to manual control
+Wed Aug 12 05:13:23 2026 : ERROR : problem enabling AUXDACs to manual control
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting AUXDAC2 Value (upper bits)
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting AUXDAC2 Value (lower bits)
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting SI4460 Control Voltage
+Wed Aug 12 05:13:23 2026 : ERROR : problem enabling RX Path
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting TX LO Frequency to 420000000
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting RX LO Frequency to 420120000
+Wed Aug 12 05:13:23 2026 : Using table index 0  channel 0
+Wed Aug 12 05:13:23 2026 : Using table index 0  channel 1
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting RX Channel 0 AGC mode
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting RX Channel 1 AGC mode
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting RX Channel 0 AGC manual level to 25
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting RX Channel 1 AGC manual level to 25
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting TX Channel 0 Attenuation level to 75.00
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting TX Channel 1 Attenuation level to %3.2f
+Wed Aug 12 05:13:23 2026 : ERROR : problem loading the FIR filter
+Wed Aug 12 05:13:23 2026 : ERROR : problem enabling the TX streaming interface
+Wed Aug 12 05:13:23 2026 : ERROR : initialization of the AD9363 may have not been complete
+Wed Aug 12 05:13:23 2026 : ERROR : problem enabling RX Path
+Wed Aug 12 05:13:23 2026 : Setting clock calibration offset to -237
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting AUXDAC1 Value (upper bits)
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting AUXDAC1 Value (lower bits)
+Wed Aug 12 05:13:23 2026 : Board Type not found, using default
+Wed Aug 12 05:13:23 2026 : Starting AD5592 init
+Wed Aug 12 05:13:23 2026 : Found 4 devices
+Wed Aug 12 05:13:23 2026 : Device has 5 channels
+Wed Aug 12 05:13:23 2026 : Found channel voltage1
+Wed Aug 12 05:13:23 2026 : Found TX0 channel
+Wed Aug 12 05:13:23 2026 : Found channel voltage0
+Wed Aug 12 05:13:23 2026 : Starting LIBGPS init
+Wed Aug 12 05:13:23 2026 : Internal clock resolution = 0 secs  :  1  nsec
+Wed Aug 12 05:13:23 2026 : Error connecting to gpsd
+Wed Aug 12 05:13:23 2026 : ERROR : libgps_if may not be initialized
+Wed Aug 12 05:13:23 2026 : Starting GPS Sync state machine
+Wed Aug 12 05:13:23 2026 : Read an SI4460 calibration offset of -109
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting AUXDAC2 Value (upper bits)
+Wed Aug 12 05:13:23 2026 : ERROR : problem setting AUXDAC2 Value (lower bits)
+Wed Aug 12 05:13:23 2026 : ERROR : problem enabling RX Path
+Wed Aug 12 05:13:23 2026 : Setting RX freq = 420000000.00
+Wed Aug 12 05:13:23 2026 : Setting TX freq = 420000000.00
+Wed Aug 12 05:13:23 2026 : Using table index 1  channel 0
+Wed Aug 12 05:13:23 2026 : Using table index 2  channel 1
+Wed Aug 12 05:13:23 2026 : Using UNIX socket name :   /var/run/ht-modem/socket
+Wed Aug 12 05:13:23 2026 : Using UNIX socket name :   /var/run/ht-modem/socketDebug
+Wed Aug 12 05:13:23 2026 : Starting Recv thread
+Wed Aug 12 05:13:23 2026 : Starting Capture FIFO thread, starting capture fifo count = 0
+Wed Aug 12 05:13:23 2026 : Starting IPC loop at 1786511603685171
+Wed Aug 12 05:13:23 2026 : Starting IPC loop at 1786511603685403
+Wed Aug 12 05:13:23 2026 : Starting xmit thread
+Wed Aug 12 05:13:23 2026 : ERROR : problem enabling TX Path
+Wed Aug 12 05:13:24 2026 : Accepted a socket connection  :  22
+Wed Aug 12 05:13:24 2026 : Accepted a socket connection  :  23
+Wed Aug 12 05:13:24 2026 : Received Control packet, control type = 10
+Wed Aug 12 05:13:24 2026 : Received Transmit Level COMMAND
+Wed Aug 12 05:13:24 2026 : Setting TX power level mode to fixed, Xmit level to 34.00
+Wed Aug 12 05:13:24 2026 : Received Control packet, control type = 10
+Wed Aug 12 05:13:24 2026 : Received SETTXRXFREQ command
+Wed Aug 12 05:13:24 2026 : Setting TX/RX freq to 420000000
+Wed Aug 12 05:13:24 2026 : Setting TX freq = 420000000.00
+Wed Aug 12 05:13:24 2026 : Setting RX freq = 420000000.00
+Wed Aug 12 05:13:33 2026 : LPD Temp = 45.45   FPD Temp = 46.77   PL Temp = 44.97
+Wed Aug 12 05:13:43 2026 : LPD Temp = 45.79   FPD Temp = 46.94   PL Temp = 45.21
+Wed Aug 12 05:13:53 2026 : LPD Temp = 45.14   FPD Temp = 46.30   PL Temp = 45.32
+Wed Aug 12 05:14:03 2026 : Received Control packet, control type = 10
+Wed Aug 12 05:14:03 2026 : Received Transmit Level COMMAND
+Wed Aug 12 05:14:03 2026 : Setting TX power level mode to fixed, Xmit level to 30.00
+Wed Aug 12 05:14:03 2026 : Received Control packet, control type = 10
+Wed Aug 12 05:14:03 2026 : Received SETTXRXFREQ command
+Wed Aug 12 05:14:03 2026 : Setting TX/RX freq to 421000000
+Wed Aug 12 05:14:03 2026 : Setting TX freq = 421000000.00
+Wed Aug 12 05:14:03 2026 : Setting RX freq = 421000000.00
+Wed Aug 12 05:14:03 2026 : Extended the payload length from 90 to 128
+Wed Aug 12 05:14:03 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:14:03 2026 : Received packet for encoding : packetID = 4 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 90 bytes
+Wed Aug 12 05:14:03 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:14:03 2026 : Added packet to xmit queue numinqueue = 1
+Wed Aug 12 05:14:03 2026 : LPD Temp = 44.86   FPD Temp = 47.08   PL Temp = 43.80
+Wed Aug 12 05:14:04 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:14:04 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:14:04 2026 : Received packet for encoding : packetID = 5 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:14:04 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:14:04 2026 : Added packet to xmit queue numinqueue = 2
+Wed Aug 12 05:14:12 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:14:12 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:14:12 2026 : Received packet for encoding : packetID = 6 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:14:12 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:14:12 2026 : Added packet to xmit queue numinqueue = 3
+Wed Aug 12 05:14:13 2026 : LPD Temp = 45.18   FPD Temp = 46.02   PL Temp = 45.43
+Wed Aug 12 05:14:23 2026 : LPD Temp = 45.17   FPD Temp = 47.22   PL Temp = 44.28
+Wed Aug 12 05:14:33 2026 : LPD Temp = 45.35   FPD Temp = 45.91   PL Temp = 44.33
+Wed Aug 12 05:14:43 2026 : LPD Temp = 44.98   FPD Temp = 46.41   PL Temp = 44.05
+Wed Aug 12 05:14:53 2026 : LPD Temp = 45.59   FPD Temp = 45.46   PL Temp = 44.81
+Wed Aug 12 05:15:03 2026 : LPD Temp = 44.72   FPD Temp = 46.09   PL Temp = 43.94
+Wed Aug 12 05:15:06 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:15:06 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:15:06 2026 : Received packet for encoding : packetID = 7 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:15:06 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:15:06 2026 : Added packet to xmit queue numinqueue = 4
+Wed Aug 12 05:15:08 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:15:08 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:15:08 2026 : Received packet for encoding : packetID = 8 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:15:08 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:15:08 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:15:10 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:15:10 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:15:10 2026 : Received packet for encoding : packetID = 9 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:15:10 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:15:10 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:15:13 2026 : LPD Temp = 44.84   FPD Temp = 44.72   PL Temp = 43.94
+Wed Aug 12 05:15:23 2026 : LPD Temp = 43.46   FPD Temp = 45.62   PL Temp = 43.69
+Wed Aug 12 05:15:33 2026 : LPD Temp = 46.19   FPD Temp = 45.54   PL Temp = 45.37
+Wed Aug 12 05:15:43 2026 : LPD Temp = 44.34   FPD Temp = 46.24   PL Temp = 42.82
+Wed Aug 12 05:15:53 2026 : LPD Temp = 43.24   FPD Temp = 44.44   PL Temp = 43.23
+Wed Aug 12 05:16:03 2026 : LPD Temp = 41.78   FPD Temp = 42.81   PL Temp = 42.09
+Wed Aug 12 05:16:11 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:16:11 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:16:11 2026 : Received packet for encoding : packetID = 10 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:16:11 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:16:11 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:16:13 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:16:13 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:16:13 2026 : Received packet for encoding : packetID = 11 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:16:13 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:16:13 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:16:13 2026 : LPD Temp = 43.07   FPD Temp = 43.44   PL Temp = 43.74
+Wed Aug 12 05:16:15 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:16:15 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:16:15 2026 : Received packet for encoding : packetID = 12 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:16:15 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:16:15 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:16:23 2026 : LPD Temp = 43.97   FPD Temp = 43.97   PL Temp = 42.84
+Wed Aug 12 05:16:33 2026 : LPD Temp = 44.11   FPD Temp = 44.64   PL Temp = 42.37
+Wed Aug 12 05:16:43 2026 : LPD Temp = 44.33   FPD Temp = 44.62   PL Temp = 43.30
+Wed Aug 12 05:16:53 2026 : LPD Temp = 43.82   FPD Temp = 46.35   PL Temp = 42.42
+Wed Aug 12 05:17:03 2026 : LPD Temp = 45.40   FPD Temp = 45.00   PL Temp = 44.28
+Wed Aug 12 05:17:13 2026 : LPD Temp = 47.02   FPD Temp = 46.60   PL Temp = 44.47
+Wed Aug 12 05:17:14 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:17:14 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:17:14 2026 : Received packet for encoding : packetID = 13 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:17:14 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:17:14 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:17:16 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:17:16 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:17:16 2026 : Received packet for encoding : packetID = 14 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:17:16 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:17:16 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:17:18 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:17:18 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:17:18 2026 : Received packet for encoding : packetID = 15 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:17:18 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:17:18 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:17:23 2026 : LPD Temp = 46.30   FPD Temp = 46.71   PL Temp = 44.83
+Wed Aug 12 05:17:33 2026 : LPD Temp = 47.17   FPD Temp = 46.94   PL Temp = 45.48
+Wed Aug 12 05:17:43 2026 : LPD Temp = 47.59   FPD Temp = 45.67   PL Temp = 47.83
+Wed Aug 12 05:17:53 2026 : LPD Temp = 47.67   FPD Temp = 47.61   PL Temp = 46.33
+Wed Aug 12 05:18:03 2026 : LPD Temp = 46.96   FPD Temp = 48.81   PL Temp = 47.50
+Wed Aug 12 05:18:11 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:18:11 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:18:11 2026 : Received packet for encoding : packetID = 16 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:18:11 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:18:11 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:18:13 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:18:13 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:18:13 2026 : Received packet for encoding : packetID = 17 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:18:13 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:18:13 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:18:13 2026 : LPD Temp = 48.59   FPD Temp = 48.87   PL Temp = 48.25
+Wed Aug 12 05:18:15 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:18:15 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:18:15 2026 : Received packet for encoding : packetID = 18 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:18:15 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:18:15 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:18:23 2026 : LPD Temp = 47.62   FPD Temp = 49.32   PL Temp = 48.40
+Wed Aug 12 05:18:33 2026 : LPD Temp = 49.43   FPD Temp = 49.83   PL Temp = 48.37
+Wed Aug 12 05:18:43 2026 : LPD Temp = 48.42   FPD Temp = 50.02   PL Temp = 49.04
+Wed Aug 12 05:18:53 2026 : LPD Temp = 49.83   FPD Temp = 49.89   PL Temp = 49.52
+Wed Aug 12 05:19:03 2026 : LPD Temp = 51.46   FPD Temp = 51.53   PL Temp = 49.68
+Wed Aug 12 05:19:13 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:19:13 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:19:13 2026 : Received packet for encoding : packetID = 19 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:19:13 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:19:13 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:19:13 2026 : LPD Temp = 50.45   FPD Temp = 50.83   PL Temp = 49.12
+Wed Aug 12 05:19:15 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:19:15 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:19:15 2026 : Received packet for encoding : packetID = 20 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:19:15 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:19:15 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:19:17 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:19:17 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:19:17 2026 : Received packet for encoding : packetID = 21 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:19:17 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:19:17 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:19:23 2026 : LPD Temp = 50.47   FPD Temp = 50.87   PL Temp = 50.90
+Wed Aug 12 05:19:33 2026 : LPD Temp = 50.64   FPD Temp = 50.55   PL Temp = 50.22
+Wed Aug 12 05:19:43 2026 : LPD Temp = 51.80   FPD Temp = 52.21   PL Temp = 50.98
+Wed Aug 12 05:19:53 2026 : LPD Temp = 51.18   FPD Temp = 52.35   PL Temp = 51.21
+Wed Aug 12 05:20:03 2026 : LPD Temp = 51.28   FPD Temp = 52.71   PL Temp = 52.55
+Wed Aug 12 05:20:13 2026 : LPD Temp = 52.71   FPD Temp = 52.64   PL Temp = 51.39
+Wed Aug 12 05:20:18 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:20:18 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:20:18 2026 : Received packet for encoding : packetID = 22 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:20:18 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:20:18 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:20:20 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:20:20 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:20:20 2026 : Received packet for encoding : packetID = 23 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:20:20 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:20:20 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:20:22 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:20:22 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:20:22 2026 : Received packet for encoding : packetID = 24 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:20:22 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:20:22 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:20:23 2026 : LPD Temp = 52.68   FPD Temp = 53.11   PL Temp = 51.04
+Wed Aug 12 05:20:33 2026 : LPD Temp = 53.20   FPD Temp = 53.78   PL Temp = 51.42
+Wed Aug 12 05:20:43 2026 : LPD Temp = 54.06   FPD Temp = 53.53   PL Temp = 52.68
+Wed Aug 12 05:20:53 2026 : LPD Temp = 51.29   FPD Temp = 53.56   PL Temp = 51.98
+Wed Aug 12 05:21:03 2026 : LPD Temp = 52.91   FPD Temp = 53.45   PL Temp = 53.86
+Wed Aug 12 05:21:12 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:21:12 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:21:12 2026 : Received packet for encoding : packetID = 25 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:21:12 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:21:12 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:21:13 2026 : LPD Temp = 51.91   FPD Temp = 53.22   PL Temp = 51.87
+Wed Aug 12 05:21:14 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:21:14 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:21:14 2026 : Received packet for encoding : packetID = 26 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:21:14 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:21:14 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:21:16 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:21:16 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:21:16 2026 : Received packet for encoding : packetID = 27 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:21:16 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:21:16 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:21:23 2026 : LPD Temp = 53.30   FPD Temp = 53.20   PL Temp = 52.43
+Wed Aug 12 05:21:33 2026 : LPD Temp = 52.49   FPD Temp = 52.27   PL Temp = 51.11
+Wed Aug 12 05:21:43 2026 : LPD Temp = 52.63   FPD Temp = 53.62   PL Temp = 51.32
+Wed Aug 12 05:21:53 2026 : LPD Temp = 52.85   FPD Temp = 52.82   PL Temp = 51.31
+Wed Aug 12 05:22:03 2026 : LPD Temp = 52.26   FPD Temp = 53.03   PL Temp = 51.65
+Wed Aug 12 05:22:13 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:22:13 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:22:13 2026 : Received packet for encoding : packetID = 28 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:22:13 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:22:13 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:22:13 2026 : LPD Temp = 51.74   FPD Temp = 52.29   PL Temp = 52.13
+Wed Aug 12 05:22:15 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:22:15 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:22:15 2026 : Received packet for encoding : packetID = 29 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:22:15 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:22:15 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:22:17 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:22:17 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:22:17 2026 : Received packet for encoding : packetID = 30 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:22:17 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:22:17 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:22:23 2026 : LPD Temp = 52.83   FPD Temp = 52.12   PL Temp = 52.22
+Wed Aug 12 05:22:33 2026 : LPD Temp = 51.98   FPD Temp = 54.11   PL Temp = 51.98
+Wed Aug 12 05:22:43 2026 : LPD Temp = 50.41   FPD Temp = 53.56   PL Temp = 51.12
+Wed Aug 12 05:22:53 2026 : LPD Temp = 51.54   FPD Temp = 51.60   PL Temp = 50.14
+Wed Aug 12 05:23:03 2026 : LPD Temp = 51.00   FPD Temp = 51.46   PL Temp = 50.51
+Wed Aug 12 05:23:08 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:23:08 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:23:08 2026 : Received packet for encoding : packetID = 31 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:23:08 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:23:08 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:23:10 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:23:10 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:23:10 2026 : Received packet for encoding : packetID = 32 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:23:10 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:23:10 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:23:12 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:23:12 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:23:12 2026 : Received packet for encoding : packetID = 33 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:23:12 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:23:12 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:23:13 2026 : LPD Temp = 52.18   FPD Temp = 51.90   PL Temp = 51.35
+Wed Aug 12 05:23:23 2026 : LPD Temp = 51.21   FPD Temp = 51.88   PL Temp = 50.11
+Wed Aug 12 05:23:33 2026 : LPD Temp = 52.29   FPD Temp = 50.78   PL Temp = 50.92
+Wed Aug 12 05:23:43 2026 : LPD Temp = 51.49   FPD Temp = 51.15   PL Temp = 50.51
+Wed Aug 12 05:23:53 2026 : LPD Temp = 51.68   FPD Temp = 51.91   PL Temp = 49.91
+Wed Aug 12 05:24:03 2026 : LPD Temp = 51.49   FPD Temp = 51.43   PL Temp = 50.37
+Wed Aug 12 05:24:13 2026 : LPD Temp = 50.89   FPD Temp = 51.49   PL Temp = 50.14
+Wed Aug 12 05:24:23 2026 : LPD Temp = 50.56   FPD Temp = 51.54   PL Temp = 50.08
+Wed Aug 12 05:24:31 2026 : Received Control packet, control type = 10
+Wed Aug 12 05:24:31 2026 : Received Transmit Level COMMAND
+Wed Aug 12 05:24:31 2026 : Setting TX power level mode to fixed, Xmit level to 30.00
+Wed Aug 12 05:24:31 2026 : Received Control packet, control type = 10
+Wed Aug 12 05:24:31 2026 : Received SETTXRXFREQ command
+Wed Aug 12 05:24:31 2026 : Setting TX/RX freq to 421000000
+Wed Aug 12 05:24:31 2026 : Setting TX freq = 421000000.00
+Wed Aug 12 05:24:31 2026 : Setting RX freq = 421000000.00
+Wed Aug 12 05:24:31 2026 : Extended the payload length from 90 to 128
+Wed Aug 12 05:24:31 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:24:31 2026 : Received packet for encoding : packetID = 36 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 90 bytes
+Wed Aug 12 05:24:31 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:24:31 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:24:31 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:24:31 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:24:31 2026 : Received packet for encoding : packetID = 37 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:24:31 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:24:31 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:24:33 2026 : LPD Temp = 50.41   FPD Temp = 51.25   PL Temp = 49.21
+Wed Aug 12 05:24:42 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:24:42 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:24:42 2026 : Received packet for encoding : packetID = 38 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:24:42 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:24:42 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:24:43 2026 : LPD Temp = 50.65   FPD Temp = 51.20   PL Temp = 49.83
+Wed Aug 12 05:24:53 2026 : LPD Temp = 50.59   FPD Temp = 50.33   PL Temp = 49.61
+Wed Aug 12 05:25:04 2026 : LPD Temp = 49.50   FPD Temp = 51.14   PL Temp = 50.19
+Wed Aug 12 05:25:14 2026 : LPD Temp = 50.41   FPD Temp = 50.87   PL Temp = 49.26
+Wed Aug 12 05:25:24 2026 : LPD Temp = 49.55   FPD Temp = 50.92   PL Temp = 49.74
+Wed Aug 12 05:25:34 2026 : LPD Temp = 49.77   FPD Temp = 50.89   PL Temp = 48.59
+Wed Aug 12 05:25:35 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:25:35 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:25:35 2026 : Received packet for encoding : packetID = 39 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:25:35 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:25:35 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:25:37 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:25:37 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:25:37 2026 : Received packet for encoding : packetID = 40 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:25:37 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:25:37 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:25:39 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:25:39 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:25:39 2026 : Received packet for encoding : packetID = 41 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:25:39 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:25:39 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:25:44 2026 : LPD Temp = 49.68   FPD Temp = 49.77   PL Temp = 48.98
+Wed Aug 12 05:25:54 2026 : LPD Temp = 49.63   FPD Temp = 50.44   PL Temp = 49.78
+Wed Aug 12 05:26:04 2026 : LPD Temp = 49.41   FPD Temp = 49.66   PL Temp = 48.91
+Wed Aug 12 05:26:14 2026 : LPD Temp = 49.74   FPD Temp = 50.34   PL Temp = 48.29
+Wed Aug 12 05:26:24 2026 : LPD Temp = 49.01   FPD Temp = 50.76   PL Temp = 48.71
+Wed Aug 12 05:26:32 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:26:32 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:26:32 2026 : Received packet for encoding : packetID = 42 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:26:32 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:26:32 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:26:34 2026 : LPD Temp = 49.36   FPD Temp = 49.74   PL Temp = 49.35
+Wed Aug 12 05:26:34 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:26:34 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:26:34 2026 : Received packet for encoding : packetID = 43 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:26:34 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:26:34 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:26:36 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:26:36 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:26:36 2026 : Received packet for encoding : packetID = 44 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:26:36 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:26:36 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:26:44 2026 : LPD Temp = 49.02   FPD Temp = 51.21   PL Temp = 48.17
+Wed Aug 12 05:26:54 2026 : LPD Temp = 49.66   FPD Temp = 49.41   PL Temp = 49.32
+Wed Aug 12 05:27:04 2026 : LPD Temp = 49.41   FPD Temp = 50.39   PL Temp = 48.67
+Wed Aug 12 05:27:14 2026 : LPD Temp = 49.08   FPD Temp = 50.81   PL Temp = 47.61
+Wed Aug 12 05:27:24 2026 : LPD Temp = 49.22   FPD Temp = 49.10   PL Temp = 48.99
+Wed Aug 12 05:27:28 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:27:28 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:27:28 2026 : Received packet for encoding : packetID = 45 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:27:28 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:27:28 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:27:30 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:27:30 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:27:30 2026 : Received packet for encoding : packetID = 46 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:27:30 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:27:30 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:27:32 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:27:32 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:27:32 2026 : Received packet for encoding : packetID = 47 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:27:32 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:27:32 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:27:34 2026 : LPD Temp = 48.62   FPD Temp = 49.16   PL Temp = 47.55
+Wed Aug 12 05:27:44 2026 : LPD Temp = 49.22   FPD Temp = 50.36   PL Temp = 48.29
+Wed Aug 12 05:27:54 2026 : LPD Temp = 48.40   FPD Temp = 49.71   PL Temp = 48.65
+Wed Aug 12 05:28:04 2026 : LPD Temp = 49.52   FPD Temp = 50.37   PL Temp = 48.45
+Wed Aug 12 05:28:14 2026 : LPD Temp = 48.67   FPD Temp = 48.73   PL Temp = 48.17
+Wed Aug 12 05:28:24 2026 : LPD Temp = 49.05   FPD Temp = 49.55   PL Temp = 48.90
+Wed Aug 12 05:28:29 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:28:29 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:28:29 2026 : Received packet for encoding : packetID = 48 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:28:29 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:28:29 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:28:31 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:28:31 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:28:31 2026 : Received packet for encoding : packetID = 49 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:28:31 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:28:31 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:28:33 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:28:33 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:28:33 2026 : Received packet for encoding : packetID = 50 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:28:33 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:28:33 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:28:34 2026 : LPD Temp = 49.55   FPD Temp = 49.99   PL Temp = 48.37
+Wed Aug 12 05:28:44 2026 : LPD Temp = 47.14   FPD Temp = 49.43   PL Temp = 47.97
+Wed Aug 12 05:28:54 2026 : LPD Temp = 49.58   FPD Temp = 49.33   PL Temp = 47.73
+Wed Aug 12 05:29:04 2026 : LPD Temp = 47.90   FPD Temp = 49.41   PL Temp = 48.25
+Wed Aug 12 05:29:14 2026 : LPD Temp = 49.07   FPD Temp = 49.07   PL Temp = 49.24
+Wed Aug 12 05:29:24 2026 : LPD Temp = 48.09   FPD Temp = 49.02   PL Temp = 47.70
+Wed Aug 12 05:29:30 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:29:30 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:29:30 2026 : Received packet for encoding : packetID = 51 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:29:30 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:29:30 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:29:32 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:29:32 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:29:32 2026 : Received packet for encoding : packetID = 52 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:29:32 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:29:32 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:29:34 2026 : LPD Temp = 49.04   FPD Temp = 50.25   PL Temp = 47.31
+Wed Aug 12 05:29:34 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:29:34 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:29:34 2026 : Received packet for encoding : packetID = 53 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:29:34 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:29:34 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:29:44 2026 : LPD Temp = 49.33   FPD Temp = 48.32   PL Temp = 47.65
+Wed Aug 12 05:29:54 2026 : LPD Temp = 48.70   FPD Temp = 49.22   PL Temp = 48.31
+Wed Aug 12 05:30:04 2026 : LPD Temp = 49.10   FPD Temp = 48.85   PL Temp = 47.34
+Wed Aug 12 05:30:14 2026 : LPD Temp = 47.61   FPD Temp = 47.87   PL Temp = 48.23
+Wed Aug 12 05:30:24 2026 : LPD Temp = 47.50   FPD Temp = 48.74   PL Temp = 47.25
+Wed Aug 12 05:30:30 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:30:30 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:30:30 2026 : Received packet for encoding : packetID = 54 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:30:30 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:30:30 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:30:32 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:30:32 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:30:32 2026 : Received packet for encoding : packetID = 55 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:30:32 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:30:32 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:30:34 2026 : LPD Temp = 48.11   FPD Temp = 48.63   PL Temp = 48.29
+Wed Aug 12 05:30:34 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:30:34 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:30:34 2026 : Received packet for encoding : packetID = 56 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:30:34 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:30:34 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:30:44 2026 : LPD Temp = 48.57   FPD Temp = 48.26   PL Temp = 46.77
+Wed Aug 12 05:30:54 2026 : LPD Temp = 47.89   FPD Temp = 48.51   PL Temp = 47.31
+Wed Aug 12 05:31:04 2026 : LPD Temp = 48.65   FPD Temp = 48.59   PL Temp = 47.48
+Wed Aug 12 05:31:14 2026 : LPD Temp = 48.56   FPD Temp = 48.81   PL Temp = 47.52
+Wed Aug 12 05:31:24 2026 : LPD Temp = 48.65   FPD Temp = 48.99   PL Temp = 47.58
+Wed Aug 12 05:31:34 2026 : LPD Temp = 48.14   FPD Temp = 48.62   PL Temp = 48.14
+Wed Aug 12 05:31:35 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:31:35 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:31:35 2026 : Received packet for encoding : packetID = 57 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:31:35 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:31:35 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:31:37 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:31:37 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:31:37 2026 : Received packet for encoding : packetID = 58 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:31:37 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:31:37 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:31:39 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:31:39 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:31:39 2026 : Received packet for encoding : packetID = 59 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:31:39 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:31:39 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:31:44 2026 : LPD Temp = 47.98   FPD Temp = 49.12   PL Temp = 47.36
+Wed Aug 12 05:31:54 2026 : LPD Temp = 48.06   FPD Temp = 49.35   PL Temp = 47.67
+Wed Aug 12 05:32:04 2026 : LPD Temp = 47.73   FPD Temp = 48.40   PL Temp = 47.06
+Wed Aug 12 05:32:14 2026 : LPD Temp = 47.55   FPD Temp = 48.11   PL Temp = 48.03
+Wed Aug 12 05:32:24 2026 : LPD Temp = 46.75   FPD Temp = 48.04   PL Temp = 47.16
+Wed Aug 12 05:32:34 2026 : LPD Temp = 48.93   FPD Temp = 48.62   PL Temp = 46.80
+Wed Aug 12 05:32:38 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:32:38 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:32:38 2026 : Received packet for encoding : packetID = 60 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:32:38 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:32:38 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:32:40 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:32:40 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:32:40 2026 : Received packet for encoding : packetID = 61 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:32:40 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:32:40 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:32:42 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:32:42 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:32:42 2026 : Received packet for encoding : packetID = 62 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:32:42 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:32:42 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:32:44 2026 : LPD Temp = 48.21   FPD Temp = 48.79   PL Temp = 46.99
+Wed Aug 12 05:32:54 2026 : LPD Temp = 47.55   FPD Temp = 49.27   PL Temp = 46.19
+Wed Aug 12 05:33:04 2026 : LPD Temp = 47.56   FPD Temp = 48.35   PL Temp = 47.78
+Wed Aug 12 05:33:14 2026 : LPD Temp = 47.69   FPD Temp = 49.13   PL Temp = 48.17
+Wed Aug 12 05:33:24 2026 : LPD Temp = 47.83   FPD Temp = 48.39   PL Temp = 48.09
+Wed Aug 12 05:33:34 2026 : LPD Temp = 46.75   FPD Temp = 48.84   PL Temp = 48.39
+Wed Aug 12 05:33:44 2026 : LPD Temp = 48.11   FPD Temp = 48.74   PL Temp = 46.30
+Wed Aug 12 05:33:54 2026 : LPD Temp = 47.59   FPD Temp = 47.34   PL Temp = 45.68
+Wed Aug 12 05:34:04 2026 : LPD Temp = 48.06   FPD Temp = 48.40   PL Temp = 46.80
+Wed Aug 12 05:34:14 2026 : LPD Temp = 47.39   FPD Temp = 49.18   PL Temp = 46.47
+Wed Aug 12 05:34:24 2026 : LPD Temp = 48.17   FPD Temp = 49.66   PL Temp = 45.74
+Wed Aug 12 05:34:34 2026 : LPD Temp = 48.37   FPD Temp = 48.46   PL Temp = 47.83
+Wed Aug 12 05:34:44 2026 : LPD Temp = 47.25   FPD Temp = 48.03   PL Temp = 46.85
+Wed Aug 12 05:34:54 2026 : LPD Temp = 47.84   FPD Temp = 47.87   PL Temp = 46.74
+Wed Aug 12 05:35:04 2026 : LPD Temp = 48.63   FPD Temp = 48.20   PL Temp = 46.32
+Wed Aug 12 05:35:09 2026 : Received Control packet, control type = 10
+Wed Aug 12 05:35:09 2026 : Received Transmit Level COMMAND
+Wed Aug 12 05:35:09 2026 : Setting TX power level mode to fixed, Xmit level to 30.00
+Wed Aug 12 05:35:09 2026 : Received Control packet, control type = 10
+Wed Aug 12 05:35:09 2026 : Received SETTXRXFREQ command
+Wed Aug 12 05:35:09 2026 : Setting TX/RX freq to 421000000
+Wed Aug 12 05:35:09 2026 : Setting TX freq = 421000000.00
+Wed Aug 12 05:35:09 2026 : Setting RX freq = 421000000.00
+Wed Aug 12 05:35:09 2026 : Extended the payload length from 90 to 128
+Wed Aug 12 05:35:09 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:35:09 2026 : Received packet for encoding : packetID = 65 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 90 bytes
+Wed Aug 12 05:35:09 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:35:09 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:35:09 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:35:09 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:35:09 2026 : Received packet for encoding : packetID = 66 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:35:09 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:35:09 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:35:14 2026 : LPD Temp = 46.97   FPD Temp = 47.69   PL Temp = 47.27
+Wed Aug 12 05:35:24 2026 : LPD Temp = 48.77   FPD Temp = 48.28   PL Temp = 47.03
+Wed Aug 12 05:35:34 2026 : LPD Temp = 48.28   FPD Temp = 46.80   PL Temp = 47.78
+Wed Aug 12 05:35:44 2026 : LPD Temp = 48.01   FPD Temp = 47.98   PL Temp = 48.01
+Wed Aug 12 05:35:54 2026 : LPD Temp = 47.42   FPD Temp = 48.62   PL Temp = 46.21
+Wed Aug 12 05:36:04 2026 : LPD Temp = 48.23   FPD Temp = 49.01   PL Temp = 46.88
+Wed Aug 12 05:36:14 2026 : LPD Temp = 47.16   FPD Temp = 47.56   PL Temp = 46.52
+Wed Aug 12 05:36:24 2026 : LPD Temp = 48.42   FPD Temp = 46.89   PL Temp = 45.91
+Wed Aug 12 05:36:34 2026 : LPD Temp = 47.69   FPD Temp = 47.95   PL Temp = 46.96
+Wed Aug 12 05:36:44 2026 : LPD Temp = 48.15   FPD Temp = 47.67   PL Temp = 46.30
+Wed Aug 12 05:36:54 2026 : LPD Temp = 47.17   FPD Temp = 47.70   PL Temp = 46.49
+Wed Aug 12 05:37:04 2026 : LPD Temp = 47.00   FPD Temp = 48.14   PL Temp = 47.95
+Wed Aug 12 05:37:07 2026 : Received Control packet, control type = 10
+Wed Aug 12 05:37:07 2026 : Received Transmit Level COMMAND
+Wed Aug 12 05:37:07 2026 : Setting TX power level mode to fixed, Xmit level to 30.00
+Wed Aug 12 05:37:07 2026 : Received Control packet, control type = 10
+Wed Aug 12 05:37:07 2026 : Received SETTXRXFREQ command
+Wed Aug 12 05:37:07 2026 : Setting TX/RX freq to 421000000
+Wed Aug 12 05:37:07 2026 : Setting TX freq = 421000000.00
+Wed Aug 12 05:37:07 2026 : Setting RX freq = 421000000.00
+Wed Aug 12 05:37:07 2026 : Extended the payload length from 90 to 128
+Wed Aug 12 05:37:07 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:37:07 2026 : Received packet for encoding : packetID = 69 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 90 bytes
+Wed Aug 12 05:37:07 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:37:07 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:37:08 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:37:08 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:37:08 2026 : Received packet for encoding : packetID = 70 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:37:08 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:37:08 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:37:14 2026 : LPD Temp = 48.73   FPD Temp = 47.38   PL Temp = 46.52
+Wed Aug 12 05:37:24 2026 : LPD Temp = 48.15   FPD Temp = 48.99   PL Temp = 46.85
+Wed Aug 12 05:37:34 2026 : LPD Temp = 47.30   FPD Temp = 47.53   PL Temp = 46.04
+Wed Aug 12 05:37:44 2026 : LPD Temp = 47.79   FPD Temp = 49.16   PL Temp = 46.71
+Wed Aug 12 05:37:54 2026 : LPD Temp = 47.86   FPD Temp = 48.39   PL Temp = 46.40
+Wed Aug 12 05:38:04 2026 : LPD Temp = 47.56   FPD Temp = 48.11   PL Temp = 47.53
+Wed Aug 12 05:38:13 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:38:13 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:38:13 2026 : Received packet for encoding : packetID = 71 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:38:13 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:38:13 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:38:14 2026 : LPD Temp = 47.39   FPD Temp = 48.26   PL Temp = 46.92
+Wed Aug 12 05:38:24 2026 : LPD Temp = 47.83   FPD Temp = 47.86   PL Temp = 47.67
+Wed Aug 12 05:38:34 2026 : LPD Temp = 48.17   FPD Temp = 49.60   PL Temp = 47.33
+Wed Aug 12 05:38:44 2026 : LPD Temp = 47.95   FPD Temp = 48.74   PL Temp = 47.25
+Wed Aug 12 05:38:54 2026 : LPD Temp = 48.84   FPD Temp = 48.42   PL Temp = 47.79
+Wed Aug 12 05:39:04 2026 : LPD Temp = 47.89   FPD Temp = 49.72   PL Temp = 47.06
+Wed Aug 12 05:39:14 2026 : LPD Temp = 49.47   FPD Temp = 50.06   PL Temp = 47.00
+Wed Aug 12 05:39:14 2026 : Extended the payload length from 95 to 128
+Wed Aug 12 05:39:14 2026 : TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+Wed Aug 12 05:39:14 2026 : Received packet for encoding : packetID = 72 chdesc = 22 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 95 bytes
+Wed Aug 12 05:39:14 2026 : symbol count (I/Q Pairs) after postamble = 368, sample count = 736, encoded Len = 46, BCH Val = 0x02eb 
+Wed Aug 12 05:39:14 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Wed Aug 12 05:39:24 2026 : LPD Temp = 48.00   FPD Temp = 49.16   PL Temp = 48.93
+Wed Aug 12 05:39:34 2026 : LPD Temp = 48.56   FPD Temp = 48.43   PL Temp = 48.40
+Wed Aug 12 05:39:44 2026 : LPD Temp = 48.34   FPD Temp = 49.77   PL Temp = 48.90
+Wed Aug 12 05:39:54 2026 : LPD Temp = 47.48   FPD Temp = 49.92   PL Temp = 48.31
+Wed Aug 12 05:40:04 2026 : LPD Temp = 49.47   FPD Temp = 49.88   PL Temp = 49.26
+Wed Aug 12 05:40:14 2026 : LPD Temp = 48.67   FPD Temp = 50.31   PL Temp = 47.89
+Wed Aug 12 05:40:24 2026 : LPD Temp = 49.78   FPD Temp = 49.30   PL Temp = 48.51
+Wed Aug 12 05:40:34 2026 : LPD Temp = 49.02   FPD Temp = 49.61   PL Temp = 47.48
+Wed Aug 12 05:40:44 2026 : LPD Temp = 47.75   FPD Temp = 50.11   PL Temp = 48.31
+Wed Aug 12 05:40:54 2026 : LPD Temp = 48.31   FPD Temp = 49.54   PL Temp = 49.27
+Wed Aug 12 05:41:04 2026 : LPD Temp = 49.89   FPD Temp = 49.74   PL Temp = 47.76
+Wed Aug 12 05:41:14 2026 : LPD Temp = 49.04   FPD Temp = 50.41   PL Temp = 47.93
+Wed Aug 12 05:41:24 2026 : LPD Temp = 50.59   FPD Temp = 50.25   PL Temp = 48.37
+Wed Aug 12 05:41:34 2026 : LPD Temp = 48.96   FPD Temp = 49.68   PL Temp = 48.76
+Wed Aug 12 05:41:44 2026 : LPD Temp = 50.19   FPD Temp = 51.00   PL Temp = 48.48
+Wed Aug 12 05:41:54 2026 : LPD Temp = 49.08   FPD Temp = 49.33   PL Temp = 49.40
+Wed Aug 12 05:42:04 2026 : LPD Temp = 49.01   FPD Temp = 49.99   PL Temp = 47.61
+Wed Aug 12 05:42:14 2026 : LPD Temp = 48.23   FPD Temp = 49.15   PL Temp = 49.01
+Wed Aug 12 05:42:24 2026 : LPD Temp = 49.68   FPD Temp = 49.04   PL Temp = 47.93
+Wed Aug 12 05:42:34 2026 : LPD Temp = 48.77   FPD Temp = 49.05   PL Temp = 47.56
+Wed Aug 12 05:42:44 2026 : LPD Temp = 49.52   FPD Temp = 50.24   PL Temp = 48.45
+Wed Aug 12 05:42:54 2026 : LPD Temp = 47.93   FPD Temp = 49.04   PL Temp = 47.45
+Wed Aug 12 05:43:04 2026 : LPD Temp = 48.12   FPD Temp = 49.30   PL Temp = 47.98
+Wed Aug 12 05:43:14 2026 : LPD Temp = 48.17   FPD Temp = 49.96   PL Temp = 47.56
+Wed Aug 12 05:43:24 2026 : LPD Temp = 48.26   FPD Temp = 48.54   PL Temp = 48.35
+Wed Aug 12 05:43:34 2026 : LPD Temp = 49.01   FPD Temp = 49.50   PL Temp = 47.39
+Wed Aug 12 05:43:44 2026 : LPD Temp = 48.11   FPD Temp = 48.07   PL Temp = 47.72
+Wed Aug 12 05:43:54 2026 : LPD Temp = 48.37   FPD Temp = 49.32   PL Temp = 48.70
+Wed Aug 12 05:44:04 2026 : LPD Temp = 48.59   FPD Temp = 48.81   PL Temp = 47.61
+Wed Aug 12 05:44:14 2026 : LPD Temp = 47.93   FPD Temp = 50.08   PL Temp = 48.26
+Wed Aug 12 05:44:24 2026 : LPD Temp = 49.26   FPD Temp = 49.16   PL Temp = 47.31
+Wed Aug 12 05:44:34 2026 : LPD Temp = 49.91   FPD Temp = 48.81   PL Temp = 48.45
+Wed Aug 12 05:44:44 2026 : LPD Temp = 48.70   FPD Temp = 48.94   PL Temp = 47.98
+Wed Aug 12 05:44:54 2026 : LPD Temp = 49.04   FPD Temp = 49.72   PL Temp = 47.27
+Wed Aug 12 05:45:04 2026 : LPD Temp = 48.79   FPD Temp = 48.63   PL Temp = 47.25
+Wed Aug 12 05:45:14 2026 : LPD Temp = 49.05   FPD Temp = 49.18   PL Temp = 47.05
+Wed Aug 12 05:45:24 2026 : LPD Temp = 48.14   FPD Temp = 48.45   PL Temp = 47.90
+Wed Aug 12 05:45:34 2026 : LPD Temp = 48.43   FPD Temp = 49.54   PL Temp = 48.82
+Wed Aug 12 05:45:44 2026 : LPD Temp = 48.42   FPD Temp = 48.60   PL Temp = 47.05
+Wed Aug 12 05:45:54 2026 : LPD Temp = 46.99   FPD Temp = 47.95   PL Temp = 46.21
+Wed Aug 12 05:46:04 2026 : LPD Temp = 48.43   FPD Temp = 48.43   PL Temp = 46.68
+Wed Aug 12 05:46:14 2026 : LPD Temp = 48.62   FPD Temp = 48.31   PL Temp = 47.11
+Wed Aug 12 05:46:24 2026 : LPD Temp = 47.11   FPD Temp = 48.46   PL Temp = 47.83
+Wed Aug 12 05:46:34 2026 : LPD Temp = 48.98   FPD Temp = 48.35   PL Temp = 47.83
+Wed Aug 12 05:46:44 2026 : LPD Temp = 47.83   FPD Temp = 49.44   PL Temp = 47.47
+Wed Aug 12 05:46:54 2026 : LPD Temp = 48.63   FPD Temp = 48.73   PL Temp = 46.78
+Wed Aug 12 05:47:04 2026 : LPD Temp = 47.84   FPD Temp = 48.26   PL Temp = 48.57
+Wed Aug 12 05:47:14 2026 : LPD Temp = 47.87   FPD Temp = 48.40   PL Temp = 47.48
+Wed Aug 12 05:47:24 2026 : LPD Temp = 48.63   FPD Temp = 50.13   PL Temp = 46.71
+Wed Aug 12 05:47:34 2026 : LPD Temp = 49.52   FPD Temp = 49.05   PL Temp = 47.58
+Wed Aug 12 05:47:44 2026 : LPD Temp = 47.72   FPD Temp = 48.43   PL Temp = 47.50
+Wed Aug 12 05:47:54 2026 : LPD Temp = 48.32   FPD Temp = 49.22   PL Temp = 46.97
+Wed Aug 12 05:48:04 2026 : LPD Temp = 48.18   FPD Temp = 49.55   PL Temp = 47.56
+Wed Aug 12 05:48:14 2026 : LPD Temp = 48.51   FPD Temp = 48.98   PL Temp = 47.31
+Wed Aug 12 05:48:24 2026 : LPD Temp = 47.30   FPD Temp = 48.46   PL Temp = 47.03
+Wed Aug 12 05:48:34 2026 : LPD Temp = 47.86   FPD Temp = 49.01   PL Temp = 46.71
+Wed Aug 12 05:48:44 2026 : LPD Temp = 48.18   FPD Temp = 48.94   PL Temp = 47.05
+Wed Aug 12 05:48:54 2026 : LPD Temp = 47.87   FPD Temp = 49.27   PL Temp = 46.97
+Wed Aug 12 05:49:04 2026 : LPD Temp = 48.06   FPD Temp = 49.16   PL Temp = 47.17
+Wed Aug 12 05:49:14 2026 : LPD Temp = 47.87   FPD Temp = 48.32   PL Temp = 48.29
+Wed Aug 12 05:49:24 2026 : LPD Temp = 47.61   FPD Temp = 47.47   PL Temp = 46.85
+Wed Aug 12 05:49:34 2026 : LPD Temp = 49.05   FPD Temp = 48.71   PL Temp = 46.43
+Wed Aug 12 05:49:44 2026 : LPD Temp = 47.92   FPD Temp = 48.67   PL Temp = 47.11

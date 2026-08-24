@@ -1,0 +1,211 @@
+"""tests/test_htrouter.py"""
+
+from pathlib import Path
+
+from parser.htrouter import parse_htrouter_log, is_htrouter_log
+from api.routes.parse import _detect_format
+
+FIXTURE_DIR = Path(__file__).parent / "fixtures"
+FIXTURE = FIXTURE_DIR / "htrouter_sample.log"          # zero-transmit session, 447 snapshots
+FIXTURE2 = FIXTURE_DIR / "htrouter_sample2.log"         # active-transmit session, 1984 snapshots
+EDGE_FIXTURE = FIXTURE_DIR / "htrouter_edge_cases.log"
+
+
+def _content(name: str) -> str:
+    return (FIXTURE_DIR / name).read_text(encoding="utf-8")
+
+
+# ── Real sample fixtures ────────────────────────────────────────────────────────
+
+def test_log_format():
+    r = parse_htrouter_log(FIXTURE)
+    assert r.log_format == "htrouter"
+
+
+def test_content_detection():
+    assert is_htrouter_log(_content("htrouter_sample.log")) is True
+    assert is_htrouter_log(_content("htrouter_sample2.log")) is True
+
+
+def test_detect_format_routes_to_htrouter():
+    assert _detect_format("ht-router.log", _content("htrouter_sample.log")) == "htrouter"
+
+
+def test_content_detection_rejects_unrelated_content():
+    assert is_htrouter_log("just some random text with no stat keys\n") is False
+
+
+def test_snapshot_grouping_not_flat_per_line():
+    """The core requirement: ~20 lines per snapshot become ONE record, not 20."""
+    r = parse_htrouter_log(FIXTURE)
+    hr = r.htrouter_result
+    # 447 snapshots from a file with thousands of matching lines confirms
+    # grouping happened rather than one record per line.
+    assert len(hr.stat_snapshots) == 447
+    assert hr.stat_snapshots[0].input_subframe_count is not None
+    assert hr.stat_snapshots[0].connected is not None
+
+
+def test_two_real_files_have_different_snapshot_schemas():
+    """Sample 1 never transmitted — these fields must be absent (None), not
+    zero, distinguishing 'never happened' from 'happened zero times'."""
+    hr1 = parse_htrouter_log(FIXTURE).htrouter_result
+    assert all(s.output_modem_xmit_failed is None for s in hr1.stat_snapshots)
+    assert all(s.output_overhead is None for s in hr1.stat_snapshots)
+
+    hr2 = parse_htrouter_log(FIXTURE2).htrouter_result
+    assert any(s.output_modem_xmit_failed is not None for s in hr2.stat_snapshots)
+
+
+def test_cumulative_counter_last_value_not_sum():
+    """Critical correctness case: these are cumulative session counters.
+    Summing across 1984 snapshots would wildly overcount; the real answer
+    (verified against raw grep of the file) is the last value: 59."""
+    hr = parse_htrouter_log(FIXTURE2).htrouter_result
+    assert hr.total_modem_xmit_failed == 59
+    assert hr.total_timeouts == 4
+
+
+def test_router_and_modem_pid_extracted():
+    hr = parse_htrouter_log(FIXTURE2).htrouter_result
+    assert hr.router_pid == 568
+    assert hr.modem_pid == 580
+
+
+def test_udp_sockets_captured():
+    hr = parse_htrouter_log(FIXTURE2).htrouter_result
+    assert "0.0.0.0:27348" in hr.udp_sockets
+    assert len(hr.udp_sockets) == 6
+
+
+def test_socket_warnings_counted():
+    hr = parse_htrouter_log(FIXTURE2).htrouter_result
+    assert hr.socket_warning_count == 15
+
+
+def test_protocol_messages_input_and_output_both_captured():
+    """udp input and udp output use different line formats — both must be
+    captured, not just one."""
+    hr = parse_htrouter_log(FIXTURE).htrouter_result
+    by_dir = {}
+    for p in hr.protocol_messages:
+        by_dir[p.io_direction] = by_dir.get(p.io_direction, 0) + 1
+    assert by_dir["input"] == 1858
+    assert by_dir["output"] == 7432
+    # input messages carry a peer, output messages don't
+    input_msg = next(p for p in hr.protocol_messages if p.io_direction == "input")
+    output_msg = next(p for p in hr.protocol_messages if p.io_direction == "output")
+    assert input_msg.peer is not None
+    assert output_msg.peer is None
+
+
+def test_protocol_messages_absent_in_other_file():
+    """Sample 2 genuinely has zero udp input/output lines — must be 0, not
+    a parsing failure."""
+    hr = parse_htrouter_log(FIXTURE2).htrouter_result
+    assert len(hr.protocol_messages) == 0
+
+
+def test_forward_events_captured():
+    hr = parse_htrouter_log(FIXTURE).htrouter_result
+    assert len(hr.forward_events) == 892
+    assert hr.forward_events[0].request_type in (43, 48)
+
+
+def test_transmissions_captured():
+    hr = parse_htrouter_log(FIXTURE2).htrouter_result
+    assert len(hr.transmissions) == 59
+    assert hr.transmissions[0].transmission_id == 8
+    assert hr.transmissions[0].duration_ns == 578420
+
+
+def test_no_unclassified_residual_lines():
+    """Every discrete event type actually observed in both real files must be
+    tallied somewhere — no silent '_other' catch-all firing on real content."""
+    hr1 = parse_htrouter_log(FIXTURE).htrouter_result
+    hr2 = parse_htrouter_log(FIXTURE2).htrouter_result
+    assert "_other" not in hr1.unparsed_event_counts
+    assert "_other" not in hr2.unparsed_event_counts
+
+
+def test_unparsed_events_tallied_by_type():
+    hr = parse_htrouter_log(FIXTURE).htrouter_result
+    assert hr.unparsed_event_counts.get("clinfo") == 3716
+    assert hr.unparsed_event_counts.get("bcast_hub_forward") == 88
+
+
+def test_untimestamped_startup_lines_counted():
+    hr = parse_htrouter_log(FIXTURE2).htrouter_result
+    assert hr.untimestamped_line_count > 0
+
+
+def test_data_limitations_surfaced():
+    r = parse_htrouter_log(FIXTURE2)
+    assert any("us_warn" in e or "socket warning" in e for e in r.parse_errors)
+    assert any("not yet structurally parsed" in e for e in r.parse_errors)
+
+
+# ── Edge cases (synthetic fixture) ─────────────────────────────────────────────
+
+def test_edge_detection():
+    assert is_htrouter_log(_content("htrouter_edge_cases.log")) is True
+
+
+def test_edge_pids_extracted():
+    hr = parse_htrouter_log(EDGE_FIXTURE).htrouter_result
+    assert hr.router_pid == 999
+    assert hr.modem_pid == 111
+
+
+def test_partial_snapshot_discarded_on_reopen():
+    """A snapshot in progress when 'reopened log file' fires must be
+    discarded entirely, not merged into the next snapshot after the reopen."""
+    hr = parse_htrouter_log(EDGE_FIXTURE).htrouter_result
+    # The discarded partial snapshot had subframe_count=77 — that value must
+    # not appear anywhere in the final snapshot list.
+    assert all(s.input_subframe_count != 77 for s in hr.stat_snapshots)
+
+
+def test_rotation_marker_recorded():
+    hr = parse_htrouter_log(EDGE_FIXTURE).htrouter_result
+    assert len(hr.rotation_markers) == 1
+
+
+def test_three_snapshots_first_second_and_trailing():
+    hr = parse_htrouter_log(EDGE_FIXTURE).htrouter_result
+    assert len(hr.stat_snapshots) == 3
+    assert hr.stat_snapshots[0].connected is True
+    assert hr.stat_snapshots[1].connected is False
+    # Trailing snapshot at EOF has no closing 'connected' line
+    assert hr.stat_snapshots[2].connected is None
+
+
+def test_trailing_incomplete_snapshot_still_captured():
+    """A file that ends mid-block is still real data — must be kept, not
+    silently discarded just because it never saw a 'connected' line."""
+    hr = parse_htrouter_log(EDGE_FIXTURE).htrouter_result
+    trailing = hr.stat_snapshots[-1]
+    assert trailing.input_subframe_count == 2
+    assert trailing.output_total_bytes == 500
+
+
+def test_edge_socket_warning_counted():
+    hr = parse_htrouter_log(EDGE_FIXTURE).htrouter_result
+    assert hr.socket_warning_count == 1
+
+
+# ── Malformed input handling ───────────────────────────────────────────────────
+
+def test_missing_file_returns_error(tmp_path):
+    r = parse_htrouter_log(tmp_path / "nonexistent.log")
+    assert len(r.parse_errors) > 0
+    assert r.htrouter_result is None
+
+
+def test_empty_file_returns_no_data_gracefully(tmp_path):
+    empty_file = tmp_path / "empty.log"
+    empty_file.write_text("")
+    r = parse_htrouter_log(empty_file)
+    assert r.log_format == "htrouter"
+    assert r.htrouter_result.stat_snapshots == []
+    assert r.session_start == ""

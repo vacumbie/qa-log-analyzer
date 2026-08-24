@@ -119,33 +119,46 @@ are the intended source of truth — keep them in sync with the code.
 
 ## Supported log formats
 
-Five formats, auto-detected by `_detect_format()` in `api/routes/parse.py`.
+Seven formats, auto-detected by `_detect_format()` in `api/routes/parse.py`.
 **Detection order matters** — fw_log runs first because its bracket pattern
 `[digits-digits, MODULE, LEVEL]` is highly distinctive and cannot match any of
-the other four. relay_manager must precede rsdk because both contain
-`AndroidBleRadio` lines; relay_manager has additional markers that distinguish
-it. `diagnostic` is always the catch-all fallback.
+the other formats. ht-modem and ht-router run next — also highly distinctive
+(ctime prefix + modem markers; stat-counter key vocabulary, respectively) —
+before the remaining four. relay_manager must precede rsdk because both
+contain `AndroidBleRadio` lines; relay_manager has additional markers that
+distinguish it. `diagnostic` is always the catch-all fallback.
 
 | Priority | Key | Parser | Source |
 |----------|-----|--------|--------|
 | 1 | `fw_log` | `parser/fw_log.py` | goTenna relay radio firmware (UART/USB debug) |
-| 2 | `atak` | `parser/atak.py` | Android ATAK plug-in |
-| 3 | `relay_manager` | `parser/relay_manager.py` | Android logcat, `com.gotenna.relaymanager` |
-| 4 | `rsdk` | `parser/rsdk.py` | iOS/Android SDK logs |
-| 5 | `diagnostic` | `parser/diagnostic.py` | goTenna Pro+ app export (fallback) |
+| 2 | `htmodem` | `parser/htmodem.py` | Next-gen radio — ht-modem (SDR/RF layer) |
+| 3 | `htrouter` | `parser/htrouter.py` | Next-gen radio — ht-router (network/link layer) |
+| 4 | `atak` | `parser/atak.py` | Android ATAK plug-in |
+| 5 | `relay_manager` | `parser/relay_manager.py` | Android logcat, `com.gotenna.relaymanager` |
+| 6 | `rsdk` | `parser/rsdk.py` | iOS/Android SDK logs |
+| 7 | `diagnostic` | `parser/diagnostic.py` | goTenna Pro+ app export (fallback) |
 
 Every parser returns a `ParseResult` from `parser/models.py`. The API and
 UI only depend on that shape — never import parser internals into routes or
 UI components.
 
-**Two more formats in design (not yet implemented, no detection priority
-assigned):** `ht-modem` and `ht-router` — a next-gen radio platform
-(SDR/FPGA, distinct hardware from the goTenna Pro+ radio the five formats
-above cover). Full requirements are drafted in `docs/parsing-requirements.md`
-and `docs/log-field-definitions.md` (Formats 5–6); no `parser/htmodem.py` or
-`parser/htrouter.py` exists yet. **New UI rule that will apply once built:**
-these two get a visually separate tab group, not just another dimmed/badged
-tab in the existing row — see `docs/ui-requirements.md` Tabs section intro.
+**ht-modem / ht-router status:** parsers, models, detection, API
+serialization, and tests are done (25 + 27 tests against real samples and
+synthetic edge cases). **No UI tab exists yet** — `base["htmodem"]` /
+`base["htrouter"]` are reachable via the API but nothing in `App.jsx` renders
+them. Full requirements in `docs/parsing-requirements.md` and
+`docs/log-field-definitions.md` (Formats 5–6). **New UI rule that will apply
+once the tab is built:** these two get a visually separate tab group, not
+just another dimmed/badged tab in the existing row — see
+`docs/ui-requirements.md` Tabs section intro.
+
+Two things worth knowing about the router parser specifically: its periodic
+stat-snapshot fields are **cumulative session-lifetime counters, not
+per-interval deltas** — a "total" is the last snapshot's value, never a sum
+across snapshots (see `RouterStatSnapshot` docstring in `models.py`). And its
+two real sample files have genuinely different snapshot schemas — one
+session never transmitted, so several `output.*` fields are absent (not
+zero) throughout.
 
 ---
 
@@ -414,8 +427,8 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | ATAK `action` GET/SET conflation | ✅ Done (2026-08-04) — both actions are still stored (dropping GETs would lose real observations); the UI splits on `action` so SET attempts, GET queries, mode polls, and mode change cmds are counted and labelled separately. Verified against the real MESMER log: 28 Frequency cmds = 16 SET + 12 GET; 2,028 mode records = 2,016 polls + 12 change cmds |
 | Rename `AtakFrequencySetAttempt`/`AtakRadioModeQuery` (they hold both actions) | ⏳ Deferred — ~69 references incl. the two serialized keys, tests, and docs; pure churn for no behavior change. Docstrings state what the fields actually hold |
 | `_CSV_TYPES` entry or JSON-only note for the two new ATAK tables | ⏳ Pending — decision not yet recorded in `api/routes/export.py` |
-| Next-Gen Radio — `ht-modem` format (SDR/RF layer: TX packets, CSMA drops, LPD/FPD/PL thermal) | Pending — requirements drafted 2026-08-24, no parser yet |
-| Next-Gen Radio — `ht-router` format (network/link layer: periodic stat snapshots, connection state, spawns ht-modem) | Pending — requirements drafted 2026-08-24, no parser yet; snapshot retention-vs-downsampling strategy undecided |
+| Next-Gen Radio — `ht-modem` format (SDR/RF layer: TX packets, CSMA drops, LPD/FPD/PL thermal) | ✅ Parser done (2026-08-24) — 25 tests; no UI tab yet |
+| Next-Gen Radio — `ht-router` format (network/link layer: periodic stat snapshots, connection state, spawns ht-modem) | ✅ Parser done (2026-08-24) — 27 tests, snapshot retention decided (keep all, defer trimming to UI's existing time-window slider); no UI tab yet |
 
 ---
 
