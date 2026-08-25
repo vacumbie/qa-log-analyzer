@@ -123,10 +123,13 @@ are the intended source of truth — keep them in sync with the code.
 
 ## Supported log formats
 
-Six formats, auto-detected by `_detect_format()` in `api/routes/parse.py`.
+Eight formats, auto-detected by `_detect_format()` in `api/routes/parse.py`.
 **Detection order matters** — fw_log runs first because its bracket pattern
 `[digits-digits, MODULE, LEVEL]` is highly distinctive and cannot match any of
-the others. `tak` must precede `atak`: both are JSON, but their field sets are
+the others. ht-modem and ht-router run next — also highly distinctive (ctime
+prefix + modem markers; stat-counter key vocabulary, respectively) and both
+plaintext, so they cannot collide with either JSON format below and sitting
+ahead of `tak` is harmless. `tak` must precede `atak`: both are JSON, but their field sets are
 disjoint (`receivedAt`/`nodeType`/`category` vs
 `logId`/`connectionState`/`atakVersion`). That disjointness covers the *content*
 check only — the `tak` **filename** hints are substring tests, and `tak_server`
@@ -142,11 +145,13 @@ markers that distinguish it. `diagnostic` is always the catch-all fallback.
 | Priority | Key | Parser | Source |
 |----------|-----|--------|--------|
 | 1 | `fw_log` | `parser/fw_log.py` | goTenna relay radio firmware (UART/USB debug) |
-| 2 | `tak` | `parser/tak.py` | TAK server CoT event stream (JSON export) |
-| 3 | `atak` | `parser/atak.py` | Android ATAK plug-in |
-| 4 | `relay_manager` | `parser/relay_manager.py` | Android logcat, `com.gotenna.relaymanager` |
-| 5 | `rsdk` | `parser/rsdk.py` | iOS/Android SDK logs |
-| 6 | `diagnostic` | `parser/diagnostic.py` | goTenna Pro+ app export (fallback) |
+| 2 | `htmodem` | `parser/htmodem.py` | Next-gen radio — ht-modem (SDR/RF layer) |
+| 3 | `htrouter` | `parser/htrouter.py` | Next-gen radio — ht-router (network/link layer) |
+| 4 | `tak` | `parser/tak.py` | TAK server CoT event stream (JSON export) |
+| 5 | `atak` | `parser/atak.py` | Android ATAK plug-in |
+| 6 | `relay_manager` | `parser/relay_manager.py` | Android logcat, `com.gotenna.relaymanager` |
+| 7 | `rsdk` | `parser/rsdk.py` | iOS/Android SDK logs |
+| 8 | `diagnostic` | `parser/diagnostic.py` | goTenna Pro+ app export (fallback) |
 
 `tak` is the only **server-side** source — the server's view of many clients,
 not a device describing itself. It carries no radio identity (no serial, GID or
@@ -156,6 +161,24 @@ the Health Score and contributes nothing to the device KPI row.
 Every parser returns a `ParseResult` from `parser/models.py`. The API and
 UI only depend on that shape — never import parser internals into routes or
 UI components.
+
+**ht-modem / ht-router status:** complete through the UI — parsers, models,
+detection, API serialization, tests (25 + 27 against real samples and synthetic
+edge cases), and the `HtModemTab` / `HtRouterTab` pair with five `CHART_MAP`
+entries. Full requirements in `docs/parsing-requirements.md` and
+`docs/log-field-definitions.md` (Formats 5–6). **The UI rule these follow:**
+they live in a visually separate tab group — own row, own `--accent2` accent,
+own section label — not another dimmed/badged tab in the existing row; see
+`docs/ui-requirements.md` Tabs section intro. Still outstanding: no `_CSV_TYPES`
+entry or JSON-only note in `api/routes/export.py` for either format.
+
+Two things worth knowing about the router parser specifically: its periodic
+stat-snapshot fields are **cumulative session-lifetime counters, not
+per-interval deltas** — a "total" is the last snapshot's value, never a sum
+across snapshots (see `RouterStatSnapshot` docstring in `models.py`). And its
+two real sample files have genuinely different snapshot schemas — one
+session never transmitted, so several `output.*` fields are absent (not
+zero) throughout.
 
 ---
 
@@ -471,6 +494,9 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | P8: TAK server receipt latency / clock skew | ⏳ Open — defined 2026-08-24 in `docs/parsing-requirements.md` so the `parser/tak.py` and `models.py` references resolve |
 | `extractTimeRange` matches `stale=` inside embedded CoT XML — 18-min session reads as a 25-hour slider range | ✅ Done — XML attribute timestamps (`attr="…"` / escaped `attr=\"…\"`) are stripped before the wall-clock scan; JSON members (`"time"`, `"receivedAt"`) are kept. The `=` is what tells them apart. Sample now reads 0.30 h (its true 18.2 min) instead of 24.24 h. **Hour-snapping is unchanged** — a sub-hour session still occupies one bucket, which is slider design, not this bug |
 | TAK map legend lists unplotted callsigns; `PALETTE` collides past 10 callsigns | ⏳ Pending — cosmetic; `colorByCallsign` iterates all events rather than plotted ones |
+| Next-Gen Radio — `ht-modem` format (SDR/RF layer: TX packets, CSMA drops, LPD/FPD/PL thermal) | ✅ Done (2026-08-25) — parser (25 tests) + HT-Modem tab, live-verified |
+| Next-Gen Radio — `ht-router` format (network/link layer: periodic stat snapshots, connection state, spawns ht-modem) | ✅ Done (2026-08-25) — parser (27 tests) + HT-Router tab, live-verified; snapshot retention decided (keep all, defer trimming to UI's existing time-window slider) |
+| Next-Gen Radio — `_CSV_TYPES` entry or JSON-only note for `htmodem`/`htrouter` | ⏳ Pending — decision not yet recorded in `api/routes/export.py` |
 
 ---
 

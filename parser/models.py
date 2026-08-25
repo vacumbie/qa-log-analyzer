@@ -701,6 +701,248 @@ class FwLogResult:
     skipped_debug:        int = 0
 
 
+# ── Next-Gen Radio — ht-modem primitives ───────────────────────────────────────
+# See docs/parsing-requirements.md "Next-Gen Radio — Modem (ht-modem) Log" and
+# docs/log-field-definitions.md Format 5 for the full field-by-field spec this
+# mirrors.
+
+@dataclass
+class HtModemTxPacket:
+    """
+    One TX packet lifecycle, from `Received packet for encoding` through its
+    outcome (queued or dropped).
+
+    `dropped` is True when a `CSMA QUEUE is Full, dropping packet` line
+    followed this packet's encoding block — that line carries no packetID of
+    its own, so it is attributed to the most recently seen packet (see
+    htmodem.py parsing notes). If a drop line appears with no preceding
+    packet in the current session, it is counted in
+    `HtModemResult.orphaned_drop_count` instead of fabricating a packet.
+    """
+    packet_id:      int
+    timestamp:      str = ""
+    chdesc:         int = 0
+    mod_mode:       int = 0
+    fec_mode:       int = 0
+    priority:       int = 0
+    local_flag:     int = 0
+    data_length:    int = 0
+    symbol_count:   Optional[int] = None
+    sample_count:   Optional[int] = None
+    encoded_len:    Optional[int] = None
+    bch_val:        str = ""
+    payload_extended_from: Optional[int] = None
+    payload_extended_to:   Optional[int] = None
+    queued:         Optional[bool] = None   # True = added to xmit queue, False = dropped, None = outcome not seen
+    numinqueue:     Optional[int] = None
+
+
+@dataclass
+class HtModemFreqChange:
+    """One TX or RX frequency change command."""
+    timestamp: str
+    direction: str   # "TX" | "RX"
+    hz:        int
+
+
+@dataclass
+class HtModemPowerChange:
+    """One TX power level change command."""
+    timestamp:  str
+    xmit_level: float
+
+
+@dataclass
+class HtModemTempSample:
+    """One periodic Zynq MPSoC thermal reading. Raw log is Celsius."""
+    timestamp: str
+    lpd_c:     float
+    fpd_c:     float
+    pl_c:      float
+
+
+@dataclass
+class HtModemResult:
+    """All structured data extracted from a next-gen radio modem (ht-modem) log."""
+    fpga_version_ok:        Optional[bool] = None   # None if the check line never appears
+    libiio_version:         str = ""
+    filter_bank:            str = ""
+    filter_range_mhz:       str = ""
+    ad936x_init_error_count: int = 0   # collapsed count of the init-failure cascade, not per-line
+    iio_devices_found:      Optional[int] = None   # "Found <N> devices" seen before AD5592 init
+    ad5592_devices_found:   Optional[int] = None   # "Found <N> devices" seen after "Starting AD5592 init"
+    clock_cal_offset:       Optional[int] = None
+    si4460_cal_offset:      Optional[int] = None
+    gpsd_connect_error:     bool = False
+    freq_changes:           list[HtModemFreqChange] = field(default_factory=list)
+    power_changes:          list[HtModemPowerChange] = field(default_factory=list)
+    tx_packets:             list[HtModemTxPacket] = field(default_factory=list)
+    orphaned_drop_count:    int = 0   # CSMA-full drop lines with no preceding TX packet block
+    temp_samples:           list[HtModemTempSample] = field(default_factory=list)
+    total_lines:            int = 0
+
+    @property
+    def dropped_count(self) -> int:
+        return sum(1 for p in self.tx_packets if p.queued is False) + self.orphaned_drop_count
+
+    @property
+    def queued_count(self) -> int:
+        return sum(1 for p in self.tx_packets if p.queued is True)
+
+
+# ── Next-Gen Radio — ht-router primitives ──────────────────────────────────────
+# See docs/parsing-requirements.md "Next-Gen Radio — Router (ht-router) Log" and
+# docs/log-field-definitions.md Format 6 for the full field-by-field spec this
+# mirrors. Two real captures showed genuinely different snapshot schemas (one
+# session had zero modem-transmit activity, so several output.* fields never
+# appeared at all) — every snapshot field below is Optional for that reason,
+# not just defensive style.
+
+@dataclass
+class RouterHistogramBucket:
+    """One bucket from an output.overhead[N] / output.xmit_completion[N] line."""
+    bucket:      int
+    range_min:   int
+    range_max:   int
+    count:       int
+
+
+@dataclass
+class RouterStatSnapshot:
+    """
+    One periodic counter snapshot — the ~20 input.*/output.* lines emitted
+    together roughly every 10s are grouped into ONE of these, never stored as
+    flat per-line records (that was the core parsing requirement for this
+    format). `connected` is the line that terminates and finalizes a group.
+
+    Retention: every snapshot in the file is kept here — no downsampling at
+    parse time. Trimming/aggregation for display is a UI/API-layer decision,
+    deliberately deferred past this parser.
+
+    IMPORTANT: every numeric field here is a cumulative session-lifetime
+    counter, not a per-interval delta — verified strictly non-decreasing
+    across real samples (e.g. output.modem_xmit_failed climbs 1, 1, 2, 2, ...
+    to a final 59, matching the ht-modem's 59 dropped packets exactly). A
+    per-interval rate must be computed as the difference between consecutive
+    snapshots, never summed across all snapshots.
+    """
+    timestamp:                str = ""   # timestamp of the first line in this group
+    input_subframe_count:     Optional[int] = None
+    input_traffic_ag:         Optional[int] = None
+    input_ctl:                Optional[int] = None
+    input_sts:                Optional[int] = None
+    input_total_frames:       Optional[int] = None
+    input_total_bytes:        Optional[int] = None
+    input_total_m2m:          Optional[int] = None
+    input_m2m_xmit:           Optional[int] = None
+    input_m2m_control:        Optional[int] = None
+    input_m2m_recv:           Optional[int] = None
+    input_m2m_status:         Optional[int] = None
+    input_m2m_xmit_status:    Optional[int] = None
+    output_traffic_ag_ok:     Optional[int] = None
+    output_traffic_ag_fail:   Optional[int] = None
+    output_ctl_ok:            Optional[int] = None
+    output_ctl_fail:          Optional[int] = None
+    output_sts_ok:            Optional[int] = None
+    output_sts_fail:          Optional[int] = None
+    output_aggregation_subframes: Optional[int] = None
+    output_aggregation_frames:    Optional[int] = None
+    output_total_bytes:       Optional[int] = None
+    # Only present in sessions with actual modem-transmit activity — absent
+    # entirely (not zero) in a session that never transmitted.
+    output_time_outs:         Optional[int] = None
+    output_bottom_timed_out:  Optional[int] = None
+    output_modem_xmit_failed: Optional[int] = None
+    output_tap_frames:        Optional[int] = None
+    output_overhead:          Optional[RouterHistogramBucket] = None
+    output_xmit_completion:   Optional[RouterHistogramBucket] = None
+    connected:                Optional[bool] = None
+
+
+@dataclass
+class RouterProtocolMessage:
+    """One client-hdr/mgt-hdr protocol message (from a udp input/output line)."""
+    timestamp:   str
+    io_direction: str   # "input" | "output" — which way through the router
+    udp_idx:     int
+    peer:        Optional[str]   # only present on "udp input" lines
+    dst:         str
+    src:         str
+    version:     int
+    msg_type:    str
+    direction:   str   # "request" | "response" — the protocol message's own direction
+
+
+@dataclass
+class RouterForwardEvent:
+    """One mgt_hub_forward.548 send/skip event."""
+    timestamp:     str
+    request_type:  int
+    dst:           str
+    sent_count:    int
+    skipped_count: int
+
+
+@dataclass
+class RouterTransmission:
+    """One 'transmission <N> finished in <ns> ns' completion event — the
+    router-side counterpart to the modem's TX packet lifecycle."""
+    timestamp:    str
+    transmission_id: int
+    duration_ns:  int
+
+
+@dataclass
+class HtRouterResult:
+    """All structured data extracted from a next-gen radio router (ht-router) log."""
+    session_start:       str = ""
+    router_pid:          Optional[int] = None
+    modem_pid:           Optional[int] = None
+    udp_sockets:         list[str] = field(default_factory=list)
+    socket_warning_count: int = 0
+    aghub_init_addr:     str = ""
+    rotation_markers:    list[str] = field(default_factory=list)
+    protocol_messages:   list[RouterProtocolMessage] = field(default_factory=list)
+    forward_events:      list[RouterForwardEvent] = field(default_factory=list)
+    stat_snapshots:      list[RouterStatSnapshot] = field(default_factory=list)
+    transmissions:       list[RouterTransmission] = field(default_factory=list)
+    # Discrete event types seen but not deep-parsed (clinfo, bcast_hub_forward,
+    # echo_info, etc.) — tallied by type so nothing is silently dropped.
+    unparsed_event_counts: dict[str, int] = field(default_factory=dict)
+    untimestamped_line_count: int = 0
+    total_lines:         int = 0
+
+    @property
+    def connected_count(self) -> int:
+        return sum(1 for s in self.stat_snapshots if s.connected is True)
+
+    @property
+    def disconnected_count(self) -> int:
+        return sum(1 for s in self.stat_snapshots if s.connected is False)
+
+    @property
+    def total_modem_xmit_failed(self) -> Optional[int]:
+        """
+        All input.*/output.* snapshot fields are cumulative session-lifetime
+        counters (verified: strictly non-decreasing across the real samples),
+        NOT per-interval deltas. The correct "total" is therefore the last
+        snapshot's value, not a sum across snapshots — summing would multiply
+        the true count by roughly the number of snapshots taken.
+        """
+        for s in reversed(self.stat_snapshots):
+            if s.output_modem_xmit_failed is not None:
+                return s.output_modem_xmit_failed
+        return None
+
+    @property
+    def total_timeouts(self) -> Optional[int]:
+        """See total_modem_xmit_failed — same cumulative-counter caveat."""
+        for s in reversed(self.stat_snapshots):
+            if s.output_time_outs is not None:
+                return s.output_time_outs
+        return None
+
+
 # ── Top-level parse result ────────────────────────────────────────────────────
 
 @dataclass
@@ -711,7 +953,7 @@ class ParseResult:
     this shape.
     """
     # Metadata
-    log_format: str = ""        # "diagnostic" | "rsdk" | "atak" | "relay_manager" | "fw_log"
+    log_format: str = ""        # "diagnostic" | "rsdk" | "atak" | "relay_manager" | "fw_log" | "htmodem" | "htrouter"
     source_filename: str = ""
     parse_errors: list[str] = field(default_factory=list)
 
@@ -763,6 +1005,12 @@ class ParseResult:
 
     # Firmware log only
     fw_log_result: Optional[FwLogResult] = None
+
+    # Next-Gen Radio — ht-modem only
+    htmodem_result: Optional[HtModemResult] = None
+
+    # Next-Gen Radio — ht-router only
+    htrouter_result: Optional[HtRouterResult] = None
 
     # Relay Manager only
     relay_health_requests: list[RelayHealthRequest] = field(default_factory=list)

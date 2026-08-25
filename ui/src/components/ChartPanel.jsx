@@ -18,7 +18,12 @@ const TT_CFG  = {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function shortLabel(r) {
-  if (r.device?.callsign) return r.device.callsign
+  // Parsers with no identity field to read write the literal string 'unknown'
+  // (next-gen radio logs carry no callsign at all). That means "absent", not a
+  // device named "unknown" — fall through to the filename so two logs charted
+  // together don't get identical series labels.
+  const callsign = r.device?.callsign
+  if (callsign && callsign !== 'unknown') return callsign
   const name = r.source_filename || ''
   // ATAK: diagnostic_ATAK_CALLSIGN_GID_...
   const atakMatch = name.match(/diagnostic_ATAK_([^_]+)_/)
@@ -28,7 +33,7 @@ function shortLabel(r) {
   if (namedMatch) return namedMatch[1]
   // Fallback to radio serial if available — more useful than truncated filename
   if (r.device?.radio_serial) return r.device.radio_serial.slice(-6)
-  return name.replace(/\.[^.]+$/, '').slice(0, 12)
+  return name.replace(/\.[^.]+$/, '').slice(0, 20)
 }
 
 function downsample(arr, max = 50) {
@@ -993,6 +998,124 @@ function TakLatency({ results }) {
   )
 }
 
+// ── ht-modem only ─────────────────────────────────────────────────────────────
+
+function HtModemTempOverTime({ results }) {
+  const hm = results.filter(r => r.log_format === 'htmodem')
+  if (!hm.length) return <NoData message="No ht-modem logs loaded" />
+  const adapted = hm.map(r => ({ ...r, _temp: r.htmodem?.temp_samples_f || [] }))
+  const { labels, getDataset } = buildRelativeTimeSeries(adapted, '_temp', 15)
+  if (!labels.length) return <NoData message="No temperature samples in this log" />
+
+  const metrics = [['lpd_f', '#00d4ff', 'LPD'], ['fpd_f', '#ff6b35', 'FPD'], ['pl_f', '#ffd166', 'PL']]
+  const datasets = hm.flatMap((r, i) => metrics.map(([key, color, name]) => ({
+    label: hm.length > 1 ? `${shortLabel(r)} — ${name}` : `${name} Temp (°F)`,
+    data: getDataset(adapted[i], key),
+    borderColor: color, backgroundColor: color + '22',
+    tension: 0.3, pointRadius: 0, borderWidth: 2,
+  })))
+
+  return (
+    <ChartCard title="Next-Gen Modem Thermal (LPD / FPD / PL)" subtitle="Zynq MPSoC thermal zones · °F">
+      <Line data={{ labels, datasets }} options={LINE_OPTS({ scales: makeScales(undefined, undefined, '°F') })} />
+    </ChartCard>
+  )
+}
+
+function HtModemTxOutcomes({ results }) {
+  const hm = results.filter(r => r.log_format === 'htmodem')
+  if (!hm.length) return <NoData message="No ht-modem logs loaded" />
+  const labels = hm.map(r => shortLabel(r))
+  return (
+    <ChartCard title="TX Packet Outcomes" subtitle="Queued for transmission vs. dropped (CSMA queue full)" height={200}>
+      <Bar
+        data={{ labels, datasets: [
+          { label: 'Queued',  data: hm.map(r => r.summary?.queued_count || 0),  backgroundColor: '#00e5a0cc', borderRadius: 4 },
+          { label: 'Dropped', data: hm.map(r => r.summary?.dropped_count || 0), backgroundColor: '#ff4757cc', borderRadius: 4 },
+        ]}}
+        options={{ ...BAR_OPTS(), scales: makeScales(0, undefined) }}
+      />
+    </ChartCard>
+  )
+}
+
+// ── ht-router only ────────────────────────────────────────────────────────────
+
+function HtRouterConnectedTimeline({ results }) {
+  const hr = results.filter(r => r.log_format === 'htrouter')
+  if (!hr.length) return <NoData message="No ht-router logs loaded" />
+  const adapted = hr.map(r => ({
+    ...r,
+    _snaps: (r.htrouter?.stat_snapshots || []).map(s => ({
+      timestamp: s.timestamp,
+      connected_num: s.connected === true ? 1 : s.connected === false ? 0 : null,
+    })),
+  }))
+  const { labels, getDataset } = buildRelativeTimeSeries(adapted, '_snaps', 20)
+  if (!labels.length) return <NoData message="No stat snapshots in this log" />
+
+  const datasets = hr.map((r, i) => ({
+    label: shortLabel(r), data: getDataset(adapted[i], 'connected_num'),
+    borderColor: '#22d3ee', backgroundColor: '#22d3ee22',
+    stepped: true, pointRadius: 0, borderWidth: 2,
+  }))
+  return (
+    <ChartCard title="Connection State Over Time" subtitle="Derived from periodic stat snapshots">
+      <Line data={{ labels, datasets }} options={LINE_OPTS({
+        scales: {
+          x: { grid: { color: GRID }, ticks: { ...TICK, maxTicksLimit: 10, maxRotation: 45 } },
+          y: { min: 0, max: 1, grid: { color: GRID }, ticks: { ...TICK, stepSize: 1, callback: v => v === 1 ? 'Connected' : 'Disconnected' } },
+        },
+      })} />
+    </ChartCard>
+  )
+}
+
+function HtRouterCumulativeFailures({ results }) {
+  const hr = results.filter(r => r.log_format === 'htrouter')
+  if (!hr.length) return <NoData message="No ht-router logs loaded" />
+  const adapted = hr.map(r => ({ ...r, _snaps: r.htrouter?.stat_snapshots || [] }))
+  const { labels, getDataset } = buildRelativeTimeSeries(adapted, '_snaps', 20)
+  if (!labels.length) return <NoData message="No stat snapshots in this log" />
+
+  const metrics = [['output_modem_xmit_failed', '#ff4757', 'Modem TX Failures'], ['output_time_outs', '#ffd166', 'Timeouts']]
+  const datasets = hr.flatMap((r, i) => metrics.map(([key, color, name]) => ({
+    label: hr.length > 1 ? `${shortLabel(r)} — ${name}` : name,
+    data: getDataset(adapted[i], key),
+    borderColor: color, backgroundColor: color + '22',
+    tension: 0.2, pointRadius: 0, borderWidth: 2,
+  })))
+  return (
+    <ChartCard
+      title="Cumulative Modem TX Failures & Timeouts"
+      subtitle="Session-lifetime running totals (not per-interval counts) — a flat stretch means no new failures in that period, not zero total"
+    >
+      <Line data={{ labels, datasets }} options={LINE_OPTS({ scales: makeScales(0, undefined) })} />
+    </ChartCard>
+  )
+}
+
+function HtRouterMsgTypes({ results }) {
+  const hr = results.filter(r => r.log_format === 'htrouter')
+  if (!hr.length) return <NoData message="No ht-router logs loaded" />
+  // Message type vocabulary is an open set — build categories from what's
+  // actually present rather than a hardcoded list (same pattern as the ATAK
+  // Modes tab's dynamically-built status lists).
+  const allTypes = [...new Set(hr.flatMap(r => Object.keys(r.summary?.msg_type_counts || {})))]
+  if (!allTypes.length) return <NoData message="No protocol messages in this log" />
+  const labels = hr.map(r => shortLabel(r))
+  const datasets = allTypes.map((type, i) => ({
+    label: type,
+    data: hr.map(r => r.summary?.msg_type_counts?.[type] || 0),
+    backgroundColor: PALETTE[i % PALETTE.length] + 'cc', borderRadius: 4,
+  }))
+  return (
+    <ChartCard title="Protocol Message Types" subtitle="client-hdr / mgt-hdr message type breakdown">
+      <Bar data={{ labels, datasets }} options={{ ...BAR_OPTS(), scales: makeScales(0, undefined) }} />
+    </ChartCard>
+  )
+}
+
 // ── Registry ──────────────────────────────────────────────────────────────────
 
 const CHART_MAP = {
@@ -1017,6 +1140,11 @@ const CHART_MAP = {
   atak_connection_state: AtakConnectionState,
   atak_events_timeline:  AtakEventsTimeline,
   tak_latency:           TakLatency,
+  htmodem_temp:          HtModemTempOverTime,
+  htmodem_outcomes:      HtModemTxOutcomes,
+  htrouter_connected:    HtRouterConnectedTimeline,
+  htrouter_cumulative_failures: HtRouterCumulativeFailures,
+  htrouter_msg_types:    HtRouterMsgTypes,
 }
 
 export default function ChartPanel({ results, selectedPoints }) {

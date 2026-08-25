@@ -13,6 +13,8 @@
 - [Pro+ Application](#pro-application)
 - [Relay Health Manager](#relay-health-manager)
 - [Relay Firmware (UART/USB Debug) Log](#relay-firmware-uartusb-debug-log)
+- [Next-Gen Radio — Modem (ht-modem) Log](#next-gen-radio--modem-ht-modem-log)
+- [Next-Gen Radio — Router (ht-router) Log](#next-gen-radio--router-ht-router-log)
 - [TAK Server (CoT Event Stream)](#tak-server-cot-event-stream)
 - [Shared Output Requirements](#shared-output-requirements)
 - [Known Limitations](#known-limitations)
@@ -30,9 +32,11 @@ The log parsing tool accepts logs from the following goTenna applications:
 | 3 | Relay Health Manager | Android *(iOS TBD)* | Android logcat (`com.gotenna.relaymanager`) | `parser/relay_manager.py` ✅ |
 | 4 | goTenna Pro+ diagnostic export | iOS, Android | Block-format diagnostic export | `parser/diagnostic.py` ✅ *(detection fallback)* |
 | 5 | Relay radio firmware | Relay radio | UART/USB serial debug console | `parser/fw_log.py` ✅ *(detection priority 1)* |
-| 6 | TAK server | Server-side (not a device) | CoT event stream, pre-parsed JSON export | `parser/tak.py` ✅ *(detection priority 2, ahead of ATAK)* |
+| 6 | Next-Gen Radio — Modem | Next-gen radio (SDR/FPGA) | `ht-modem` process log, ctime-style stdout capture | `parser/htmodem.py` ✅ *(detection priority 2)* |
+| 7 | Next-Gen Radio — Router | Next-gen radio (SDR/FPGA) | `ht-router` process log, ISO8601 stdout capture | `parser/htrouter.py` ✅ *(detection priority 3)* |
+| 8 | TAK server | Server-side (not a device) | CoT event stream, pre-parsed JSON export | `parser/tak.py` ✅ *(detection priority 4, immediately ahead of ATAK)* |
 
-> **Format 6 is the first server-side source.** Every other format is a device or
+> **Format 8 is the first server-side source.** Every other format is a device or
 > app log describing one radio's own view. A TAK stream is the server's view of
 > many devices at once, so it carries no radio identity (no serial, no GID, no
 > firmware version) and contributes nothing to the Health Score.
@@ -1032,6 +1036,278 @@ catch-all `diagnostic` parser never sees these because fw_log is checked first.
 
 ---
 
+## Next-Gen Radio — Modem (ht-modem) Log
+
+> **Status: requirements drafted, not yet implemented.** No parser, models, or
+> tests exist yet for this format. This section is the spec to build against.
+
+### Overview
+
+The next-gen radio platform (SDR/FPGA-based, distinct hardware from the
+existing goTenna Pro+ NRF52/Si4460/PA radio) runs two independent processes,
+each with its own log: `ht-modem` (this section) and `ht-router` (next
+section). `ht-modem` is the SDR/RF layer — it owns the AD936X transceiver
+(via LIBIIO) and the Zynq FPGA/PL fabric, and is responsible for TX/RX
+encoding, frequency and power control, and radio-side channel access
+(CSMA). Parsed by a new `parser/htmodem.py` (not yet created). This is a
+**separate format from `ht-router`**, not a sub-type — the two processes have
+unrelated timestamp styles, message shapes, and failure modes, and a QA
+engineer investigating the modem does not want router noise mixed in (see
+UI requirement below).
+
+### Log Format
+
+```
+<ctime timestamp> : <message>
+```
+
+Example: `Wed Aug 12 05:13:23 2026 : FPGA Version is correct`
+
+- Timestamp is **wall-clock**, second precision, in the platform's local
+  `ctime()` format (`%a %b %d %H:%M:%S %Y`) — no timezone marker, no
+  milliseconds. This is a different style from every existing format's
+  timestamps and needs its own parse routine.
+- `<message>` is free text. Several message shapes recur often enough to
+  parse as structured fields (see below); everything else is retained only
+  as an unparsed line count.
+- The literal first line, `Start of log <ctime>`, marks session start and is
+  not itself a timestamped message line.
+
+### Detection
+
+Proposed: scan the first ~30 non-empty lines for the `<ctime> : ` prefix
+pattern combined with at least one of the modem-specific markers (`FPGA
+Version`, `AD936X`, `LIBIIO`, `ht-modem`). Needed to avoid colliding with
+`diagnostic`'s block format, which is also loosely timestamp-prefixed text.
+Exact priority ordering relative to the other five formats — including
+`ht-router` — to be finalized when the detector is implemented; likely
+early (high specificity, low collision risk), similar to `fw_log`.
+
+### Fields to Parse
+
+| Source line | Parsed into | Notes |
+|-------------|-------------|-------|
+| `Start of log <ctime>` | `session_start` | First line of the file |
+| `FPGA Version is correct` | `fpga_version_ok` (bool) | Absence of this line is itself notable |
+| `Setting filter bank to <name> <range>MHZ` | `filter_bank`, `filter_range_mhz` | |
+| `LIBIIO : version <v> detected` | `libiio_version` | |
+| `Found <N> devices` | `devices_found` | Appears more than once per session (IIO devices, then later AD5592 devices) — **last-seen-wins is wrong here**; needs a way to distinguish which init phase each occurrence belongs to |
+| `Could not find the AD936X PHY device` through the following `ERROR : problem setting/enabling …` run | `ad936x_init_errors[]` | **Hardware fault cascade** — when this fires, essentially every subsequent RF init step also errors (see Known Limitations). Surface as a single `parse_errors` entry with the count, not 20+ individual error rows |
+| `ERROR : problem setting RSSI mode` (repeats 5×) | counted, not itemized | De-duplicate identical repeated error lines rather than storing each occurrence |
+| `Setting clock calibration offset to <n>` | `clock_cal_offset` | |
+| `Read an SI4460 calibration offset of <n>` | `si4460_cal_offset` | Confirms this next-gen platform still carries a Si4460 alongside the AD936X — worth flagging, not assuming it's dead hardware from the old platform |
+| `Error connecting to gpsd` | `gpsd_connect_error` (bool) | |
+| `Setting RX freq = <hz>.00` / `Setting TX freq = <hz>.00` | `freq_changes[]` (`timestamp`, `direction`, `hz`) | Multiple per session as control commands arrive |
+| `Received Control packet, control type = <n>` | `control_packets[]` | `control type = 10` seen paired with both Transmit Level and SETTXRXFREQ commands in the sample — the control type alone does not disambiguate the command; the following line does |
+| `Setting TX power level mode to fixed, Xmit level to <n>.00` | `power_changes[]` (`timestamp`, `xmit_level`) | |
+| `Received packet for encoding : packetID = <n> chdesc = <n> modMode = <n> FECMode = <n> priority = <n> localFlag = <n> dataLength = <n> bytes` | `tx_packets[]` (`TxPacket`) | One per TX attempt |
+| `symbol count (I/Q Pairs) after postamble = <n>, sample count = <n>, encoded Len = <n>, BCH Val = 0x<hex>` | fields on the matching `TxPacket` (by adjacency — always the line immediately following `Received packet for encoding`) | |
+| `Added packet to xmit queue numinqueue = <n>` | `tx_packets[].queued` = True, `numinqueue` | |
+| `ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet` | `tx_packets[].queued` = False, `dropped_count` (+1) | **Packet-loss metric.** This line does not repeat the `packetID`, so it must be attributed to the most recent `Received packet for encoding` block, not parsed standalone |
+| `Extended the payload length from <a> to <b>` | `tx_packets[].payload_extended_from/to` | Precedes its packet's `Received packet for encoding` line |
+| `LPD Temp = <f>   FPD Temp = <f>   PL Temp = <f>` | `temp_samples[]` (`timestamp`, `lpd_c`, `fpd_c`, `pl_c`) | Periodic (~10s), Zynq MPSoC thermal zones — **Celsius in the raw log**, convert to °F per the project-wide temperature rule. `LPD`/`FPD`/`PL` are new sensor names, not the existing platform's `NRF52`/`Si4460`/`PA` — do not conflate in shared temperature-chart code |
+
+### Parsing Rules
+
+1. Timestamp parsing uses `ctime()` format, not ISO8601 — needs its own
+   regex/`strptime` distinct from every other format's timestamp handling.
+2. The AD936X init-failure cascade (a contiguous run of `ERROR : problem
+   ...` lines immediately following `Could not find the AD936X PHY device`)
+   is collapsed into one `parse_errors` entry with a count, not stored
+   line-by-line — mirrors how `fw_log.py` already collapses repeated
+   error/warn lines into `error_counts`/`warn_messages`.
+3. `CSMA QUEUE is Full, dropping packet` has no `packetID` of its own; it
+   must attach to the most recently seen `Received packet for encoding`
+   block. If a drop line appears with no preceding TX packet block in the
+   current session, log it as an orphaned drop rather than silently
+   dropping the drop-count itself.
+4. Temperatures are Celsius in the raw log; convert to Fahrenheit at parse
+   time or display time — follow whichever convention `fw_log.py`/existing
+   temp-chart code already uses so the two formats stay consistent.
+
+### Known Limitations — Next-Gen Radio Modem Log
+
+- **Not yet implemented.** No `parser/htmodem.py`, no `HtModemResult`
+  model, no tests, no fixtures beyond the one raw sample provided
+  (`ht-modem.log`).
+- **`Found <N> devices` is ambiguous per-occurrence** — appears at least
+  twice (IIO device enumeration, then AD5592 device enumeration) with no
+  distinguishing context beyond surrounding lines. A naive "last value
+  wins" parse would silently misattribute the count.
+- **Hardware-fault cascade produces ~20 near-duplicate error lines** in the
+  sample when the AD936X PHY device isn't found — this looks like two
+  dozen distinct problems but is really one root cause. Parsing rule 2
+  above addresses this, but needs validation against a *successful* init
+  (no AD936X failure) to confirm the parser doesn't assume the cascade
+  always happens.
+- **Single-fixture validation** — everything above is derived from one
+  session capture (`ht-modem.log`, ~40 minutes, Aug 12 2026). A second
+  real log — ideally one without the AD936X init failure — is needed
+  before this is considered proven.
+
+### Sample File Observations (ht-modem.log)
+
+- Session: `Wed Aug 12 05:13:23 2026` → last line `05:49:44 2026` (~36 min).
+- FPGA version check passes; AD936X PHY device **not found**, triggering
+  ~20 cascading `ERROR : problem …` lines through GPIO/AUXDAC/RSSI/channel
+  setup.
+- `gpsd` connection failed (`Error connecting to gpsd`).
+- Multiple TX/RX frequency changes (420 MHz → 421 MHz range) and power
+  level changes (30–34) via `Received Control packet, control type = 10`.
+- Numerous `CSMA QUEUE is Full, dropping packet` events — packet loss is
+  a recurring condition in this capture, not a one-off.
+- Temperature samples every ~10s for the full session; `LPD`/`FPD`/`PL`
+  all in the high-40s °C range, no anomalous readings observed.
+
+---
+
+## Next-Gen Radio — Router (ht-router) Log
+
+> **Status: requirements drafted, not yet implemented.** No parser, models, or
+> tests exist yet for this format. This section is the spec to build against.
+
+### Overview
+
+`ht-router` is the network/link-layer process on the same next-gen radio
+platform as `ht-modem` (see previous section) — it manages UDP-based
+client/management interfaces, forwards protocol messages between clients
+and the radio, and **spawns and monitors the `ht-modem` process itself**
+(`nb_modem_start: started ht-modem pid <n>`). Parsed by a new
+`parser/htrouter.py` (not yet created). Kept as a **separate format from
+`ht-modem`**, not a sub-type, for the same reason: different timestamp
+style, different message shapes, different failure modes, and a QA
+engineer diagnosing link-layer throughput issues does not want RF-layer
+init noise mixed in.
+
+### Log Format
+
+Two distinct line shapes appear interleaved in the same file:
+
+**1. Discrete protocol/event lines:**
+```
+<ISO8601 timestamp>Z: <message>
+```
+Example: `2026-08-12T05:13:23.447396Z: ag_warn @ aghub_init.401: created aghub_tick event, aghub 0x5595d0a700`
+
+**2. Periodic counter snapshot** — not one line, a **repeating block** of
+~20 individually timestamped lines emitted together roughly every 10
+seconds:
+```
+<ts>Z: input.subframe.count <n>
+<ts>Z: input.traffic[aggr_next_proto_ag] <n>
+<ts>Z: input.ctl <n>
+<ts>Z: input.sts <n>
+<ts>Z: input.total_frames <n>
+<ts>Z: input.total_bytes <n>
+<ts>Z: input.total_m2m <n>
+<ts>Z: input.m2m_by_type[m2m_type_xmit] <n>
+<ts>Z: input.m2m_by_type[m2m_type_control] <n>
+<ts>Z: input.m2m_by_type[m2m_type_recv] <n>
+<ts>Z: input.m2m_by_type[m2m_type_status] <n>
+<ts>Z: input.m2m_by_type[m2m_type_xmit_status] <n>
+<ts>Z: output.traffic[aggr_next_proto_ag].ok <n>
+<ts>Z: output.traffic[aggr_next_proto_ag].fail <n>
+<ts>Z: output.ctl.ok <n>
+<ts>Z: output.ctl.fail <n>
+<ts>Z: output.sts.ok <n>
+<ts>Z: output.sts.fail <n>
+<ts>Z: output.aggregation.subframes <n>
+<ts>Z: output.aggregation.frames <n>
+<ts>Z: output.total_bytes <n>
+<ts>Z: output.time_outs <n>
+<ts>Z: output.bottom.timed_out <n>
+<ts>Z: output.modem_xmit_failed <n>
+<ts>Z: output.overhead[N] ([min, max] bytes) <n>
+<ts>Z: output.xmit_completion[N] ([min, max] ms) <n>
+<ts>Z: connected <0|1>
+```
+
+- Timestamps are **ISO8601 with microseconds, `Z`-suffixed** (UTC) — the
+  same style as the TAK server format, unlike `ht-modem`'s `ctime` style.
+- `reopened log file` is a session/rotation boundary marker — the counters
+  reset to (or near) zero immediately after it. Treat as a new sub-session,
+  not a continuation, when computing rates.
+- Each snapshot's ~20 lines share the same or nearly the same timestamp
+  (microsecond drift between lines in a block); group by proximity, not
+  exact equality.
+
+### Detection
+
+Proposed: the `input.*`/`output.*` counter-key vocabulary (`input.total_m2m`,
+`output.modem_xmit_failed`, `connected`) is highly distinctive and should
+not collide with any other format's content. Filename convention
+(`ht-router*.log`) can serve as a secondary signal, mirroring how `tak`
+detection uses both content and a filename hint. Ordering relative to
+`ht-modem` detection needs both parsers to exist before it can be finalized
+— they must not falsely match each other's files.
+
+### Fields to Parse
+
+| Source line | Parsed into | Notes |
+|-------------|-------------|-------|
+| `Starting ht-router (<path>)...` / `ht-router started (pid <n>)` | `session_start`, `router_pid` | |
+| `nb_modem_start: started ht-modem pid <n>` | `modem_pid` | Confirms which `ht-modem` session (if also loaded) belongs to this router session — a potential cross-format correlation key, similar to `logId` in the ATAK/RSDK cross-format notes |
+| `local UDP socket <ip>:<port>` | `udp_sockets[]` | One per client-type interface at startup |
+| `us_warn @ udp_write.486: sendto: (22) Invalid argument` | `socket_warnings[]` | Repeats identically at startup in the sample (5×) — likely one per not-yet-connected socket; needs field confirmation |
+| `ag_warn @ aghub_init.401: created aghub_tick event, aghub <addr>` | `aghub_init_addr` | |
+| `client-hdr versflags version <n>, options <y/n>, next-proto <proto> \| mgt-hdr dst <addr>, src <addr>, version <n>, type <type>` | `protocol_messages[]` (`ProtocolMessage`) | `dst`/`src` are hex node addresses (`0x00000006` etc.) — same identity space as callsign/GID in other formats? Needs field confirmation against `log-field-definitions.md`'s identity model before assuming so |
+| `mgt_hub_forward.548: request type <n> for <addr>: sent to <n> client(s), skipped <n> with no session (an unstarted target sees nothing)` | `forward_events[]` | |
+| `reopened log file` | session boundary marker | See Log Format notes above |
+| `input.*` / `output.*` counter block | `stat_snapshots[]` (`RouterStatSnapshot`) | See Parsing Rules — this is the highest-volume, highest-design-risk part of this format |
+| `connected <0\|1>` | `stat_snapshots[].connected` (bool) | Final line of each snapshot block; also useful standalone as a connection-state timeline |
+
+### Parsing Rules
+
+1. **Snapshot blocks must be grouped, not treated as independent lines.**
+   Group consecutive `input.*`/`output.*`/`connected` lines (by timestamp
+   proximity, terminating at the `connected <0|1>` line) into one
+   `RouterStatSnapshot` record per group, not ~20 separate unrelated
+   records — otherwise the resulting series is 20× too many "events" and
+   loses the fact that they're one measurement.
+2. Given the file sizes involved (60k+ lines in the smaller sample), decide
+   **before implementation** whether every snapshot is retained or whether
+   downsampling/aggregation happens at parse time — this is a real
+   performance and payload-size question, not a stylistic one. Flag to
+   Valerie as an open decision, not something to default silently.
+3. `reopened log file` resets the counters; do not compute a delta or
+   rate across a reopen boundary as if it were continuous.
+4. `output.modem_xmit_failed` is the single clearest cross-reference point
+   to `ht-modem`'s `CSMA QUEUE is Full, dropping packet` — when both logs
+   are loaded together, a future correlation feature could compare these,
+   but that is out of scope for the initial parser.
+
+### Known Limitations — Next-Gen Radio Router Log
+
+- **Not yet implemented.** No `parser/htrouter.py`, no `RouterStatSnapshot`
+  model, no tests, no fixtures beyond the two raw samples provided.
+- **Snapshot volume is large and undesigned.** Two sample files run 61,716
+  and 24,312 lines; at ~20 lines per snapshot every ~10s, a single capture
+  can contain thousands of snapshot records. Storage/UI strategy (full
+  retention vs. downsampling) is an open decision — see Parsing Rule 2.
+- **Socket warning semantics unconfirmed** — `us_warn @ udp_write.486:
+  sendto: (22) Invalid argument` repeats identically 5× at startup with no
+  further context distinguishing which socket/interface each belongs to.
+- **`dst`/`src` address space unconfirmed** — whether protocol-message
+  `dst 0x00000006` / `src 0x00000004` map onto the same GID/callsign
+  identity model used elsewhere is not yet verified against real device
+  correlation data.
+- **Two-file validation, same capture window** — both provided samples
+  (`ht-router.log`, `ht-router__1_.log`) appear to be from related or
+  overlapping sessions (both start ~Aug 12 2026, 05:13). A capture from a
+  clearly distinct session/device would strengthen validation.
+
+### Sample File Observations (ht-router.log, ht-router__1_.log)
+
+- `ht-router__1_.log`: session start `2026-08-12T05:13:22Z`, spawns
+  `ht-modem` pid 580 within ~1 second of its own start. 61,716 lines.
+- `ht-router.log`: starts `2026-08-20T20:01:20Z` with an immediate
+  `reopened log file` as its first line — this sample begins mid-rotation,
+  not at process start. 24,312 lines.
+- `connected` toggles between `0` and `1` across both samples — a
+  connection-state timeline is directly derivable.
+- `output.modem_xmit_failed` is non-zero in observed snapshots, consistent
+  with the packet drops seen in the `ht-modem.log` sample from the same
+  window.
 ## TAK Server (CoT Event Stream)
 
 ### Overview
