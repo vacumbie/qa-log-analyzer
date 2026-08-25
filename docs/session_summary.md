@@ -253,6 +253,57 @@ pytest tests/test_atak.py -v  # single file verbose
 
 ## Most Recent Work (Last Few PRs)
 
+**2026-08-25 — Next-Gen Radio (`ht-modem` / `ht-router`): parsers committed, UI tab
+built and live-verified, three UI defects fixed. Branch `feature/next-gen-radio-docs`,
+2 commits pushed, PR not yet opened. pytest: 267 passed, 2 skipped.**
+
+```
+06eb52e docs: draft next-gen radio ht-modem and ht-router requirements
+09ab8e7 feat(parser): add ht-modem and ht-router parsers
+```
+
+The UI tab work (`App.jsx`, `ChartPanel.jsx`) is **still uncommitted** at time of writing.
+
+*What exists now:* `parser/htmodem.py` and `parser/htrouter.py` returning `ParseResult`,
+wired through `models.py` → `parser/__init__.py` → `_detect_format()` (priorities 2 and 3,
+ahead of `atak`) → `_result_to_dict()`. Detection order and the seven-format table are
+recorded in CLAUDE.md. 52 tests (25 modem + 27 router) over 5 fixtures.
+
+*UI:* `HtModemTab` and `HtRouterTab` in `App.jsx`, plus a **visually separate
+"⚡ Next-Gen Radio" tab group** — own row, own `--accent2` orange, own section label —
+satisfying the `ui-requirements.md` rule that these must not be another dimmed/badged
+entry in the main tab row. The group is hidden entirely until a matching log loads.
+5 new `CHART_MAP` entries: `htmodem_temp`, `htmodem_outcomes`, `htrouter_connected`,
+`htrouter_cumulative_failures`, `htrouter_msg_types`.
+
+*Live browser verification (Edge, real fixtures through the running stack)* — all KPIs
+and charts render real data; no JS errors (the only console 404 is `/favicon.ico`,
+pre-existing). Three defects were found and fixed:
+
+1. **Absent cumulative counters rendered as a green `0`.** `htrouter_sample.log` never
+   transmits, so `output_modem_xmit_failed` / `output_time_outs` are absent from all 447
+   snapshots and the API correctly returns `null` — but `(x || 0)` in the KPI reducers
+   collapsed that to a passing `0`. Now summed via `sumReported()`, which stays `null`
+   when no log carries the field, and the card shows `—` + "not reported in this log".
+   This was a direct violation of the "never replaced with zeros" rule.
+2. **A real `0` rendered as `—`** (the inverse). `socket_warning_count: 0` is a genuine
+   zero; `value={totalWarnings || '—'}` displayed it as no-data. Now `?? '—'`.
+3. **Every next-gen chart series was labelled `unknown`.** `shortLabel()` returned
+   `device.callsign` first, and these parsers write the literal string `"unknown"`
+   (no identity field exists in the logs). Now treated as absent so the filename
+   fallback is reached; that fallback widened 12→20 chars so `htrouter_sample` and
+   `htrouter_sample2` don't collide.
+
+*Known gap — fixture coverage is complementary, not complete:* `htrouter_sample.log` has
+9,290 protocol messages but **no** failure counters; `htrouter_sample2.log` has 59 TX
+failures / 4 timeouts but **zero** protocol messages. Neither file alone exercises all
+three router charts. The two real samples genuinely have different snapshot schemas —
+this is the data, not a parser bug.
+
+*Still open:* no `_CSV_TYPES` entry or JSON-only note in `api/routes/export.py` for
+`htmodem` / `htrouter` (step 9 of "Add a new log format"). The cumulative-failures chart
+renders empty axes rather than a `NoData` message when every value is null.
+
 **2026-08-04 — ATAK radio-command layer (Frequency commands, NetworkMode/TetherMode
 queries, `relayModeUpdated`) + full quality-gate pass. → PR #33 MERGED (`ffadd0b`),
 branch deleted. CI green: 215 passed, 2 skipped.**
