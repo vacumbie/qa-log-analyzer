@@ -24,6 +24,16 @@ const TABS = [
   { id:'fw-log',    label:'FW Log', fwOnly: true },
 ]
 
+// Next-Gen Radio tabs are a visually separate group in the tab bar (own row,
+// own accent color, own section label) rather than another dimmed/badged
+// entry mixed into TABS above — a deliberate UI requirement, not an oversight.
+// Hidden entirely (not just dimmed) until a matching log is loaded, same as
+// atakOnly tabs.
+const NEXTGEN_TABS = [
+  { id:'htmodem',  label:'HT-Modem',  htmodemOnly: true },
+  { id:'htrouter', label:'HT-Router', htrouterOnly: true },
+]
+
 // ── Shared sub-components ─────────────────────────────────────────────────────
 
 function EmptyTabState({ message, detail }) {
@@ -2380,6 +2390,98 @@ function SdkLogSummaryCard({ summary }) {
 }
 
 
+// ── Next-Gen Radio: ht-modem ──────────────────────────────────────────────────
+
+function HtModemTab({ results }) {
+  const hm = results.filter(r => r.log_format === 'htmodem')
+
+  const totalTx      = hm.reduce((n, r) => n + (r.summary?.tx_packet_count || 0), 0)
+  const totalQueued  = hm.reduce((n, r) => n + (r.summary?.queued_count || 0), 0)
+  const totalDropped = hm.reduce((n, r) => n + (r.summary?.dropped_count || 0), 0)
+  const anyAd936xFail = hm.some(r => (r.summary?.ad936x_init_error_count || 0) > 0)
+  const anyGpsdFail    = hm.some(r => r.summary?.gpsd_connect_error)
+  const peakTemps = hm.map(r => r.summary?.peak_pl_temp_f).filter(v => v != null)
+  const peakTemp  = peakTemps.length ? Math.max(...peakTemps) : null
+
+  return (
+    <div>
+      {hm.map((r, i) => <RelayLimitationBanner key={i} parseErrors={r.parse_errors} />)}
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+        <KpiCard label="FPGA Check" value={hm.every(r => r.summary?.fpga_version_ok) ? 'OK' : 'UNKNOWN/FAIL'}
+          color={hm.every(r => r.summary?.fpga_version_ok) ? '#00e5a0' : '#ffd166'} />
+        <KpiCard label="AD936X Init" value={anyAd936xFail ? 'FAILED' : 'OK'}
+          color={anyAd936xFail ? '#ff4757' : '#00e5a0'} sub={anyAd936xFail ? 'RF front end likely never initialized' : undefined} />
+        <KpiCard label="GPS (gpsd)" value={anyGpsdFail ? 'DISCONNECTED' : 'OK'}
+          color={anyGpsdFail ? '#ffd166' : '#00e5a0'} />
+        <KpiCard label="TX Packets" value={totalTx} color={C.accent} />
+        <KpiCard label="Queued" value={totalQueued} color="#00e5a0" />
+        <KpiCard label="Dropped" value={totalDropped} color={totalDropped ? '#ff4757' : C.muted}
+          sub={totalTx ? `${Math.round((totalDropped / totalTx) * 100)}% of TX packets` : undefined} />
+        <KpiCard label="Peak PL Temp" value={peakTemp != null ? `${peakTemp}°F` : '—'}
+          color={peakTemp != null && peakTemp >= 131 ? '#ff4757' : peakTemp != null && peakTemp >= 113 ? '#ffd166' : '#00e5a0'} />
+      </div>
+
+      <SectionHeader icon="🌡️" title="Thermal" sub="LPD / FPD / PL over session" />
+      <ChartPanel results={hm} selectedPoints={['htmodem_temp']} />
+
+      <SectionHeader icon="📡" title="TX Packet Outcomes" sub="Queued vs. dropped (CSMA queue full)" />
+      <ChartPanel results={hm} selectedPoints={['htmodem_outcomes']} />
+    </div>
+  )
+}
+
+// ── Next-Gen Radio: ht-router ─────────────────────────────────────────────────
+
+function HtRouterTab({ results }) {
+  const hr = results.filter(r => r.log_format === 'htrouter')
+
+  const totalSnaps   = hr.reduce((n, r) => n + (r.summary?.snapshot_count || 0), 0)
+  const totalMsgs    = hr.reduce((n, r) => n + (r.summary?.protocol_message_count || 0), 0)
+  // A counter no snapshot ever reported is absent, not zero — some sessions
+  // never transmit, so the whole output.* group is missing rather than 0. Sum
+  // only the logs that actually carry the field, and stay null when none do,
+  // so the card can show "—" instead of a passing green 0.
+  const sumReported = key => {
+    const reported = hr.map(r => r.summary?.[key]).filter(v => v != null)
+    return reported.length ? reported.reduce((n, v) => n + v, 0) : null
+  }
+  const totalXmitFail = sumReported('total_modem_xmit_failed')
+  const totalTimeouts = sumReported('total_timeouts')
+  const totalWarnings = sumReported('socket_warning_count')
+
+  return (
+    <div>
+      {hr.map((r, i) => <RelayLimitationBanner key={i} parseErrors={r.parse_errors} />)}
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+        <KpiCard label="Stat Snapshots" value={totalSnaps.toLocaleString()} color={C.accent} />
+        <KpiCard label="Modem PID" value={hr[0]?.summary?.modem_pid ?? '—'} color="#6366f1"
+          sub={hr[0]?.summary?.modem_pid != null ? 'cross-links to ht-modem log' : undefined} />
+        <KpiCard label="Modem TX Failures" value={totalXmitFail ?? '—'}
+          color={totalXmitFail == null ? C.muted : totalXmitFail ? '#ff4757' : '#00e5a0'}
+          sub={totalXmitFail == null ? 'not reported in this log' : 'session-lifetime total'} />
+        <KpiCard label="Timeouts" value={totalTimeouts ?? '—'}
+          color={totalTimeouts == null ? C.muted : totalTimeouts ? '#ffd166' : '#00e5a0'}
+          sub={totalTimeouts == null ? 'not reported in this log' : 'session-lifetime total'} />
+        <KpiCard label="Socket Warnings" value={totalWarnings ?? '—'}
+          color={totalWarnings == null ? C.muted : totalWarnings ? '#ffd166' : '#00e5a0'}
+          sub={totalWarnings == null ? 'not reported in this log' : undefined} />
+        <KpiCard label="Protocol Messages" value={totalMsgs.toLocaleString()} color={C.accent} />
+      </div>
+
+      <SectionHeader icon="🔌" title="Connection State" sub="Derived from periodic stat snapshots" />
+      <ChartPanel results={hr} selectedPoints={['htrouter_connected']} />
+
+      <SectionHeader icon="⚠️" title="Cumulative Failures" sub="Session-lifetime running totals" />
+      <ChartPanel results={hr} selectedPoints={['htrouter_cumulative_failures']} />
+
+      <SectionHeader icon="📨" title="Protocol Message Types" sub="client-hdr / mgt-hdr breakdown" />
+      <ChartPanel results={hr} selectedPoints={['htrouter_msg_types']} />
+    </div>
+  )
+}
+
 function AtakTab({ results }) {
   const atakResults = results.filter(r => r.log_format === 'atak')
   if (atakResults.length === 0) return <Note>No ATAK logs loaded. Upload an ATAK plug-in .log file to see this tab.</Note>
@@ -2718,6 +2820,14 @@ function TabContent({ tab, results }) {
       if (!results.some(r => r.log_format === 'fw_log'))
         return <EmptyTabState message="No Firmware Logs Uploaded" detail="Upload a UART/USB debug log from the goTenna relay radio to analyze firmware data." />
       return <FwLogTab results={results} />
+    case 'htmodem':
+      if (!results.some(r => r.log_format === 'htmodem'))
+        return <EmptyTabState message="No Next-Gen Modem Logs Uploaded" detail="Upload an ht-modem process log to analyze SDR/RF layer data." />
+      return <HtModemTab results={results} />
+    case 'htrouter':
+      if (!results.some(r => r.log_format === 'htrouter'))
+        return <EmptyTabState message="No Next-Gen Router Logs Uploaded" detail="Upload an ht-router process log to analyze network/link layer data." />
+      return <HtRouterTab results={results} />
     default:          return null
   }
 }
@@ -2872,6 +2982,16 @@ export default function App() {
       // SDK-error aggregate and is carried over whole below.
       const atakEvts  = (r.atak_events                 || []).filter(e => inWindow(e.timestamp))
 
+      // Next-Gen Radio — own arrays, own inWindow filtering
+      const htmodemTx    = (r.htmodem?.tx_packets    || []).filter(p => inWindow(p.timestamp))
+      const htmodemFreq  = (r.htmodem?.freq_changes  || []).filter(f => inWindow(f.timestamp))
+      const htmodemPower = (r.htmodem?.power_changes || []).filter(p => inWindow(p.timestamp))
+      const htmodemTemps = (r.htmodem?.temp_samples_f || []).filter(t => inWindow(t.timestamp))
+      const htrouterSnaps = (r.htrouter?.stat_snapshots    || []).filter(s => inWindow(s.timestamp))
+      const htrouterMsgs  = (r.htrouter?.protocol_messages || []).filter(m => inWindow(m.timestamp))
+      const htrouterFwd   = (r.htrouter?.forward_events    || []).filter(f => inWindow(f.timestamp))
+      const htrouterTx    = (r.htrouter?.transmissions     || []).filter(t => inWindow(t.timestamp))
+
       // Recompute summary fields that derive from the filtered arrays
       const hops     = msgs.map(m => m.hop_count).filter(Boolean)
       const temps    = samples.map(s => s.pa_temp_c).filter(v => v != null && v > 0)
@@ -2902,6 +3022,39 @@ export default function App() {
         session_count:    r.summary?.session_count,
         // BLE failures derive from the SDK-error aggregate — not time-windowable, carried over whole
         ble_fail_count:   r.summary?.ble_fail_count,
+      } : r.log_format === 'htmodem' ? {
+        fpga_version_ok:         r.summary?.fpga_version_ok,
+        libiio_version:          r.summary?.libiio_version,
+        ad936x_init_error_count: r.summary?.ad936x_init_error_count,
+        gpsd_connect_error:      r.summary?.gpsd_connect_error,
+        tx_packet_count:         htmodemTx.length,
+        queued_count:            htmodemTx.filter(p => p.queued === true).length,
+        dropped_count:           htmodemTx.filter(p => p.queued === false).length,
+        freq_change_count:       htmodemFreq.length,
+        power_change_count:      htmodemPower.length,
+        temp_sample_count:       htmodemTemps.length,
+        peak_pl_temp_f:          (vals => vals.length ? Math.max(...vals) : null)(htmodemTemps.map(t => t.pl_f)),
+      } : r.log_format === 'htrouter' ? {
+        router_pid:              r.summary?.router_pid,
+        modem_pid:               r.summary?.modem_pid,
+        snapshot_count:          htrouterSnaps.length,
+        connected_count:         htrouterSnaps.filter(s => s.connected === true).length,
+        disconnected_count:      htrouterSnaps.filter(s => s.connected === false).length,
+        // Cumulative session-lifetime counters — last value within the window,
+        // not a sum. See RouterStatSnapshot docstring (parser/models.py).
+        total_modem_xmit_failed: (vals => vals.length ? vals[vals.length - 1] : null)(
+          htrouterSnaps.map(s => s.output_modem_xmit_failed).filter(v => v != null)),
+        total_timeouts: (vals => vals.length ? vals[vals.length - 1] : null)(
+          htrouterSnaps.map(s => s.output_time_outs).filter(v => v != null)),
+        socket_warning_count:    r.summary?.socket_warning_count,
+        protocol_message_count:  htrouterMsgs.length,
+        msg_type_counts: htrouterMsgs.reduce((acc, m) => {
+          acc[m.msg_type] = (acc[m.msg_type] || 0) + 1
+          return acc
+        }, {}),
+        forward_event_count:     htrouterFwd.length,
+        transmission_count:      htrouterTx.length,
+        rotation_count:          r.summary?.rotation_count,
       } : {
         total_messages:     msgs.length,
         pli_count:          msgs.filter(m => m.message_type === 'location').length,
@@ -2943,6 +3096,23 @@ export default function App() {
         atak_events:                 atakEvts,
         atak_frequency_set_attempts: atakFreq,
         atak_radio_mode_queries:     atakModeQ,
+        // Next-Gen Radio nested objects — spread the original so static
+        // session-level fields (fpga_version_ok, router_pid, etc.) survive,
+        // then override just the windowable arrays.
+        htmodem: r.htmodem ? {
+          ...r.htmodem,
+          tx_packets:      htmodemTx,
+          freq_changes:    htmodemFreq,
+          power_changes:   htmodemPower,
+          temp_samples_f:  htmodemTemps,
+        } : r.htmodem,
+        htrouter: r.htrouter ? {
+          ...r.htrouter,
+          stat_snapshots:    htrouterSnaps,
+          protocol_messages: htrouterMsgs,
+          forward_events:    htrouterFwd,
+          transmissions:     htrouterTx,
+        } : r.htrouter,
         summary: { ...r.summary, ...recomputed },
       }
     })
@@ -2978,6 +3148,11 @@ export default function App() {
     // relay-health and fw-log are always visible — dimmed when no relevant log loaded
     return true
   })
+  const hasHtModem  = results.some(r => r.log_format === 'htmodem')
+  const hasHtRouter = results.some(r => r.log_format === 'htrouter')
+  const visibleNextGenTabs = NEXTGEN_TABS.filter(t =>
+    (t.htmodemOnly && hasHtModem) || (t.htrouterOnly && hasHtRouter)
+  )
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
@@ -3067,6 +3242,40 @@ export default function App() {
               )
             })}
           </div>
+
+          {/* Next-Gen Radio tab group — deliberately visually separated: its
+              own row, its own accent color (--accent2 orange, already the
+              design system's "supplementary" color), and an explicit section
+              label. Not rendered at all until a matching log is loaded. */}
+          {visibleNextGenTabs.length > 0 && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 0, padding: '0 36px',
+              borderBottom: '1px solid var(--border2)',
+              background: 'rgba(255,107,53,0.06)',
+              flexShrink: 0, flexWrap: 'wrap', backdropFilter: 'blur(4px)',
+            }}>
+              <span style={{
+                fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.12em', textTransform: 'uppercase',
+                color: 'var(--accent2)', padding: '10px 14px 12px 0', flexShrink: 0,
+                borderRight: '1px solid var(--border2)', marginRight: 10, whiteSpace: 'nowrap',
+              }}>
+                ⚡ Next-Gen Radio
+              </span>
+              {visibleNextGenTabs.map(t => (
+                <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  padding: '10px 16px 12px',
+                  fontFamily: "'Barlow Condensed',sans-serif", fontSize: 13, fontWeight: 600,
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                  color: activeTab === t.id ? 'var(--accent2)' : C.muted,
+                  borderBottom: `2px solid ${activeTab === t.id ? 'var(--accent2)' : 'transparent'}`,
+                  marginBottom: -1, transition: 'color 0.15s, border-color 0.15s',
+                }}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Tab content */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '4px 36px 32px' }}>
