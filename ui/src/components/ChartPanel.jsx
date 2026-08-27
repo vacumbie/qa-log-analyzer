@@ -1003,21 +1003,86 @@ function TakLatency({ results }) {
 function HtModemTempOverTime({ results }) {
   const hm = results.filter(r => r.log_format === 'htmodem')
   if (!hm.length) return <NoData message="No ht-modem logs loaded" />
-  const adapted = hm.map(r => ({ ...r, _temp: r.htmodem?.temp_samples_f || [] }))
-  const { labels, getDataset } = buildRelativeTimeSeries(adapted, '_temp', 15)
-  if (!labels.length) return <NoData message="No temperature samples in this log" />
+
+  const toMs = ts => {
+    if (!ts) return NaN
+    const s = ts.includes('T') ? ts : ts.replace(' ', 'T')
+    const ms = new Date(s.endsWith('Z') ? s : s + 'Z').getTime()
+    return isNaN(ms) ? new Date(ts).getTime() : ms
+  }
+
+  // Downsample the SAMPLE rows together (not each metric separately) so
+  // LPD/FPD/PL stay aligned at the same points rather than drifting apart.
+  // Elapsed-time-since-start (not absolute time): each session's own first
+  // sample becomes x=0, regardless of its real calendar date. This is what
+  // lets multiple sessions from wildly different dates (or even different
+  // years) overlay meaningfully on one shared axis instead of a shared
+  // absolute-date axis stretching to fit the full gap between them.
+  const perDevice = hm.map(r => {
+    const samples = (r.htmodem?.temp_samples_f || [])
+      .filter(s => s.timestamp)
+      .map(s => ({ ...s, ms: toMs(s.timestamp) }))
+      .filter(s => !isNaN(s.ms))
+      .sort((a, b) => a.ms - b.ms)
+    const startMs = samples.length ? samples[0].ms : 0
+    const withElapsed = samples.map(s => ({ ...s, elapsedMs: s.ms - startMs }))
+    return { r, samples: downsample(withElapsed, 150) }
+  })
+
+  const anySamples = perDevice.some(d => d.samples.length > 0)
+  if (!anySamples) return <NoData message="No temperature samples in this log" />
+
+  const allElapsed = perDevice.flatMap(d => d.samples.map(s => s.elapsedMs))
+  const maxElapsedHours = Math.max(...allElapsed) / 3_600_000
+
+  // "1:23:45" for sessions over an hour, "12:34" otherwise — a stopwatch/
+  // duration format, not a clock-time format, since this is elapsed time.
+  const fmtDuration = ms => {
+    const totalSec = Math.round(ms / 1000)
+    const h = Math.floor(totalSec / 3600)
+    const m = Math.floor((totalSec % 3600) / 60)
+    const s = totalSec % 60
+    const pad = n => String(n).padStart(2, '0')
+    return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`
+  }
 
   const metrics = [['lpd_f', '#00d4ff', 'LPD'], ['fpd_f', '#ff6b35', 'FPD'], ['pl_f', '#ffd166', 'PL']]
-  const datasets = hm.flatMap((r, i) => metrics.map(([key, color, name]) => ({
+  const datasets = perDevice.flatMap(({ r, samples }) => metrics.map(([key, color, name]) => ({
     label: hm.length > 1 ? `${shortLabel(r)} — ${name}` : `${name} Temp (°F)`,
-    data: getDataset(adapted[i], key),
+    data: samples.map(s => ({ x: s.elapsedMs, y: s[key], _abs: s.ms })),
     borderColor: color, backgroundColor: color + '22',
     tension: 0.3, pointRadius: 0, borderWidth: 2,
   })))
 
   return (
-    <ChartCard title="Next-Gen Modem Thermal (LPD / FPD / PL)" subtitle="Zynq MPSoC thermal zones · °F">
-      <Line data={{ labels, datasets }} options={LINE_OPTS({ scales: makeScales(undefined, undefined, '°F') })} />
+    <ChartCard title="Next-Gen Modem Thermal (LPD / FPD / PL)" subtitle="Zynq MPSoC thermal zones · °F · elapsed time since each session's start">
+      <Line data={{ datasets }} options={LINE_OPTS({
+        parsing: false,
+        scales: {
+          x: {
+            type: 'linear', grid: { color: GRID }, min: 0,
+            ticks: { ...TICK, maxTicksLimit: 10, maxRotation: 0, callback: fmtDuration },
+            title: { display: true, text: maxElapsedHours >= 1 ? 'elapsed (h:mm:ss)' : 'elapsed (m:ss)', color: '#2a3a52', font: { size: 9 } },
+          },
+          y: { grid: { color: GRID }, ticks: TICK, title: { display: true, text: '°F', color: '#2a3a52', font: { size: 9 } } },
+        },
+        plugins: {
+          tooltip: {
+            ...TT_CFG,
+            callbacks: {
+              title: items => items.length ? `+${fmtDuration(items[0].parsed.x)}` : '',
+              // Absolute timestamp shown too — still useful for cross-
+              // referencing a spike back to a specific line in the raw log.
+              afterTitle: items => items.length && items[0].raw?._abs
+                ? new Date(items[0].raw._abs).toLocaleString(undefined, {
+                    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+                  })
+                : '',
+            },
+          },
+          legend: { labels: { color: '#4a6080', boxWidth: 10 } },
+        },
+      })} />
     </ChartCard>
   )
 }

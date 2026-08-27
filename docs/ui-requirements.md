@@ -780,6 +780,43 @@ remains the sole `range-unavailable` trigger. Premise pinned in
 > the hour. Do not widen `EPOCH_MS_RE` to bare 13-digit integers: it must stay
 > key-anchored or it will capture durations and corrupt the range.
 
+### Cross-File Date/Time Offset Warning — ⏳ Pending (2026-08-26)
+
+No existing feature warns the user when multiple uploaded files span a
+suspiciously large date/time gap (e.g. two ht-modem captures from different
+years). Checked thoroughly — twice, across both `main` and the working
+branch — since the person recalled implementing this; it does not exist.
+What *does* exist and is easy to confuse it with:
+- The "Scanning timestamps…" loading state in `FileUpload.jsx` — this only
+  builds one **combined** min/max range across all uploaded files for the
+  time-window slider. It never compares individual files against each other
+  or flags a gap between them.
+- The ATAK "clock skew" KPI in `DeviceSummary.jsx` — negative delivery times
+  between two *communicating devices* within one session. Unrelated: a
+  same-session, same-upload metric, not a cross-file/cross-upload check.
+
+**Motivating case:** the Next-Gen Modem thermal chart
+(`HtModemTempOverTime` in `ChartPanel.jsx`) now plots real absolute
+timestamps (2026-08-26 fix, replacing a normalized 0–100% axis). If two
+ht-modem sessions with disjoint time ranges are loaded together, the shared
+x-axis stretches across the full gap between them, which will look broken.
+This warning is a prerequisite for either (a) telling the user why the
+chart looks that way, or (b) automatically switching to a "small multiples"
+layout (one chart panel per session) when ranges don't overlap — see that
+component's comments for the deferred design.
+
+**Fix (not yet built):** during the existing client-side timestamp scan in
+`FileUpload.jsx`'s `onDrop`, track each file's own min/max range (not just
+the combined absolute min/max), then compare ranges pairwise. If any two
+files' ranges don't overlap and the gap between them exceeds some threshold
+(days, not hours — normal multi-hour session offsets are expected and fine),
+surface a warning in the upload modal before the user confirms the time
+window. Exact threshold and warning UX not yet designed.
+
+**Priority:** Low — cosmetic/UX polish, not a data-correctness issue. No
+parser or API change; purely a `FileUpload.jsx` addition mirroring the
+pattern of the existing epoch-ms scanner fix above.
+
 ### Rename "Relay Firmware" / "Relay radio firmware" to "Firmware" — ⏳ Pending
 Cosmetic/naming cleanup: standardize the user-facing label "Relay Firmware" /
 "Relay radio firmware" to simply "Firmware" throughout the codebase and docs

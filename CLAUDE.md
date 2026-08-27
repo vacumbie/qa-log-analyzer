@@ -457,6 +457,7 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | BLE payload decoding (relay health attributes) | Blocked — waiting on protocol spec |
 | Relay Manager JSON log format (SDK Logging 2.0) | Pending — format in design |
 | Health Score threshold validation (BLE, thermal, battery, queue, RSSI) | Pending — blocked on field data; dimensions wired, thresholds are initial estimates |
+| Cross-file date/time offset warning on upload | ⏳ Pending — low priority, UX polish for disjoint-session charts |
 | P1: MESMER BLE tag profile (DEBUG vs ERROR) | ✅ Done — any tag containing BLE counts regardless of severity |
 | P2: Protocol separation (BROADCAST/PRIVATE) in TX/RX, file transfer, congestion | ⏳ Pending |
 | P3: Cross-device delivery matrix using logId | ⏳ Pending |

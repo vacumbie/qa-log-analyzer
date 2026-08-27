@@ -2390,34 +2390,45 @@ function SdkLogSummaryCard({ summary }) {
 function HtModemTab({ results }) {
   const hm = results.filter(r => r.log_format === 'htmodem')
 
-  const totalTx      = hm.reduce((n, r) => n + (r.summary?.tx_packet_count || 0), 0)
-  const totalQueued  = hm.reduce((n, r) => n + (r.summary?.queued_count || 0), 0)
-  const totalDropped = hm.reduce((n, r) => n + (r.summary?.dropped_count || 0), 0)
-  const anyAd936xFail = hm.some(r => (r.summary?.ad936x_init_error_count || 0) > 0)
-  const anyGpsdFail    = hm.some(r => r.summary?.gpsd_connect_error)
-  const peakTemps = hm.map(r => r.summary?.peak_pl_temp_f).filter(v => v != null)
-  const peakTemp  = peakTemps.length ? Math.max(...peakTemps) : null
-
   return (
     <div>
-      {hm.map((r, i) => <RelayLimitationBanner key={i} parseErrors={r.parse_errors} />)}
+      {hm.map((r, i) => {
+        const sum   = r.summary || {}
+        const color = PALETTE[i % PALETTE.length]
+        const dropped = sum.dropped_count || 0
+        const total   = sum.tx_packet_count || 0
+        const peak    = sum.peak_pl_temp_f
 
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-        <KpiCard label="FPGA Check" value={hm.every(r => r.summary?.fpga_version_ok) ? 'OK' : 'UNKNOWN/FAIL'}
-          color={hm.every(r => r.summary?.fpga_version_ok) ? '#00e5a0' : '#ffd166'} />
-        <KpiCard label="AD936X Init" value={anyAd936xFail ? 'FAILED' : 'OK'}
-          color={anyAd936xFail ? '#ff4757' : '#00e5a0'} sub={anyAd936xFail ? 'RF front end likely never initialized' : undefined} />
-        <KpiCard label="GPS (gpsd)" value={anyGpsdFail ? 'DISCONNECTED' : 'OK'}
-          color={anyGpsdFail ? '#ffd166' : '#00e5a0'} />
-        <KpiCard label="TX Packets" value={totalTx} color={C.accent} />
-        <KpiCard label="Queued" value={totalQueued} color="#00e5a0" />
-        <KpiCard label="Dropped" value={totalDropped} color={totalDropped ? '#ff4757' : C.muted}
-          sub={totalTx ? `${Math.round((totalDropped / totalTx) * 100)}% of TX packets` : undefined} />
-        <KpiCard label="Peak PL Temp" value={peakTemp != null ? `${peakTemp}°F` : '—'}
-          color={peakTemp != null && peakTemp >= 131 ? '#ff4757' : peakTemp != null && peakTemp >= 113 ? '#ffd166' : '#00e5a0'} />
-      </div>
+        return (
+          <div key={i} style={{ marginBottom: 24 }}>
+            {/* Session header — one per unit, matching RelayHealthTab's convention */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, paddingBottom: 10, borderBottom: `1px solid ${color}30` }}>
+              <div style={{ width: 3, height: 32, background: color, borderRadius: 2, flexShrink: 0 }} />
+              <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 16, fontWeight: 700, color }}>{r.source_filename}</div>
+            </div>
 
-      <SectionHeader icon="🌡️" title="Thermal" sub="LPD / FPD / PL over session" />
+            <RelayLimitationBanner parseErrors={r.parse_errors} />
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+              <KpiCard label="FPGA Check" value={sum.fpga_version_ok ? 'OK' : 'UNKNOWN/FAIL'}
+                color={sum.fpga_version_ok ? '#00e5a0' : '#ffd166'} />
+              <KpiCard label="AD936X Init" value={(sum.ad936x_init_error_count || 0) > 0 ? 'FAILED' : 'OK'}
+                color={(sum.ad936x_init_error_count || 0) > 0 ? '#ff4757' : '#00e5a0'}
+                sub={(sum.ad936x_init_error_count || 0) > 0 ? 'RF front end likely never initialized' : undefined} />
+              <KpiCard label="GPS (gpsd)" value={sum.gpsd_connect_error ? 'DISCONNECTED' : 'OK'}
+                color={sum.gpsd_connect_error ? '#ffd166' : '#00e5a0'} />
+              <KpiCard label="TX Packets" value={total} color={C.accent} />
+              <KpiCard label="Queued" value={sum.queued_count || 0} color="#00e5a0" />
+              <KpiCard label="Dropped" value={dropped} color={dropped ? '#ff4757' : C.muted}
+                sub={total ? `${Math.round((dropped / total) * 100)}% of TX packets` : undefined} />
+              <KpiCard label="Peak PL Temp" value={peak != null ? `${peak}°F` : '—'}
+                color={peak != null && peak >= 131 ? '#ff4757' : peak != null && peak >= 113 ? '#ffd166' : '#00e5a0'} />
+            </div>
+          </div>
+        )
+      })}
+
+      <SectionHeader icon="🌡️" title="Thermal" sub="LPD / FPD / PL, elapsed time since each session's start" />
       <ChartPanel results={hm} selectedPoints={['htmodem_temp']} />
 
       <SectionHeader icon="📡" title="TX Packet Outcomes" sub="Queued vs. dropped (CSMA queue full)" />
@@ -2431,39 +2442,43 @@ function HtModemTab({ results }) {
 function HtRouterTab({ results }) {
   const hr = results.filter(r => r.log_format === 'htrouter')
 
-  const totalSnaps   = hr.reduce((n, r) => n + (r.summary?.snapshot_count || 0), 0)
-  const totalMsgs    = hr.reduce((n, r) => n + (r.summary?.protocol_message_count || 0), 0)
-  // A counter no snapshot ever reported is absent, not zero — some sessions
-  // never transmit, so the whole output.* group is missing rather than 0. Sum
-  // only the logs that actually carry the field, and stay null when none do,
-  // so the card can show "—" instead of a passing green 0.
-  const sumReported = key => {
-    const reported = hr.map(r => r.summary?.[key]).filter(v => v != null)
-    return reported.length ? reported.reduce((n, v) => n + v, 0) : null
-  }
-  const totalXmitFail = sumReported('total_modem_xmit_failed')
-  const totalTimeouts = sumReported('total_timeouts')
-  const totalWarnings = sumReported('socket_warning_count')
-
   return (
     <div>
-      {hr.map((r, i) => <RelayLimitationBanner key={i} parseErrors={r.parse_errors} />)}
+      {hr.map((r, i) => {
+        const sum   = r.summary || {}
+        const color = PALETTE[i % PALETTE.length]
+        const xmitFail = sum.total_modem_xmit_failed
+        const timeouts = sum.total_timeouts
+        const warnings = sum.socket_warning_count
 
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-        <KpiCard label="Stat Snapshots" value={totalSnaps.toLocaleString()} color={C.accent} />
-        <KpiCard label="Modem PID" value={hr[0]?.summary?.modem_pid ?? '—'} color="#6366f1"
-          sub={hr[0]?.summary?.modem_pid != null ? 'cross-links to ht-modem log' : undefined} />
-        <KpiCard label="Modem TX Failures" value={totalXmitFail ?? '—'}
-          color={totalXmitFail == null ? C.muted : totalXmitFail ? '#ff4757' : '#00e5a0'}
-          sub={totalXmitFail == null ? 'not reported in this log' : 'session-lifetime total'} />
-        <KpiCard label="Timeouts" value={totalTimeouts ?? '—'}
-          color={totalTimeouts == null ? C.muted : totalTimeouts ? '#ffd166' : '#00e5a0'}
-          sub={totalTimeouts == null ? 'not reported in this log' : 'session-lifetime total'} />
-        <KpiCard label="Socket Warnings" value={totalWarnings ?? '—'}
-          color={totalWarnings == null ? C.muted : totalWarnings ? '#ffd166' : '#00e5a0'}
-          sub={totalWarnings == null ? 'not reported in this log' : undefined} />
-        <KpiCard label="Protocol Messages" value={totalMsgs.toLocaleString()} color={C.accent} />
-      </div>
+        return (
+          <div key={i} style={{ marginBottom: 24 }}>
+            {/* Session header — one per unit, matching RelayHealthTab's convention */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, paddingBottom: 10, borderBottom: `1px solid ${color}30` }}>
+              <div style={{ width: 3, height: 32, background: color, borderRadius: 2, flexShrink: 0 }} />
+              <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 16, fontWeight: 700, color }}>{r.source_filename}</div>
+            </div>
+
+            <RelayLimitationBanner parseErrors={r.parse_errors} />
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+              <KpiCard label="Stat Snapshots" value={(sum.snapshot_count || 0).toLocaleString()} color={C.accent} />
+              <KpiCard label="Modem PID" value={sum.modem_pid ?? '—'} color="#6366f1"
+                sub={sum.modem_pid != null ? 'cross-links to ht-modem log' : undefined} />
+              <KpiCard label="Modem TX Failures" value={xmitFail ?? '—'}
+                color={xmitFail == null ? C.muted : xmitFail ? '#ff4757' : '#00e5a0'}
+                sub={xmitFail == null ? 'not reported in this log' : 'session-lifetime total'} />
+              <KpiCard label="Timeouts" value={timeouts ?? '—'}
+                color={timeouts == null ? C.muted : timeouts ? '#ffd166' : '#00e5a0'}
+                sub={timeouts == null ? 'not reported in this log' : 'session-lifetime total'} />
+              <KpiCard label="Socket Warnings" value={warnings ?? '—'}
+                color={warnings == null ? C.muted : warnings ? '#ffd166' : '#00e5a0'}
+                sub={warnings == null ? 'not reported in this log' : undefined} />
+              <KpiCard label="Protocol Messages" value={(sum.protocol_message_count || 0).toLocaleString()} color={C.accent} />
+            </div>
+          </div>
+        )
+      })}
 
       <SectionHeader icon="🔌" title="Connection State" sub="Derived from periodic stat snapshots" />
       <ChartPanel results={hr} selectedPoints={['htrouter_connected']} />
