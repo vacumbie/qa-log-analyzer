@@ -268,6 +268,25 @@ def test_link_layer_fields_present_in_the_sessions_that_report_them():
             )
 
 
+def test_total_bad_crc_is_the_last_reported_value_not_a_sum():
+    """Same cumulative-counter rule as total_modem_xmit_failed, and it lives on
+    the model for the same reason: the UI must never re-derive it. Summing
+    sample3's 1,077 snapshots would report tens of thousands of bad CRCs."""
+    hr = parse_htrouter_log(SAMPLE3).htrouter_result
+    reported = [s.input_bad_crc for s in hr.stat_snapshots if s.input_bad_crc is not None]
+    assert hr.total_bad_crc == reported[-1]
+    assert hr.total_bad_crc == 130
+    assert hr.total_bad_crc < sum(reported)
+
+
+def test_total_bad_crc_is_none_when_no_snapshot_reports_it():
+    """Absent stays absent all the way up to the total — a session with no RF
+    noise counters must not report 0 bad CRCs, which would read as measured."""
+    for fixture in (FIXTURE, FIXTURE2):
+        hr = parse_htrouter_log(fixture).htrouter_result
+        assert hr.total_bad_crc is None, f"{fixture.name} should report no total"
+
+
 def test_link_layer_fields_are_cumulative_like_everything_else():
     """Same discipline as output_modem_xmit_failed: verify non-decreasing
     across the session rather than assuming."""

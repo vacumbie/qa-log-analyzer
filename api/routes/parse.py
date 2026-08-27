@@ -828,6 +828,7 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             # across snapshots. See RouterStatSnapshot docstring.
             "total_modem_xmit_failed": hr.total_modem_xmit_failed,
             "total_timeouts":          hr.total_timeouts,
+            "total_bad_crc":           hr.total_bad_crc,
             "socket_warning_count":    hr.socket_warning_count,
             "protocol_message_count":  len(hr.protocol_messages),
             "msg_type_counts":         msg_type_counts,

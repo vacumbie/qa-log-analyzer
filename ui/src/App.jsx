@@ -2702,13 +2702,12 @@ function NextGenKpiRow({ results }) {
   const dropped   = sumCount(modem, 'dropped_count')
   const peaks     = modem.map(r => r.summary?.peak_pl_temp_f).filter(v => v != null)
   const peakTemp  = peaks.length ? Math.max(...peaks) : null
+  // Both read the parser's own cumulative-counter properties through the
+  // summary. The "last non-null snapshot, never a sum" rule is defined once, in
+  // HtRouterResult — re-deriving it here would give the Overview row and the
+  // HT-Router tab two independent definitions of the same number.
   const xmitFail  = sumReported(router, r => r.summary?.total_modem_xmit_failed)
-  const badCrc    = sumReported(router, r => {
-    // Cumulative session counters: the total is the LAST snapshot's value, never
-    // a sum across snapshots. Absent throughout means never reported, not zero.
-    const snaps = (r.htrouter?.stat_snapshots || []).filter(s => s.input_bad_crc != null)
-    return snaps.length ? snaps[snaps.length - 1].input_bad_crc : null
-  })
+  const badCrc    = sumReported(router, r => r.summary?.total_bad_crc)
 
   return (
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '12px 36px', borderBottom: '1px solid var(--border2)', background: 'rgba(5,8,15,0.75)', flexShrink: 0, backdropFilter: 'blur(4px)' }}>
@@ -3196,6 +3195,8 @@ export default function App() {
           htrouterSnaps.map(s => s.output_modem_xmit_failed).filter(v => v != null)),
         total_timeouts: (vals => vals.length ? vals[vals.length - 1] : null)(
           htrouterSnaps.map(s => s.output_time_outs).filter(v => v != null)),
+        total_bad_crc: (vals => vals.length ? vals[vals.length - 1] : null)(
+          htrouterSnaps.map(s => s.input_bad_crc).filter(v => v != null)),
         socket_warning_count:    r.summary?.socket_warning_count,
         protocol_message_count:  htrouterMsgs.length,
         msg_type_counts: htrouterMsgs.reduce((acc, m) => {

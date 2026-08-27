@@ -999,6 +999,21 @@ class HtRouterResult:
                 return s.output_time_outs
         return None
 
+    @property
+    def total_bad_crc(self) -> Optional[int]:
+        """
+        See total_modem_xmit_failed — same cumulative-counter caveat.
+
+        Exists so the UI never has to re-derive it: a KPI card originally
+        reimplemented this "last non-null snapshot" walk in JSX, which meant the
+        Overview row and the tab computed one concept two ways and only one of
+        them would pick up a change to the rule.
+        """
+        for s in reversed(self.stat_snapshots):
+            if s.input_bad_crc is not None:
+                return s.input_bad_crc
+        return None
+
 
 # ── Top-level parse result ────────────────────────────────────────────────────
 

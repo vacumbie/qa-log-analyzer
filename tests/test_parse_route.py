@@ -351,6 +351,20 @@ def test_htrouter_snapshot_serialization_exposes_the_link_layer_fields():
     }.items() <= snapshot.items()
 
 
+def test_htrouter_total_bad_crc_reaches_the_summary():
+    """The Overview KPI row reads this from the summary rather than walking
+    stat_snapshots itself, so the serializer is the link that makes the parser's
+    cumulative-counter rule the single definition."""
+    summary = _upload_fixture("htrouter_sample3.log")["summary"]
+    assert summary["total_bad_crc"] == 130
+
+
+def test_htrouter_total_bad_crc_is_null_when_never_reported():
+    summary = _upload_fixture("htrouter_sample.log")["summary"]
+    assert summary["total_bad_crc"] is None
+    assert summary["total_modem_xmit_failed"] is None
+
+
 def test_htrouter_absent_link_layer_fields_serialize_as_null_not_zero():
     """The absence convention has to survive JSON too: null reads as 'never
     reported', 0 reads as 'measured, none seen'. A session that never logged
