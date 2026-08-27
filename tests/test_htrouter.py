@@ -209,3 +209,50 @@ def test_empty_file_returns_no_data_gracefully(tmp_path):
     assert r.log_format == "htrouter"
     assert r.htrouter_result.stat_snapshots == []
     assert r.session_start == ""
+
+
+# ── Link-layer error/validity counters — real second/third samples ────────────
+
+SAMPLE3 = FIXTURE_DIR / "htrouter_sample3.log"
+SAMPLE4_ROTATED = FIXTURE_DIR / "htrouter_sample4_rotated.log"
+
+
+def test_link_layer_error_fields_parsed():
+    hr = parse_htrouter_log(SAMPLE3).htrouter_result
+    s = hr.stat_snapshots[0]
+    assert s.input_too_short_link_hdr == 152
+    assert s.input_too_short_link_payload == 237
+    assert s.input_too_short_link_crc == 2
+    assert s.input_wrong_link_version == 579
+    assert s.input_crc_present == 1831
+    assert s.input_bad_crc == 112
+    assert s.input_subframe_no_protocol == 3
+    assert s.input_subframe_logical_recv_error == 11
+    assert s.input_subframe_family_recv_error == 8
+
+
+def test_link_layer_fields_are_cumulative_like_everything_else():
+    """Same discipline as output_modem_xmit_failed: verify non-decreasing
+    across the session rather than assuming."""
+    hr = parse_htrouter_log(SAMPLE3).htrouter_result
+    values = [s.input_bad_crc for s in hr.stat_snapshots if s.input_bad_crc is not None]
+    assert values == sorted(values)
+
+
+def test_rotated_log_file_detected_and_parsed_despite_unusual_filename():
+    """ht-router_log.1 (no .log extension) is a rotated log, not a new
+    format — content-based detection must not depend on the extension."""
+    content = SAMPLE4_ROTATED.read_text()
+    assert is_htrouter_log(content) is True
+    result = parse_htrouter_log(SAMPLE4_ROTATED)
+    assert result.log_format == "htrouter"
+    assert len(result.htrouter_result.stat_snapshots) > 0
+
+
+def test_rotated_log_and_current_log_are_contiguous_sessions():
+    """ht-router_log.1 ends right where ht-router.log begins — documenting
+    this relationship, not enforcing any cross-file merge (each file is
+    still parsed as its own independent session)."""
+    rotated = parse_htrouter_log(SAMPLE4_ROTATED)
+    current = parse_htrouter_log(SAMPLE3)
+    assert rotated.session_end <= current.session_start

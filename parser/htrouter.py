@@ -86,6 +86,15 @@ _TRANSMISSION_RE = re.compile(r'^transmission (\d+) finished in (\d+) ns')
 
 # Simple "<key> <int>" snapshot lines, mapped to RouterStatSnapshot field names.
 _SNAPSHOT_INT_FIELDS = {
+    "input.too_short.link_hdr":                 "input_too_short_link_hdr",
+    "input.too_short.link_payload":             "input_too_short_link_payload",
+    "input.too_short.link_crc":                 "input_too_short_link_crc",
+    "input.wrong_link_version":                 "input_wrong_link_version",
+    "input.crc_present":                        "input_crc_present",
+    "input.bad_crc":                            "input_bad_crc",
+    "input.subframe.no_protocol":               "input_subframe_no_protocol",
+    "input.subframe.logical_recv_error":        "input_subframe_logical_recv_error",
+    "input.subframe.family_recv_error":         "input_subframe_family_recv_error",
     "input.subframe.count":                    "input_subframe_count",
     "input.traffic[aggr_next_proto_ag]":        "input_traffic_ag",
     "input.ctl":                                "input_ctl",

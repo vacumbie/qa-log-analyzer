@@ -861,6 +861,18 @@ class RouterStatSnapshot:
     snapshots, never summed across all snapshots.
     """
     timestamp:                str = ""   # timestamp of the first line in this group
+    # Link-layer validity/error counters — seen in captures with real RF
+    # noise; absent (not zero) in a clean session, same absence convention
+    # as the output.* transmit fields below.
+    input_too_short_link_hdr:     Optional[int] = None
+    input_too_short_link_payload: Optional[int] = None
+    input_too_short_link_crc:     Optional[int] = None
+    input_wrong_link_version:     Optional[int] = None
+    input_crc_present:            Optional[int] = None
+    input_bad_crc:                Optional[int] = None
+    input_subframe_no_protocol:          Optional[int] = None
+    input_subframe_logical_recv_error:   Optional[int] = None
+    input_subframe_family_recv_error:    Optional[int] = None
     input_subframe_count:     Optional[int] = None
     input_traffic_ag:         Optional[int] = None
     input_ctl:                Optional[int] = None

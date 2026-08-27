@@ -727,6 +727,15 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
         def _snapshot_dict(s):
             return {
                 "timestamp":                    s.timestamp,
+                "input_too_short_link_hdr":       s.input_too_short_link_hdr,
+                "input_too_short_link_payload":   s.input_too_short_link_payload,
+                "input_too_short_link_crc":       s.input_too_short_link_crc,
+                "input_wrong_link_version":       s.input_wrong_link_version,
+                "input_crc_present":              s.input_crc_present,
+                "input_bad_crc":                  s.input_bad_crc,
+                "input_subframe_no_protocol":            s.input_subframe_no_protocol,
+                "input_subframe_logical_recv_error":     s.input_subframe_logical_recv_error,
+                "input_subframe_family_recv_error":      s.input_subframe_family_recv_error,
                 "input_subframe_count":          s.input_subframe_count,
                 "input_traffic_ag":               s.input_traffic_ag,
                 "input_ctl":                      s.input_ctl,
