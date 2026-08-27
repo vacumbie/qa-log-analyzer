@@ -1,5 +1,5 @@
 # QA Log Analyzer — Session Summary
-_Last updated: 2026-08-24_
+_Last updated: 2026-08-27_
 
 ---
 
@@ -279,6 +279,73 @@ pytest tests/test_atak.py -v  # single file verbose
 ---
 
 ## Most Recent Work (Last Few PRs)
+
+**2026-08-27 — `vera` coverage audit of the uncommitted `integration-test` work,
+36 new tests, and two code defects it found fixed. Branch `integration-test`,
+uncommitted. pytest: 473 passed, 2 skipped (was 437 + 2).**
+
+The branch carried three uncommitted features with thin coverage: ht-modem
+"Packet Transmitted" RF confirmations, nine ht-router link-layer `input.*`
+snapshot fields, and TAK NDJSON (JSON-Lines) support with five new fixtures.
+`vera` audited all three; 11 of its 13 findings were coverage gaps, 2 were real
+defects.
+
+*Two defects fixed:*
+
+1. **NDJSON detection failed on a leading blank line** (`parser/tak.py`,
+   `is_tak_log()`). The root-character test stripped whitespace; the envelope
+   test read `content.split("\n", 1)[0]` literally, so a leading `\n` made it
+   see `""`, decline the NDJSON branch, and drop the file through to the
+   `diagnostic` catch-all — where an 804-event capture parsed as **empty, with
+   no error and no `parse_errors` entry**. Concatenated, re-saved and rotated
+   captures are exactly what produce a leading newline. Now reads the first
+   *non-empty* line. A leading space alone always worked (the strip caught it),
+   which is why this survived the original review.
+2. **`orphaned_transmitted_count` was never serialized** (`_result_to_dict()`).
+   Set in the parser, asserted by a parser test, then stopped — its sibling
+   `orphaned_drop_count` is serialized, so unattributed RF confirmations were
+   unreachable from the UI or an export. Classic ParseResult-chain-stops-early.
+
+*36 tests added*, all against fixtures already committed — no new fixtures:
+
+- `test_tak.py` (+11) — the real 804-line NDJSON capture was previously only
+  regex-scanned in `test_time_range_scan.py`, never parsed. Now pinned:
+  category counts summing to 804, 35 both-or-neither partial coordinates,
+  32 `(0,0)` sentinels, PLI/Marker-scoped no-fix (30, with the trailing clause
+  naming a further 37), 793 negative latencies with min `−2097`, the handshake,
+  and both `DATA LIMITATION` entries with per-element counts.
+- `test_parse_route.py` (+14) — the category-sum invariant globbed
+  `tak_stream_*.json`, so both `tak_ndjson_*.log` fixtures were silently
+  excluded from the check CLAUDE.md describes as holding "across every fixture";
+  widened to `tak_*` with a discovery guard so it can't go hollow again. Plus
+  route coverage for **all 14 new htmodem/htrouter serialized fields** — neither
+  feature has a UI consumer yet, so `_result_to_dict()` is the terminus of both
+  data paths and nothing else would catch a dropped key.
+- `test_htrouter.py` (+3) — the nine link-layer fields stay `None` (never `0`)
+  across samples 1–2, with a negative control on samples 3–4; rotation-style
+  filename (`ht-router_log.1`) through `_detect_format()`.
+- `test_detect_format.py` (+5), `test_htmodem.py` (+1, a reconciliation test:
+  2585 raw lines = 2584 attributed + 1 orphaned), `test_time_range_scan.py`
+  (+1, the 804 × 3 = 2412 count assertion its array-shape sibling already had).
+
+*Three items `vera` raised that need a decision, not a test:*
+
+1. A session with TX packets but **zero** RF confirmations is an
+   indistinguishable `0` — "this firmware build doesn't emit Packet
+   Transmitted" reads the same as "nothing transmitted". `temp_samples` emits a
+   `DATA LIMITATION` in the equivalent case; this doesn't.
+2. The retransmission `parse_errors` entry **renders nowhere**.
+   `RelayLimitationBanner` filters on the `DATA LIMITATION` prefix, which this
+   entry correctly lacks (nothing is missing or undecodable). Net effect: 42
+   real RF retransmissions are invisible, while the file-list red ⚠ fires with
+   no visible explanation. A KPI card fed by the already-serialized
+   `retransmit_packet_count` would fix both halves.
+3. `HtModemTempOverTime` moved off the normalized 0–100% x-axis to an
+   elapsed-ms axis — justified by the year-2036 unset-RTC timestamps in samples
+   2/3/4, but it contradicts a documented CLAUDE.md architecture decision that
+   doesn't yet record the exception.
+
+---
 
 **2026-08-25 — Next-Gen Radio (`ht-modem` / `ht-router`): parsers committed, UI tab
 built and live-verified, three UI defects fixed. Branch `feature/next-gen-radio-docs`,
