@@ -188,7 +188,7 @@ own section label — not another dimmed/badged tab in the existing row; see
 entry or JSON-only note in `api/routes/export.py` for either format, and the
 newer parsed fields (ht-modem TX confirmations, the nine ht-router `input.*`
 link-layer counters) are serialized but **not yet rendered anywhere** — an
-explicit deferral, recorded in `docs/ui-requirements.md` §17, not an oversight.
+explicit deferral, recorded in `docs/ui-requirements.md` §18, not an oversight.
 
 Three things worth knowing about the router parser specifically: its periodic
 stat-snapshot fields are **cumulative session-lifetime counters, not
@@ -545,7 +545,7 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | TAK — NDJSON (JSON-Lines) capture shape | ✅ Done (2026-08-27) — `is_tak_log()` `{`-rooted branch + `_load_records()` envelope unwrap; 804-event real capture as fixture. Detection safety now rests solely on disjoint signature keys, pinned by test |
 | ht-modem — `Packet Transmitted` RF confirmations | ✅ Done (2026-08-27) — `HtModemTransmitConfirmation`, `transmissions[]` list, `orphaned_transmitted_count`. **`retransmit_count` is an extra-confirmation count, not a retry count** — attribution is positional; reported as a `DATA LIMITATION` |
 | ht-router — nine `input.*` link-layer validity/error counters | ✅ Done (2026-08-27) — `Optional[int]`, absent stays `None` never `0`; two of four real captures don't report them |
-| Next-Gen Radio — UI surface for TX confirmations and `input.*` error counters | ⏳ Pending — serialized but rendered nowhere. Explicit deferral recorded in `docs/ui-requirements.md` §17, incl. the requirement to add both summary fields to the `filteredResults` recompute at the same time |
+| Next-Gen Radio — UI surface for TX confirmations and `input.*` error counters | ⏳ Pending — serialized but rendered nowhere. Explicit deferral recorded in `docs/ui-requirements.md` §18, incl. the requirement to add both summary fields to the `filteredResults` recompute at the same time |
 | `HtModemTempOverTime` — unequal-duration compression on the shared elapsed axis | ⏳ Pending — documented exception to the normalized-axis rule; a 36-min session beside a 2h36m one renders as ~a quarter width. Three options in `docs/ui-requirements.md` |
 | `RelayLimitationBanner` filters out un-prefixed `parse_errors`, so the ⚠ glyph can fire with no visible explanation | ⏳ Pending — `TakTab.jsx`'s `LimitationBanner` already renders prefixed and un-prefixed as two groups; adopt that pattern in `HtModemTab`/`HtRouterTab`/`FwLogTab` |
 | ht-modem — zero `Packet Transmitted` confirmations is indistinguishable from no transmission | ⏳ Pending — a log with TX packets and no confirmations emits no entry, unlike the sibling `temp_samples` case which does |
@@ -557,6 +557,9 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | Windowed `dropped_count` omitted `orphaned_drop_count`, so the KPI fell whenever any time window was applied | ✅ Done (2026-08-27) — recompute now matches the parser's `dropped_count` property. Orphans carry no timestamp of their own, so they count in every window |
 | `HtRouterTab` Modem PID card promised a cross-link to a loaded ht-modem session | ✅ Done (2026-08-27) — ht-modem parses no PID, so nothing could ever match. Sub-label now says "ht-modem process spawned by this router" |
 | `TakTab` empty state advertised `.json` only, after NDJSON support landed | ✅ Done (2026-08-27) — names both the array export and the JSON-Lines capture |
+| `ui-requirements.md` §16–§18 asserted features that were never built | ✅ Done (2026-08-27) — `sumReported()` attribution corrected (it belongs to the KPI row, and didn't exist when that text was written), plus RF Control Timeline, `output.bottom.timed_out`, socket-warning first-seen, rotation-marker boundaries, header contents and two banner claims all marked not-built rather than described as shipping |
+| `log-field-definitions.md` documented a `control_packets` collection that was never built | ✅ Done (2026-08-27) — recorded as **not parsed** in both specs, with the reason: `control type = 10` appears with both Transmit Level and SETTXRXFREQ, so the type alone identifies nothing and `freq_changes`/`power_changes` already carry the meaning |
+| Duplicate `### 16.` tab sections in `ui-requirements.md` | ✅ Done (2026-08-27) — next-gen renumbered to 17/18; cross-references updated. (Section 14, Network Topology, remains out of order at the end of the file — unimplemented, pre-existing) |
 
 ---
 

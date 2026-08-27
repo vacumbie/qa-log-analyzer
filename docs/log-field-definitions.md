@@ -753,18 +753,18 @@ Parsed into `HtModemResult`, attached to `ParseResult.htmodem_result`.
 |-----------|-----------|-------------|-------|
 | `LIBIIO : version <v> detected` | string | `libiio_version` | |
 | `Setting filter bank to <name> <range>MHZ` | string, string | `filter_bank`, `filter_range_mhz` | |
-| `Could not find the AD936X PHY device` + cascading `ERROR : problem …` run | count | `ad936x_init_errors_count` | **Collapsed to one count**, not stored per-line — see parsing rule in `parsing-requirements.md` |
+| `Could not find the AD936X PHY device` + cascading `ERROR : problem …` run | count | `ad936x_init_error_count` | **Collapsed to one count**, not stored per-line — see parsing rule in `parsing-requirements.md` |
 | `Setting clock calibration offset to <n>` | int | `clock_cal_offset` | |
 | `Read an SI4460 calibration offset of <n>` | int | `si4460_cal_offset` | Confirms an SI4460 is still present on this platform alongside the AD936X |
 | `Error connecting to gpsd` | bool | `gpsd_connect_error` | |
 
-### RF Control (`freq_changes`, `power_changes`, `control_packets`)
+### RF Control (`freq_changes`, `power_changes`)
 
 | Raw Field | Parsed As | Model Field | Notes |
 |-----------|-----------|-------------|-------|
-| `Received Control packet, control type = <n>` | int | `control_packets[].control_type` | `control type = 10` alone does not disambiguate the command — the following line does |
 | `Setting TX power level mode to fixed, Xmit level to <n>.00` | float | `power_changes[].xmit_level` | |
 | `Setting RX freq = <hz>.00` / `Setting TX freq = <hz>.00` | int, direction | `freq_changes[].hz`, `.direction` | |
+| `Received Control packet, control type = <n>` | — | **not parsed** | No `control_packets` collection exists. This table previously documented `control_packets[].control_type`, which was never built. Left unparsed on purpose for now: `control type = 10` appears with both Transmit Level and SETTXRXFREQ commands, so the type alone identifies nothing — the *following* line is what carries the meaning, and `freq_changes`/`power_changes` already capture that. Parsing the control line would add a field whose only honest value is "ambiguous" |
 
 ### TX Packets (`TxPacket`)
 
@@ -822,9 +822,9 @@ Parsed into `HtRouterResult`, attached to `ParseResult.htrouter_result`.
 | Raw Field | Parsed As | Model Field | Notes |
 |-----------|-----------|-------------|-------|
 | `local UDP socket <ip>:<port>` | string | `udp_sockets[]` | |
-| `us_warn @ udp_write.486: sendto: (22) Invalid argument` | count | `socket_warnings_count` | Repeats identically at startup in both samples — semantics not yet confirmed |
+| `us_warn @ udp_write.486: sendto: (22) Invalid argument` | count | `socket_warning_count` | Repeats identically at startup in both samples — semantics not yet confirmed. **Count only** — the first-seen timestamp is not retained |
 | `ag_warn @ aghub_init.401: created aghub_tick event, aghub <addr>` | string | `aghub_init_addr` | |
-| `client-hdr versflags version <n>, options <y/n>, next-proto <proto> \| mgt-hdr dst <addr>, src <addr>, version <n>, type <type>` | struct | `protocol_messages[]` (`dst`, `src`, `version`, `type`) | Whether `dst`/`src` map onto the existing GID/callsign identity model (see Identity model notes below) is **unconfirmed** |
+| `client-hdr versflags version <n>, options <y/n>, next-proto <proto> \| mgt-hdr dst <addr>, src <addr>, version <n>, type <type>` | struct | `protocol_messages[]` (`dst`, `src`, `version`, `msg_type`, plus `timestamp`, `io_direction`, `udp_idx`, `peer`, `direction`) | The model field is `msg_type`, not `type`. `io_direction` is input/output through the router; `direction` is the protocol message's own request/response — two different axes, easy to conflate. `peer` is only present on `udp input` lines. Whether `dst`/`src` map onto the existing GID/callsign identity model (see Identity model notes below) is **unconfirmed** |
 | `mgt_hub_forward.548: request type <n> for <addr>: sent to <n> client(s), skipped <n> with no session` | struct | `forward_events[]` | |
 
 ### Periodic Stat Snapshot (`RouterStatSnapshot`)

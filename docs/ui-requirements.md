@@ -419,7 +419,7 @@ battery or thermal. See the format limitations in `parsing-requirements.md`.
 
 ---
 
-### 16. Next-Gen Modem (`ht-modem`) — ✅ Implemented
+### 17. Next-Gen Modem (`ht-modem`) — ✅ Implemented
 
 > Spec drafted 2026-08-24; `HtModemTab` in `App.jsx` built 2026-08-25 and
 > live-verified. Reworked 2026-08-27 from one cross-session aggregate KPI row
@@ -436,9 +436,15 @@ above), not the main tab row.
   and took `some()`/`every()` for the pass-fail badges, which reads as a single
   unit when two captures are open and hides which session had the fault.
 - **Data Limitations Banner** — surfaces the AD936X init-failure cascade
-  (collapsed count, not 20+ rows), the ambiguous `Found <N> devices` parse,
-  and the positional-attribution limitation on `Packet Transmitted`
-  confirmations. Rendered per session, inside that session's block.
+  (collapsed count, not 20+ rows), the positional-attribution limitation on
+  `Packet Transmitted` confirmations, the missing-FPGA-line case, the gpsd
+  connection error, and the no-temperature-samples case. Rendered per session,
+  inside that session's block.
+  ⚠️ **Not surfaced despite an earlier claim here:** the ambiguous
+  `Found <N> devices` parse. The parser resolves it silently by phase
+  (`iio_devices_found` vs `ad5592_devices_found`) and emits no `parse_errors`
+  entry, so nothing reaches the banner. Whether it warrants one is open —
+  the two values are disambiguated correctly, so there may be no gap to report.
 
 > **Un-prefixed `parse_errors` entries are currently invisible on this tab.**
 > `RelayLimitationBanner` filters on `startsWith('DATA LIMITATION')`, while the
@@ -447,14 +453,26 @@ above), not the main tab row.
 > `TakTab.jsx`'s `LimitationBanner` already solves this by rendering prefixed
 > and un-prefixed entries as two labelled groups; this tab should adopt that
 > pattern. Tracked in the backlog.
-- **Session header** — session start/end, FPGA version check result
-  (pass/fail badge), LIBIIO version, filter bank
-- **RF Control Timeline** — frequency changes and power level changes
-  over time, with the originating control packet
+- **Session header** — accent stripe + source filename. ⚠️ **Spec'd but not
+  built:** session start/end, LIBIIO version, filter bank. The FPGA version
+  check ships as a KPI card, not a header pass/fail badge.
 - **TX Packet Activity** — packets encoded vs. queued vs. **dropped**
-  (`CSMA QUEUE is Full`) as a KPI row, plus a timeline chart; dropped-packet
-  rate is the headline QA metric for this tab, analogous to how the FW Log
-  tab headlines relay routing counts
+  (`CSMA QUEUE is Full`) as a KPI row, plus `htmodem_outcomes`, which is a
+  grouped **bar** chart (not the timeline this spec originally called for —
+  there is no time axis). Dropped-packet rate is the headline QA metric for
+  this tab, analogous to how the FW Log tab headlines relay routing counts.
+  Note the `Dropped` KPI counts `orphaned_drop_count` as well as
+  `queued === false`, matching the parser's `dropped_count` property; the
+  time-window recompute must include orphans too or the number falls the
+  moment a window is applied.
+- ⚠️ **RF Control Timeline — spec'd, not built.** `freq_changes` and
+  `power_changes` are parsed, serialized and time-window filtered, but no
+  component consumes them and there is no `CHART_MAP` key. The "with the
+  originating control packet" part is not buildable as specified: the
+  `Received Control packet, control type = <n>` line is not parsed, and
+  `control type = 10` appears with both Transmit Level and SETTXRXFREQ
+  commands, so the type alone identifies nothing. See
+  `log-field-definitions.md` → RF Control.
 - **Thermal** — `LPD`/`FPD`/`PL` temperature chart over time, °F display
   per the project-wide temperature rule, same charting pattern as the
   existing Thermal tab but a distinct sensor set (do not merge with
@@ -475,39 +493,52 @@ above), not the main tab row.
   SI4460 calibration offset (surfaced as informational, not necessarily a
   fault)
 
-### 17. Next-Gen Router (`ht-router`) — ✅ Implemented
+### 18. Next-Gen Router (`ht-router`) — ✅ Implemented
 
 > Spec drafted 2026-08-24; `HtRouterTab` in `App.jsx` built 2026-08-25 and
-> live-verified. Reworked 2026-08-27 to per-session blocks, same as section 16.
+> live-verified. Reworked 2026-08-27 to per-session blocks, same as section 17.
 
 `ht-router`-only tab — appears only when a next-gen router log is loaded, in
 the same visually separated Next-Gen Radio tab group as `ht-modem` (section
-16), but as its own distinct tab, not merged into one.
+17), but as its own distinct tab, not merged into one.
 
 - **Per-session blocks, not cross-session aggregates** — same rework and same
-  reasoning as section 16.
+  reasoning as section 17.
 - **Absent counters must render as `—`, not `0`.** A session that never
   transmitted omits the whole `output.*` group; a session with no RF noise
-  omits the nine `input.*` error counters. Summed via `sumReported()`, which
-  stays `null` when no loaded log carries the field, and the card shows `—`
-  with "not reported in this log". A genuine `0` (e.g. `socket_warning_count`)
-  renders as `0` via `?? '—'`, never collapsed to `—` by `||`.
-- **Data Limitations Banner** — surfaces the unconfirmed `dst`/`src`
-  identity-space question and the unconfirmed socket-warning semantics.
-  (Snapshot retention is no longer open: all snapshots are kept and trimming
-  is delegated to the time-window slider.)
-- **Session header** — router PID, spawned modem PID (cross-links to a
-  loaded `ht-modem` session by PID when both are present in the same
-  upload), session start, rotation markers (`reopened log file`) shown as
-  boundaries rather than hidden
+  omits the nine `input.*` error counters. Because the tab now renders one
+  block per session there is no cross-session summing inside it — each card
+  reads that session's own value through `?? '—'` with a
+  "not reported in this log" sub-label. A genuine `0` (e.g.
+  `socket_warning_count`) renders as `0`, never collapsed to `—` by `||`.
+  Cross-session summing does happen in the Overview's `NextGenKpiRow`, whose
+  local `sumReported()` helper returns `null` when no loaded log reports the
+  field rather than summing absences to `0`. (An earlier version of this
+  section attributed `sumReported()` to this tab; it belongs to the KPI row,
+  and did not exist at all while the tab used cross-session aggregates.)
+- **Data Limitations Banner** — surfaces the socket-warning count with
+  unconfirmed semantics, and the unparsed-event tally. ⚠️ **Not surfaced
+  despite an earlier claim here:** the unconfirmed `dst`/`src` identity-space
+  question. `htrouter.py` emits four `parse_errors` entries and none covers it;
+  the caveat lives only in `log-field-definitions.md`.
+- **Session header** — accent stripe + source filename, with router PID and
+  spawned modem PID as KPI cards. ⚠️ **Corrected:** the modem PID does **not**
+  cross-link to a loaded `ht-modem` session. ht-modem parses no PID of its own,
+  so there is nothing to match on the other side — the card now reads
+  "ht-modem process spawned by this router", which is all the data supports.
+  **Spec'd but not built:** session start in the header, and rotation markers
+  (`reopened log file`) shown as boundaries — `rotation_markers` is parsed and
+  serialized, and `summary.rotation_count` exists, but neither is rendered.
 - **Connection Timeline** — `connected` 0/1 over time, derived from the
   periodic snapshot blocks
-- **Throughput & Reliability** — `output.modem_xmit_failed`,
-  `output.time_outs`, `output.bottom.timed_out` as time series; this is
+- **Throughput & Reliability** — `output.modem_xmit_failed` and
+  `output.time_outs` as time series (`HtRouterCumulativeFailures`); this is
   the router-side counterpart to the modem tab's dropped-packet metric,
   and the two should be visually comparable when both logs are loaded
   together (not necessarily merged, just presented so a QA engineer can
-  eyeball correlation).
+  eyeball correlation). ⚠️ `output.bottom.timed_out` is serialized as
+  `output_bottom_timed_out` but **not plotted** — the chart carries two series,
+  not three.
   **Must say when it's empty.** Having snapshots is not the same as having
   these counters in them — a session that never transmitted omits the whole
   `output.*` group, so every dataset is all-null and Chart.js paints a bare
@@ -518,8 +549,10 @@ the same visually separated Next-Gen Radio tab group as `ht-modem` (section
   chart; `HtRouterMsgTypes` next to it already had the equivalent guard.
 - **Protocol Message Activity** — breakdown of `client-hdr`/`mgt-hdr`
   message types and `mgt_hub_forward` send/skip counts
-- **Socket Warnings** — count and first-seen timestamp of `us_warn`
-  entries, flagged for follow-up rather than treated as fully understood
+- **Socket Warnings** — count of `us_warn` entries, flagged for follow-up
+  rather than treated as fully understood. ⚠️ **No first-seen timestamp**, as
+  this spec previously claimed: the parser keeps only `socket_warning_count`
+  and discards the line, so it is unimplementable without a parser change.
 
 > **Deliberately not yet surfaced — recorded so the gap is a decision, not an
 > oversight.** Two groups of parsed, serialized fields have no UI consumer:
@@ -531,7 +564,7 @@ the same visually separated Next-Gen Radio tab group as `ht-modem` (section
 >   is the obvious home. Must respect the absent-is-`—` rule above, since four
 >   of the five real captures don't report them at all.
 > - ht-modem's `transmitted_count`, `retransmit_packet_count`, and the
->   per-packet `transmissions[]` (section 16). A KPI card is the natural
+>   per-packet `transmissions[]` (section 17). A KPI card is the natural
 >   surface, but the label must not call `retransmit_packet_count` a retry
 >   count — see `parsing-requirements.md` → "Confirmation attribution is
 >   positional".
@@ -664,7 +697,7 @@ time-window slider rather than decided at parse time.
 Relay radio firmware (UART/USB debug) logs are auto-detected (detection priority 1) and parsed by `parser/fw_log.py` into `FwLogResult`. The FW Log tab (section 13) renders origin hash, RF configuration, message bucket history, relay routing decisions, channel energy (the RSSI proxy), neighbor table, and errors/warnings, with the three firmware-log `DATA LIMITATION` notes surfaced honestly. See parser spec in `parsing-requirements.md` (Relay Firmware section) and field definitions Format 4. **Note:** decoding the binary RHC payload (hash → serial, firmware version) is tracked separately below as RHC Response Field Mappings, still pending.
 
 ### TAK Server Format + Tab — ✅ Implemented (2026-08-24, PR #35)
-TAK server CoT event streams are auto-detected (priority 2, ahead of ATAK) and parsed by `parser/tak.py` into `TakEvent` / `TakServerInfo`. The TAK Server tab (section 16) renders the category KPI row, a Leaflet position map coloured by callsign, and a server receipt-latency chart with negative latency called out as clock skew. `tak_events` joins the time-window filter with its own summary recompute branch, and the upload modal accepts `.json`. See the parser spec in `parsing-requirements.md` (TAK Server section) and field definitions Format 5.
+TAK server CoT event streams are auto-detected (priority 2, ahead of ATAK) and parsed by `parser/tak.py` into `TakEvent` / `TakServerInfo`. The TAK Server tab (section 16) renders the category KPI row, a Leaflet position map coloured by callsign, and a server receipt-latency chart with negative latency called out as clock skew. `tak_events` joins the time-window filter with its own summary recompute branch, and the upload modal accepts `.json`. See the parser spec in `parsing-requirements.md` (TAK Server section) and field definitions Format 7.
 
 Two presentation rules came out of live verification and are now recorded in the tab spec: a scoped count must state its scope (the `No GPS Fix` KPI is PLI/Marker-only and must not be labelled as the map-exclusion count), and a map with nothing to plot must say so rather than render an un-tiled Leaflet container, which paints as a blank near-white box.
 
