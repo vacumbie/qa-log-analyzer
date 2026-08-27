@@ -1180,11 +1180,13 @@ pending either a firmware change or a documented ordering guarantee.
   packets, 0 confirmations) emits no `parse_errors` entry, so "this firmware
   build doesn't log confirmations" reads the same as "nothing transmitted".
   The sibling `temp_samples` case *does* emit one; the asymmetry is open.
-- **Unset RTC.** Captures 2–4 carry year-2036 timestamps (`Mon Apr 28
-  … 2036`) because the radio's clock was never set. Sessions cannot be
-  pinned to absolute time, and loading one alongside a real-dated log gives a
-  ten-year time-window range. This is why `HtModemTempOverTime` plots elapsed
-  time rather than absolute dates — see `docs/ui-requirements.md`.
+- **Unset RTC.** `htmodem_sample2.log` carries year-2036 timestamps (`Mon Apr 28
+  … 2036`) because the radio's clock was never set; `htmodem_sample.log` is
+  real-dated (2026). The two ht-router 2036 captures (`sample3`,
+  `sample4_rotated`) are the same radio. Affected sessions cannot be pinned to
+  absolute time, and loading one alongside a real-dated log gives a ten-year
+  time-window range. This is why `HtModemTempOverTime` plots elapsed time
+  rather than absolute dates — see `docs/ui-requirements.md`.
 - **`Found <N> devices` is ambiguous per-occurrence** — appears at least
   twice (IIO device enumeration, then AD5592 device enumeration) with no
   distinguishing context beyond surrounding lines. A naive "last value
@@ -1445,8 +1447,8 @@ retained in `raw` for anything the derived fields don't cover (WebTAK-specific
 
 ### Detection
 
-Priority **4**, immediately ahead of ATAK. `is_tak_log()` branches on the first
-non-`[`/`{` character after stripping leading whitespace:
+Priority **4**, immediately ahead of ATAK. `is_tak_log()` strips leading
+whitespace and branches on whether the first character is `[` or `{`:
 
 - **`[`-rooted** — requires all three of `"receivedAt"`, `"nodeType"` and
   `"category"` within the first 4000 characters.
@@ -1475,11 +1477,27 @@ line for the NDJSON shape:
 | Viewpoint | Server, many devices | One device, itself |
 
 Because the shapes now overlap, the key disjointness is the *only* thing
-keeping an ATAK log out of the TAK parser. `test_ndjson_branch_does_not_capture_atak_logs`
-in `tests/test_detect_format.py` pins that against a bare `{`-rooted ATAK
-record, and 22 further tests sweep every real ATAK fixture. Widening
-`_SIGNATURE_KEYS` in `parser/tak.py` will fail those loudly — which is the
-intent.
+keeping an ATAK log out of the TAK parser.
+`test_ndjson_branch_does_not_capture_atak_logs` in `tests/test_detect_format.py`
+pins that against a bare `{`-rooted ATAK record, and two parametrized sweeps
+cover every real ATAK fixture — one for content ordering, one for the
+filename-hint guard described below.
+
+**Which direction of edit breaks what is counter-intuitive**, so measure rather
+than assume. The check is `all(key in …)`:
+
+| Edit to `_SIGNATURE_KEYS` | ATAK fixtures misrouted | TAK fixtures misrouted |
+|---|---|---|
+| baseline | 0 | 0 |
+| add `"logId"` (a *narrowing* edit, despite reading as widening) | 0 | **9 of 10** |
+| loosen to `('"category"',)` | 0 | 0 |
+| empty tuple | **10 of 10** | 0 |
+
+So adding a key breaks TAK detection, not the ATAK guard, and even loosening to
+one generic key misroutes nothing — because real ATAK logs contain none of
+these keys at all. Only emptying the tuple trips the ATAK-side tests. Both
+directions fail loudly; just don't expect the ATAK sweeps to be what catches a
+narrowing edit.
 
 **The disjointness argument covers `is_tak_log()`, not the filename hints.** The
 hints are substring tests, and `tak_server` is a substring of the legacy ATAK

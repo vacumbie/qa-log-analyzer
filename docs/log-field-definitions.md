@@ -728,17 +728,16 @@ dataclasses live in `parser/models.py`.
 > **Structure:** `<ctime timestamp> : <message>`, free-text message with several
 > recurring structured shapes.
 >
-> **Status: spec only — not yet implemented.** No `HtModemResult` model, no
-> parser, no tests exist yet. Field mappings below are the target design.
+> **Status: implemented.** `parser/htmodem.py` → `HtModemResult` in
+> `models.py` → `_result_to_dict()` → `HtModemTab`.
 
 > Timestamps are **wall-clock `ctime()` format**, second precision, no
-> timezone. This is a distinct timestamp style from every currently
-> implemented format. See `parsing-requirements.md` → Next-Gen Radio — Modem
+> timezone — a distinct style from every other supported format, which is why
+> the client-side time-window scanner needed its own `CTIME_RE` branch (see
+> `ui-requirements.md`). See `parsing-requirements.md` → Next-Gen Radio — Modem
 > for the full field-by-field parsing rules.
 
-Would be parsed into a new `HtModemResult` (attached to
-`ParseResult.htmodem_result`, name TBD when implemented). All new dataclasses
-would live in `parser/models.py` alongside the existing `Fw*` models.
+Parsed into `HtModemResult`, attached to `ParseResult.htmodem_result`.
 
 ### Identity & Session
 
@@ -843,8 +842,9 @@ Parsed into `HtRouterResult`, attached to `ParseResult.htrouter_result`.
 | `output.aggregation.subframes/frames`, `.total_bytes` | ints | `stat_snapshots[].output_aggregation_subframes`, `.output_aggregation_frames`, `.output_total_bytes` | |
 | `output.time_outs`, `output.bottom.timed_out` | ints | `stat_snapshots[].output_time_outs`, `.output_bottom_timed_out` | |
 | `output.modem_xmit_failed` | int | `stat_snapshots[].output_modem_xmit_failed` | Clearest cross-reference point to `ht-modem`'s `CSMA QUEUE is Full` drops — correlation feature is future scope, not this parser |
-| `output.overhead[N] ([min, max] bytes) <n>` | int | `stat_snapshots[].output_overhead` | |
-| `output.xmit_completion[N] ([min, max] ms) <n>` | int | `stat_snapshots[].output_xmit_completion` | |
+| `output.overhead[N] ([min, max] bytes) <n>` | struct | `stat_snapshots[].output_overhead` — `Optional[RouterHistogramBucket]` | One histogram bucket, not a scalar: `bucket`, `range_min`, `range_max`, `count` (`RouterHistogramBucket` in `models.py`). Serialized as a nested object, so a consumer reading it as a number gets `undefined` |
+| `output.xmit_completion[N] ([min, max] ms) <n>` | struct | `stat_snapshots[].output_xmit_completion` — `Optional[RouterHistogramBucket]` | Same shape as `output_overhead` above |
+| `output.tap_frames` | int | `stat_snapshots[].output_tap_frames` | |
 | `connected <0\|1>` | bool | `stat_snapshots[].connected` | Terminates each snapshot block; also usable standalone as a connection-state timeline |
 
 > **Grouping requirement:** the ~20 lines above are **one measurement**, not

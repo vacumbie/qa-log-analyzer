@@ -905,13 +905,21 @@ real-dated log yields a **ten-year slider range** snapped to hours. The slider
 becomes unusable for narrowing to either session, and nothing tells the user
 why. Independent of any chart's axis choice.
 
-**Measured, not assumed:** running the real `extractTimeRange` over
-`htmodem_sample2.log` + `diagnostic_sample.txt` concatenated returns
-`2026-04-27T07:35:59Z → 2036-04-28T05:24:53Z` — **10.00 years**. Note this only
-became reproducible once the ctime scanner landed (see the section above);
-before that ht-modem returned `null` and contributed nothing to the combined
-range, so the case genuinely could not arise. The fix that made the slider work
-for ht-modem is what makes this item real.
+**Measured, not assumed** — by running the real `extractTimeRange` over
+concatenated fixtures:
+
+| Files | Combined span |
+|---|---|
+| `htmodem_sample2.log` + `diagnostic_sample.txt` | `2026-04-27T07:35:59Z → 2036-04-28T05:24:53Z` — **10.00 years** |
+| `htrouter_sample3.log` + `tak_ndjson_real_sample.log` | **9.67 years** |
+| `htrouter_sample2.log` + `htrouter_sample3.log` | **9.71 years** |
+
+The ht-router pairs matter for dating this item: ht-router writes ISO
+timestamps that `TS_RE` has always matched, so the ten-year range was
+reproducible **before** the ctime scanner landed, not because of it. (An
+earlier draft of this paragraph claimed the ctime fix was what made the case
+possible. It wasn't — it only added ht-modem as a third way to reach it. The
+defect predates both.)
 
 **Fix (not yet built):** during the existing client-side timestamp scan in
 `FileUpload.jsx`'s `onDrop`, track each file's own min/max range (not just

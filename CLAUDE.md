@@ -136,9 +136,16 @@ of the TAK parser is that their field sets are disjoint
 (`receivedAt`/`nodeType`/`category` vs `logId`/`connectionState`/`atakVersion`).
 For the NDJSON shape those keys must all appear in the **first non-empty line**
 alongside `"message"`, which is what stops an unrelated JSON-Lines format that
-merely mentions them somewhere from matching. Widening `_SIGNATURE_KEYS` will
-fail `test_ndjson_branch_does_not_capture_atak_logs` plus 22 ATAK-fixture
-ordering tests — keep it that way. That disjointness covers the *content*
+merely mentions them somewhere from matching.
+
+Before editing `_SIGNATURE_KEYS`, note which direction breaks what — the check
+is `all(key in …)`, so the intuition is backwards. **Adding** a key *narrows*
+the match and breaks **TAK** detection (adding `"logId"` misroutes 9 of 10 TAK
+fixtures and 0 ATAK ones). Only **emptying** the tuple misroutes ATAK, tripping
+`test_ndjson_branch_does_not_capture_atak_logs` and the two per-ATAK-fixture
+sweeps in `test_detect_format.py` (one asserts content ordering, the other the
+filename-hint guard). Either direction fails loudly; just don't expect the
+ATAK-side tests to be the ones that catch a narrowing edit. That disjointness covers the *content*
 check only — the `tak` **filename** hints are substring tests, and `tak_server`
 matches the legacy ATAK convention whenever the callsign starts with `SERVER`
 (`diagnostic_ATAK_SERVER_…` → misrouted, every record dropped as missing `time`,
@@ -170,8 +177,9 @@ UI only depend on that shape — never import parser internals into routes or
 UI components.
 
 **ht-modem / ht-router status:** complete through the UI — parsers, models,
-detection, API serialization, tests (34 + 34 against four real captures each
-plus synthetic edge cases), and the `HtModemTab` / `HtRouterTab` pair with five
+detection, API serialization, tests (34 each, against two real ht-modem
+captures and four real ht-router captures plus a synthetic edge-case fixture
+per format), and the `HtModemTab` / `HtRouterTab` pair with five
 `CHART_MAP` entries. Full requirements in `docs/parsing-requirements.md` and
 `docs/log-field-definitions.md` (Formats 5–6). **The UI rule these follow:**
 they live in a visually separate tab group — own row, own `--accent2` accent,
