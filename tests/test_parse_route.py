@@ -351,6 +351,35 @@ def test_htrouter_snapshot_serialization_exposes_the_link_layer_fields():
     }.items() <= snapshot.items()
 
 
+@pytest.mark.parametrize("fixture_name,fmt", [
+    ("htmodem_sample2.log", "htmodem"),
+    ("htrouter_sample3.log", "htrouter"),
+    ("htrouter_sample.log", "htrouter"),
+])
+def test_next_gen_csv_export_types_all_resolve_to_writable_tables(fixture_name, fmt):
+    """Every name in _CSV_TYPES must be a real key in the serialized response
+    and survive csv.DictWriter, which takes its fieldnames from row 0 and
+    raises if a later row carries a key row 0 lacks. The two next-gen formats
+    are the ragged-schema case — snapshots omit whole field groups depending on
+    what a session reported — so this is where that would bite."""
+    import csv, io as _io
+    from api.routes.export import _CSV_TYPES
+
+    result = _upload_fixture(fixture_name)
+    assert result["log_format"] == fmt
+    for data_type in sorted(_CSV_TYPES[fmt]):
+        rows = result.get(data_type)
+        if rows is None:
+            rows = result.get(fmt, {}).get(data_type)
+        assert rows is not None, f"{fmt}.{data_type} is exported but not serialized"
+        if not rows:
+            continue          # export returns 404 for an empty table, by design
+        out = _io.StringIO()
+        writer = csv.DictWriter(out, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def test_htrouter_total_bad_crc_reaches_the_summary():
     """The Overview KPI row reads this from the summary rather than walking
     stat_snapshots itself, so the serializer is the link that makes the parser's

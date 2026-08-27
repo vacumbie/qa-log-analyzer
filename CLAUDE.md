@@ -184,8 +184,8 @@ per format), and the `HtModemTab` / `HtRouterTab` pair with five
 `docs/log-field-definitions.md` (Formats 5–6). **The UI rule these follow:**
 they live in a visually separate tab group — own row, own `--accent2` accent,
 own section label — not another dimmed/badged tab in the existing row; see
-`docs/ui-requirements.md` Tabs section intro. Still outstanding: no `_CSV_TYPES`
-entry or JSON-only note in `api/routes/export.py` for either format, and the
+`docs/ui-requirements.md` Tabs section intro. Both formats now have `_CSV_TYPES`
+entries in `api/routes/export.py`. Still outstanding: the
 newer parsed fields (ht-modem TX confirmations, the nine ht-router `input.*`
 link-layer counters) are serialized but **not yet rendered anywhere** — an
 explicit deferral, recorded in `docs/ui-requirements.md` §18, not an oversight.
@@ -564,7 +564,7 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | `HtModemTempOverTime` — unequal-duration compression on the shared elapsed axis | ⏳ Pending — documented exception to the normalized-axis rule; a 36-min session beside a 2h36m one renders as ~a quarter width. Three options in `docs/ui-requirements.md` |
 | `RelayLimitationBanner` filters out un-prefixed `parse_errors`, so the ⚠ glyph can fire with no visible explanation | ⏳ Pending — `TakTab.jsx`'s `LimitationBanner` already renders prefixed and un-prefixed as two groups; adopt that pattern in `HtModemTab`/`HtRouterTab`/`FwLogTab` |
 | ht-modem — zero `Packet Transmitted` confirmations is indistinguishable from no transmission | ⏳ Pending — a log with TX packets and no confirmations emits no entry, unlike the sibling `temp_samples` case which does |
-| Next-Gen Radio — `_CSV_TYPES` entry or JSON-only note for `htmodem`/`htrouter` | ⏳ Pending — decision not yet recorded in `api/routes/export.py` |
+| Next-Gen Radio — `_CSV_TYPES` entry or JSON-only note for `htmodem`/`htrouter` | ✅ Done (2026-08-27) — **entries**, not JSON-only notes: both formats expose flat per-row tables, unlike `relay_manager`/`fw_log`'s nested summary structure. `htmodem`: `tx_packets`, `temp_samples_f`, `freq_changes`, `power_changes`. `htrouter`: `stat_snapshots`, `protocol_messages`, `forward_events`, `transmissions`. Two of those carry one nested column each (`transmissions`, the histogram buckets) which CSV stringifies — documented in `export.py` rather than dropping the two headline tables to avoid it |
 | `NextGenKpiRow`'s Bad CRC card re-derived the cumulative-counter rule in JSX | ✅ Done (2026-08-27) — `HtRouterResult.total_bad_crc` property → summary key → windowed recompute → UI reads `r.summary`, matching its two siblings. The rule is now defined once instead of the Overview row and the tab computing one number two ways |
 | Fourth verbatim `toMs` copy in `ChartPanel.jsx` | ✅ Done (2026-08-27) — one module-level `function toMs`, four locals deleted, six call sites unchanged. The "leave the duplication" escape clause didn't apply: one argument, no options bag |
 | Thermal chart repeated its three sensor colours per session — two sessions gave two identical-cyan "LPD" legend entries | ✅ Done (2026-08-27) — multi-session switches to colour = session (`PALETTE[i]`, matching the KPI block header) with the sensor carried by line style; subtitle states the encoding |

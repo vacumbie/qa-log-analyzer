@@ -35,6 +35,18 @@ _CSV_TYPES = {
     # relay_manager and fw_log it is a natural CSV export. raw_cot is not
     # serialized by the API, so the XML column is absent by design.
     "tak":        {"tak_events"},
+    # Next-gen radio. Both formats are per-row tables rather than the nested
+    # summary structure that makes relay_manager and fw_log JSON-only, so they
+    # get entries — but two tables carry one nested column each, and
+    # csv.DictWriter stringifies those into a single unusable cell:
+    #   tx_packets.transmissions      — list of RF confirmations per packet
+    #   stat_snapshots.output_overhead / .output_xmit_completion
+    #                                 — RouterHistogramBucket objects
+    # They are still exported, because dropping the two headline tables to
+    # avoid one awkward column each would be the worse trade. Use
+    # /export/{id}/json when you need those columns structured.
+    "htmodem":    {"tx_packets", "temp_samples_f", "freq_changes", "power_changes"},
+    "htrouter":   {"stat_snapshots", "protocol_messages", "forward_events", "transmissions"},
 }
 
 
@@ -71,8 +83,12 @@ def export_csv(session_id: str, data_type: str = "received_messages") -> Streami
       atak       : atak_messages | atak_health_samples | atak_events |
                    atak_app_launches | system_samples
       tak        : tak_events
+      htmodem    : tx_packets | temp_samples_f | freq_changes | power_changes
+      htrouter   : stat_snapshots | protocol_messages | forward_events |
+                   transmissions
 
-    relay_manager and fw_log are JSON-only — see the note on _CSV_TYPES.
+    relay_manager and fw_log are JSON-only — see the note on _CSV_TYPES, which
+    also lists the two next-gen tables carrying a nested column.
     """
     session = _store.get(session_id)
     if not session:
