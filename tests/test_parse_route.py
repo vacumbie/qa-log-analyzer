@@ -157,9 +157,22 @@ def test_tak_clean_stream_reports_no_operational_parse_errors_through_the_route(
     assert operational == []
 
 
-@pytest.mark.parametrize("fixture_name", sorted(
-    f.name for f in (Path(__file__).parent / "fixtures").glob("tak_stream_*.json")
-))
+TAK_FIXTURES = sorted(
+    f.name for f in (Path(__file__).parent / "fixtures").glob("tak_*") if f.is_file()
+)
+
+
+def test_tak_fixture_discovery_covers_both_shapes():
+    """The glob below deliberately matches tak_* rather than tak_stream_*.json:
+    the NDJSON captures are named tak_ndjson_*.log, so the narrower pattern
+    excluded them and the invariant CLAUDE.md describes as holding 'across every
+    fixture' quietly stopped covering the newest shape. An empty or
+    array-shape-only match here would collect a hollow guard."""
+    assert any(name.startswith("tak_ndjson_") for name in TAK_FIXTURES)
+    assert any(name.startswith("tak_stream_") for name in TAK_FIXTURES)
+
+
+@pytest.mark.parametrize("fixture_name", TAK_FIXTURES)
 def test_tak_category_counts_reconcile_against_total_events(fixture_name):
     """The five category counts must sum to total_events for every fixture. This
     is the guard the unrecognized bucket exists for — without it an unknown
@@ -209,3 +222,137 @@ def test_tak_single_zero_coordinate_serializes_as_a_real_fix():
     result = _tak_upload("tak_stream_zero_coordinate_positions.json")
     tema = next(e for e in result["tak_events"] if e["callsign"] == "TEMA")
     assert (tema["has_gps_fix"], tema["lat"], tema["lon"]) == (True, 5.626081, 0.0)
+
+
+# ── TAK NDJSON through the route ──────────────────────────────────────────────
+
+def test_ndjson_capture_routes_to_the_tak_parser_by_content():
+    """tak_ndjson_real_sample.log matches neither TAK filename hint, so this is
+    the content path carrying an 804-event capture on its own."""
+    result = _tak_upload("tak_ndjson_real_sample.log")
+    assert result["log_format"] == "tak"
+    assert len(result["tak_events"]) == 804
+
+
+def test_ndjson_summary_stats_serialized():
+    summary = _tak_upload("tak_ndjson_real_sample.log")["summary"]
+    assert summary["unique_callsigns"] == 23
+    assert summary["no_fix_count"] == 30
+    assert summary["min_latency_ms"] == -2097
+    assert summary["negative_latency_count"] == 793
+
+
+def test_ndjson_partial_coordinates_serialize_as_null_not_zero():
+    """Same guard as the array shape: the export has no has_gps_fix filter, so a
+    fabricated 0.0 would leave the API as a plottable equator position."""
+    result = _tak_upload("tak_ndjson_real_sample.log")
+    partial = [e for e in result["tak_events"] if e["lat"] is None]
+    assert len(partial) == 35
+    assert all(e["lon"] is None and e["has_gps_fix"] is False for e in partial)
+
+
+# ── ht-modem / ht-router serialization ────────────────────────────────────────
+# Neither format has a UI consumer for this data yet — no TX-confirmation KPI
+# card, nothing in App.jsx or ChartPanel.jsx reading an input_* field. That makes
+# _result_to_dict() the terminus of both data paths rather than a waypoint, so a
+# key dropped here would be caught at no layer, ever. These tests are the only
+# thing standing under those 14 fields.
+
+def _upload_fixture(fixture_name: str) -> dict:
+    return _post(fixture_name, (FIXTURE_DIR / fixture_name).read_bytes())["results"][0]
+
+
+def test_htmodem_upload_routes_to_the_htmodem_parser():
+    result = _upload_fixture("htmodem_sample2.log")
+    assert result["log_format"] == "htmodem"
+    assert len(result["htmodem"]["tx_packets"]) == 2585
+
+
+def test_htmodem_tx_packet_serialization_exposes_the_expected_field_set():
+    """Pinning the exact key set catches a dropped field and an accidental
+    payload bloat alike — the same reason the TAK event test above does it."""
+    result = _upload_fixture("htmodem_sample2.log")
+    assert set(result["htmodem"]["tx_packets"][0]) == {
+        "timestamp", "packet_id", "priority", "local_flag", "chdesc",
+        "mod_mode", "fec_mode", "data_length", "encoded_len", "bch_val",
+        "symbol_count", "sample_count", "payload_extended_from",
+        "payload_extended_to", "queued", "numinqueue",
+        "transmitted", "retransmit_count", "transmissions",
+    }
+
+
+def test_htmodem_transmission_confirmation_fields_serialized():
+    """The RF telemetry itself — rev/fwd power, S11, and the confirmation's own
+    temp_val, which is a different sensor and scale from temp_samples_f and must
+    not be folded into it."""
+    result = _upload_fixture("htmodem_sample2.log")
+    packet = next(p for p in result["htmodem"]["tx_packets"] if p["transmitted"])
+    assert set(packet["transmissions"][0]) == {
+        "rev_val", "fwd_val", "s11_db", "temp_val",
+    }
+
+
+def test_htmodem_retransmission_survives_serialization_as_a_list():
+    """transmissions is a list precisely so a second confirmation isn't
+    overwritten; serializing only the latest would discard the retry evidence
+    the parser went to trouble to keep."""
+    result = _upload_fixture("htmodem_sample2.log")
+    packet = next(p for p in result["htmodem"]["tx_packets"]
+                  if p["packet_id"] == 285)
+    assert len(packet["transmissions"]) == 2
+    assert packet["retransmit_count"] == 1
+
+
+def test_htmodem_summary_reports_transmitted_and_retransmit_counts():
+    summary = _upload_fixture("htmodem_sample2.log")["summary"]
+    assert summary["transmitted_count"] == 2542
+    assert summary["retransmit_packet_count"] == 42
+
+
+def test_htmodem_orphaned_counts_both_reach_the_api():
+    """orphaned_drop_count and orphaned_transmitted_count are the same kind of
+    fact — an event the parser saw but could not attribute. Serializing one and
+    not the other makes the unattributed confirmations unreachable from the UI
+    or an export, which is the ParseResult chain stopping one step short."""
+    htmodem = _upload_fixture("htmodem_sample2.log")["htmodem"]
+    assert htmodem["orphaned_drop_count"] == 0
+    assert htmodem["orphaned_transmitted_count"] == 1
+
+
+def test_htmodem_retransmission_note_reaches_the_api_response():
+    result = _upload_fixture("htmodem_sample2.log")
+    assert any("42 packet(s)" in e and "retransmission" in e
+               for e in result["parse_errors"])
+
+
+def test_htrouter_upload_routes_to_the_htrouter_parser():
+    result = _upload_fixture("htrouter_sample3.log")
+    assert result["log_format"] == "htrouter"
+    assert len(result["htrouter"]["stat_snapshots"]) == 1077
+
+
+def test_htrouter_snapshot_serialization_exposes_the_link_layer_fields():
+    result = _upload_fixture("htrouter_sample3.log")
+    snapshot = result["htrouter"]["stat_snapshots"][0]
+    assert {
+        "input_too_short_link_hdr": 152,
+        "input_too_short_link_payload": 237,
+        "input_too_short_link_crc": 2,
+        "input_wrong_link_version": 579,
+        "input_crc_present": 1831,
+        "input_bad_crc": 112,
+        "input_subframe_no_protocol": 3,
+        "input_subframe_logical_recv_error": 11,
+        "input_subframe_family_recv_error": 8,
+    }.items() <= snapshot.items()
+
+
+def test_htrouter_absent_link_layer_fields_serialize_as_null_not_zero():
+    """The absence convention has to survive JSON too: null reads as 'never
+    reported', 0 reads as 'measured, none seen'. A session that never logged
+    these counters must not arrive at the UI looking clean."""
+    result = _upload_fixture("htrouter_sample.log")
+    snapshot = result["htrouter"]["stat_snapshots"][0]
+    assert snapshot["input_bad_crc"] is None
+    assert snapshot["input_crc_present"] is None
+    assert snapshot["input_wrong_link_version"] is None

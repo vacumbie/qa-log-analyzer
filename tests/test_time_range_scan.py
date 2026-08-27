@@ -91,6 +91,22 @@ def test_ndjson_real_capture_range_matches_session_bounds(scanner):
     assert 1.9 < span < 2.2
 
 
+def test_ndjson_strip_keeps_every_json_timestamp_member(scanner):
+    """The count assertion the span check can't make. A strip regression that ate
+    most timestamps but happened to leave the two extremes would keep the span
+    correct and pass the test above — the array-shape sibling guards against that
+    with a count, and the NDJSON shape needs the same.
+
+    804 lines x three members: the logger envelope's own "timestamp" plus the
+    event's "time" and "receivedAt". The envelope timestamp is deliberately
+    included — it is a JSON member, not an XML attribute, and it records when the
+    server logged the line, so it belongs in the session range.
+    """
+    text = (FIXTURE_DIR / "tak_ndjson_real_sample.log").read_text(encoding="utf-8")
+    stripped = scanner["XML_TS_ATTR_RE"].sub("", text)
+    assert len(scanner["TS_RE"].findall(stripped)) == 804 * 3
+
+
 @pytest.mark.parametrize("fixture_name", sorted(
     f.name for f in FIXTURE_DIR.glob("*")
     if f.is_file() and not f.name.startswith("tak_")

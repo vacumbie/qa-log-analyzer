@@ -231,6 +231,43 @@ def test_link_layer_error_fields_parsed():
     assert s.input_subframe_family_recv_error == 8
 
 
+_LINK_LAYER_FIELDS = (
+    "input_too_short_link_hdr",
+    "input_too_short_link_payload",
+    "input_too_short_link_crc",
+    "input_wrong_link_version",
+    "input_crc_present",
+    "input_bad_crc",
+    "input_subframe_no_protocol",
+    "input_subframe_logical_recv_error",
+    "input_subframe_family_recv_error",
+)
+
+
+def test_link_layer_fields_absent_stay_none_never_zero():
+    """Same absence convention as output_modem_xmit_failed above: samples 1 and
+    2 don't report these counters at all, and that is not the same as reporting
+    zero of them. A default of 0 would render a clean green '0 bad CRC' for a
+    session where bad CRCs were never measured."""
+    for fixture in (FIXTURE, FIXTURE2):
+        hr = parse_htrouter_log(fixture).htrouter_result
+        for field in _LINK_LAYER_FIELDS:
+            assert all(getattr(s, field) is None for s in hr.stat_snapshots), (
+                f"{field} should be None throughout {fixture.name}"
+            )
+
+
+def test_link_layer_fields_present_in_the_sessions_that_report_them():
+    """The negative control for the test above — if the fields were never
+    populated anywhere, an all-None sweep would pass for the wrong reason."""
+    for fixture in (SAMPLE3, SAMPLE4_ROTATED):
+        hr = parse_htrouter_log(fixture).htrouter_result
+        for field in _LINK_LAYER_FIELDS:
+            assert any(getattr(s, field) is not None for s in hr.stat_snapshots), (
+                f"{field} should be populated somewhere in {fixture.name}"
+            )
+
+
 def test_link_layer_fields_are_cumulative_like_everything_else():
     """Same discipline as output_modem_xmit_failed: verify non-decreasing
     across the session rather than assuming."""
@@ -239,14 +276,24 @@ def test_link_layer_fields_are_cumulative_like_everything_else():
     assert values == sorted(values)
 
 
-def test_rotated_log_file_detected_and_parsed_despite_unusual_filename():
-    """ht-router_log.1 (no .log extension) is a rotated log, not a new
-    format — content-based detection must not depend on the extension."""
+def test_rotated_log_file_content_detected_and_parsed():
+    """A rotated log is the same format as the live one — the content check and
+    the parser must both handle it with no special casing."""
     content = SAMPLE4_ROTATED.read_text()
     assert is_htrouter_log(content) is True
     result = parse_htrouter_log(SAMPLE4_ROTATED)
     assert result.log_format == "htrouter"
     assert len(result.htrouter_result.stat_snapshots) > 0
+
+
+def test_rotation_style_filename_still_detects_as_htrouter():
+    """The extension claim, actually exercised: logrotate produces
+    'ht-router_log.1', which has no .log suffix at all. _detect_format() is the
+    function that reads filenames, so it is the one that has to be asked —
+    is_htrouter_log() never sees the name and cannot fail this way."""
+    content = SAMPLE4_ROTATED.read_text()
+    assert _detect_format("ht-router_log.1", content) == "htrouter"
+    assert _detect_format("ht-router.log.1", content) == "htrouter"
 
 
 def test_rotated_log_and_current_log_are_contiguous_sessions():

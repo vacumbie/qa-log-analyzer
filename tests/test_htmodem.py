@@ -229,6 +229,25 @@ def test_retransmission_note_in_parse_errors():
     assert any("42 packet(s)" in e and "retransmission" in e for e in result.parse_errors)
 
 
+def test_every_transmitted_line_is_either_attributed_or_counted_orphaned():
+    """The reconciliation the three counts above can't give you.
+
+    2542 / 42 / 1 are independent magic numbers — a regex tightened into
+    dropping a variant 'Packet Transmitted' format would move all three
+    together and still look self-consistent. This counts the raw lines in the
+    fixture and asserts nothing fell out: every confirmation is either attached
+    to a packet or tallied as orphaned, with no silent third path.
+    """
+    raw_line_count = sum(
+        1 for line in SAMPLE2.read_text(encoding="utf-8").splitlines()
+        if "Packet Transmitted" in line
+    )
+    hm = parse_htmodem_log(SAMPLE2).htmodem_result
+    attributed = sum(len(p.transmissions) for p in hm.tx_packets)
+    assert raw_line_count == 2585
+    assert attributed + hm.orphaned_transmitted_count == raw_line_count
+
+
 def test_untransmitted_packet_has_empty_transmissions_list():
     """A packet that was queued but never got a 'Packet Transmitted' line
     (e.g. file cut off) has an empty list, not a fabricated confirmation."""

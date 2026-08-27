@@ -173,6 +173,47 @@ def test_empty_tak_export_still_detected_by_filename():
     assert _detect_format("tak-stream-2026-07-30T19-42-44.json", "[]") == "tak"
 
 
+# ── NDJSON TAK captures ───────────────────────────────────────────────────────
+# The production capture shape is JSON-Lines, so its root character is '{' — the
+# same character an ATAK log's records start with. Detection now has a second
+# branch for it, and these pin the new rows.
+
+NDJSON_FIXTURES = ["tak_ndjson_sample.log", "tak_ndjson_real_sample.log"]
+
+
+@pytest.mark.parametrize("fixture_name", NDJSON_FIXTURES)
+def test_detects_ndjson_tak_from_content_alone(fixture_name):
+    """Neither NDJSON fixture matches a TAK filename hint ('tak-stream' /
+    'tak_server'), so content is all detection has to work from."""
+    assert _detect_format("mystery.log", _content(fixture_name)) == "tak"
+
+
+@pytest.mark.parametrize("fixture_name", NDJSON_FIXTURES)
+def test_ndjson_detected_despite_leading_blank_line(fixture_name):
+    """A concatenated, re-saved or rotated capture can arrive with a leading
+    newline. is_tak_log() strips before testing the root character but not
+    before reading the first line, so a leading '\\n' makes the envelope test
+    read an empty string, the NDJSON branch declines, and an 804-event capture
+    falls through to the diagnostic catch-all — parsed as an empty log, with no
+    error and no parse_errors entry to say anything went wrong.
+
+    A leading space alone survives (the strip catches it); only whitespace
+    containing a newline triggers this.
+    """
+    content = _content(fixture_name)
+    assert _detect_format("mystery.log", "\n" + content) == "tak"
+    assert _detect_format("mystery.log", "\r\n" + content) == "tak"
+
+
+def test_ndjson_branch_does_not_capture_atak_logs():
+    """The new '{'-rooted branch runs before the ATAK check. Real ATAK exports
+    are '['-rooted so they can't reach it today, but the guard is what keeps a
+    future bare-object ATAK log from being swallowed by the envelope test."""
+    assert _detect_format(
+        "mystery.log", '{"logId": 5, "connectionState": "CONNECTED", "atakVersion": "3.0"}\n'
+    ) == "atak"
+
+
 # ── Fallback ──────────────────────────────────────────────────────────────────
 
 def test_unrecognized_content_falls_back_to_diagnostic():

@@ -599,3 +599,103 @@ def test_array_shape_still_works_unaffected_by_ndjson_support():
     result = parse_tak_log(CLEAN_FIXTURE)
     assert result.log_format == "tak"
     assert len(result.tak_events) == 6
+
+
+# ── NDJSON at real-capture scale ──────────────────────────────────────────────
+# The 5-line fixture above covers the two skip branches, but its event content is
+# happy-path — no negative latency, no partial coordinates, no PLI/Marker (0,0)
+# sentinel. Every rule the array shape is pinned against has to hold on the
+# NDJSON path too, and the 804-line production capture is the only fixture that
+# actually carries that material. Asserting here rather than growing the
+# hand-built file keeps the synthetic fixture a branch-coverage fixture.
+
+REAL_NDJSON_FIXTURE = FIXTURE_DIR / "tak_ndjson_real_sample.log"
+
+
+def test_real_ndjson_capture_parses_every_line():
+    """804 non-empty lines, 804 events — no line silently lost to the envelope
+    unwrap, and none skipped as malformed."""
+    result = parse_tak_log(REAL_NDJSON_FIXTURE)
+    assert len(result.tak_events) == 804
+    assert not any("could not be parsed as a TAK event envelope" in e
+                   for e in result.parse_errors)
+
+
+def test_real_ndjson_category_counts_sum_to_total():
+    result = parse_tak_log(REAL_NDJSON_FIXTURE)
+    counts = {}
+    for e in result.tak_events:
+        counts[e.category] = counts.get(e.category, 0) + 1
+    assert counts == {"Marker": 492, "PLI": 273, "Other": 37, "Chat": 2}
+    assert sum(counts.values()) == len(result.tak_events)
+
+
+def test_real_ndjson_partial_coordinates_read_both_or_neither():
+    """35 records in this capture carry only one of lat/lon. On the NDJSON path
+    too, the missing half must stay None — a 0.0 here is a fabricated equator
+    position that passes the (0,0)-pair sentinel test and plots as a real fix."""
+    result = parse_tak_log(REAL_NDJSON_FIXTURE)
+    partial = [e for e in result.tak_events if e.lat is None or e.lon is None]
+    assert len(partial) == 35
+    # both-or-neither: never one None and one number
+    assert all(e.lat is None and e.lon is None for e in partial)
+
+
+def test_real_ndjson_partial_coordinate_error_counts_every_affected_record():
+    result = parse_tak_log(REAL_NDJSON_FIXTURE)
+    entry = next(e for e in result.parse_errors if "carry only one of lat/lon" in e)
+    assert entry.startswith("35 event(s)")
+
+
+def test_real_ndjson_zero_pair_sentinel_recognized():
+    """32 records report the CoT 0.0/0.0 no-fix sentinel — distinct from the 35
+    incomplete pairs, and none of them may keep a fix."""
+    result = parse_tak_log(REAL_NDJSON_FIXTURE)
+    sentinels = [e for e in result.tak_events if e.lat == 0.0 and e.lon == 0.0]
+    assert len(sentinels) == 32
+    assert all(e.has_gps_fix is False for e in sentinels)
+
+
+def test_real_ndjson_no_fix_count_is_pli_marker_scoped():
+    """The scoped-count rule at production scale: 30 of the 67 positionless
+    records are PLI/Marker. The other 37 are Chat/server-control, which never
+    carried a position to lose."""
+    result = parse_tak_log(REAL_NDJSON_FIXTURE)
+    assert len(result.tak_no_fix_events) == 30
+    assert {e.category for e in result.tak_no_fix_events} <= {"PLI", "Marker"}
+
+
+def test_real_ndjson_no_fix_sentence_matches_the_summary_scope():
+    result = parse_tak_log(REAL_NDJSON_FIXTURE)
+    entry = next(e for e in result.parse_errors if "no usable position" in e)
+    assert entry.startswith(f"{len(result.tak_no_fix_events)} PLI/Marker event(s)")
+    assert "A further 37 Chat/server-control event(s)" in entry
+
+
+def test_real_ndjson_negative_latency_preserved_not_clamped():
+    """793 of 804 events arrive with receivedAt before time — near-universal
+    clock skew in this capture, and exactly the P8 signal the format was added
+    to surface. A clamp to 0 would erase it."""
+    result = parse_tak_log(REAL_NDJSON_FIXTURE)
+    negative = [v for v in result.tak_latency_ms_values if v < 0]
+    assert len(negative) == 793
+    assert min(result.tak_latency_ms_values) == -2097
+
+
+def test_real_ndjson_server_info_from_the_handshake_record():
+    result = parse_tak_log(REAL_NDJSON_FIXTURE)
+    assert result.tak_server_info is not None
+    assert result.tak_server_info.server_version == "5.6-RELEASE-57-HEAD"
+    assert result.tak_server_info.api_version == "3"
+
+
+def test_real_ndjson_both_data_limitations_surfaced():
+    """Both entries are data-driven, and this capture carries the material for
+    each: 2 Chat records, and <status>/<takv>/<track> telemetry."""
+    result = parse_tak_log(REAL_NDJSON_FIXTURE)
+    limits = [e for e in result.parse_errors if e.startswith("DATA LIMITATION —")]
+    assert any("Chat message bodies not extracted" in e for e in limits)
+    entry = next(e for e in limits if "Telemetry present" in e)
+    assert "battery percentage (12 event(s))" in entry
+    assert "device model / OS / TAK version (497 event(s))" in entry
+    assert "speed and course (12 event(s))" in entry
