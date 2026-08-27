@@ -701,6 +701,7 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             ],
             "tx_packets":              tx_packets,
             "orphaned_drop_count":     hm.orphaned_drop_count,
+            "orphaned_transmitted_count": hm.orphaned_transmitted_count,
             "temp_samples_f":          temps_f,
             "total_lines":             hm.total_lines,
         }
