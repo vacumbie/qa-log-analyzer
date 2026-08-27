@@ -292,10 +292,11 @@ def test_htmodem_transmission_confirmation_fields_serialized():
     }
 
 
-def test_htmodem_retransmission_survives_serialization_as_a_list():
+def test_htmodem_second_confirmation_survives_serialization_as_a_list():
     """transmissions is a list precisely so a second confirmation isn't
-    overwritten; serializing only the latest would discard the retry evidence
-    the parser went to trouble to keep."""
+    overwritten; serializing only the latest would discard a real observation.
+    retransmit_count is an extra-confirmation count, not a confirmed retry —
+    see test_htmodem.py for the positional-attribution ambiguity."""
     result = _upload_fixture("htmodem_sample2.log")
     packet = next(p for p in result["htmodem"]["tx_packets"]
                   if p["packet_id"] == 285)
@@ -319,9 +320,12 @@ def test_htmodem_orphaned_counts_both_reach_the_api():
     assert htmodem["orphaned_transmitted_count"] == 1
 
 
-def test_htmodem_retransmission_note_reaches_the_api_response():
+def test_htmodem_multi_confirmation_limitation_reaches_the_api_response():
+    """Prefixed, so the tab banner renders it. An un-prefixed entry reaches the
+    file-list red ⚠ but is filtered out of every banner, which is a warning
+    with no explanation."""
     result = _upload_fixture("htmodem_sample2.log")
-    assert any("42 packet(s)" in e and "retransmission" in e
+    assert any(e.startswith("DATA LIMITATION — 42 TX packet(s)")
                for e in result["parse_errors"])
 
 

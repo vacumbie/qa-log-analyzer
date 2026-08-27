@@ -281,9 +281,20 @@ def parse_htmodem_log(path: Path) -> ParseResult:
             # real capture — other lines like a temp reading can intervene),
             # so attach to whichever packet is current, same as the drop
             # attribution above, rather than requiring strict adjacency.
-            # Appended, not overwritten: 42 of 2,585 confirmations in a real
-            # capture were a second confirmation for the same packet (a real
-            # RF retransmission) — overwriting would silently discard that.
+            #
+            # Appended, not overwritten, because a packet can end up with two
+            # confirmations — but be careful what that means. The line carries
+            # no packetID, so attribution is positional, and the modem
+            # sometimes starts encoding the NEXT packet before the previous
+            # one's confirmation appears. That shifts a confirmation forward
+            # by one packet. In the real capture, 43 packets have zero
+            # confirmations and 42 have two, and 40 of those 42 sit
+            # immediately after a zero-confirmation packet — so most "second
+            # confirmations" are the previous packet's, not a retry. Keeping
+            # both is still right (overwriting would discard a real
+            # observation either way), but the count is not evidence of RF
+            # retransmission. Fixing this properly needs packetID matching
+            # against the queue, which these lines don't carry.
             if current_packet is not None:
                 current_packet.transmissions.append(HtModemTransmitConfirmation(
                     rev_val=int(tram.group(1)),
@@ -353,13 +364,25 @@ def parse_htmodem_log(path: Path) -> ParseResult:
             "to a specific TX packet."
         )
 
-    retransmitted = [p for p in hm.tx_packets if p.retransmit_count > 0]
-    if retransmitted:
-        total_retries = sum(p.retransmit_count for p in retransmitted)
+    # Reported as an attribution limitation, not a retransmission count. A
+    # multi-confirmation packet is genuinely ambiguous: 'Packet Transmitted'
+    # carries no packetID, so a confirmation arriving after the next packet
+    # started encoding is attributed to that next packet instead. Calling
+    # these "retransmissions" (as this entry originally did) asserted a
+    # hardware fact the same capture contradicts.
+    multi_confirmed = [p for p in hm.tx_packets if p.retransmit_count > 0]
+    unconfirmed = [p for p in hm.tx_packets if not p.transmitted]
+    if multi_confirmed:
+        extra = sum(p.retransmit_count for p in multi_confirmed)
         result.parse_errors.append(
-            f"{len(retransmitted)} packet(s) show more than one 'Packet "
-            f"Transmitted' confirmation ({total_retries} extra confirmation(s) "
-            "total) — a real RF-layer retransmission, not a duplicate log line."
+            f"DATA LIMITATION — {len(multi_confirmed)} TX packet(s) have more "
+            f"than one 'Packet Transmitted' confirmation attributed to them "
+            f"({extra} extra confirmation(s)), while {len(unconfirmed)} have "
+            "none. The confirmation line carries no packetID, so attribution "
+            "is positional: a confirmation logged after the next packet began "
+            "encoding is credited to that next packet. An extra confirmation "
+            "may therefore be a genuine RF retry or the previous packet's "
+            "confirmation — this log cannot distinguish the two."
         )
 
     if not hm.temp_samples:

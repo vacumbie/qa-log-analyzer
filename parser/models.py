@@ -736,21 +736,32 @@ class HtModemTxPacket:
     queued:         Optional[bool] = None   # True = added to xmit queue, False = dropped, None = outcome not seen
     numinqueue:     Optional[int] = None
     # RF transmission confirmations — a separate, later event from "queued."
-    # A LIST, not a single scalar: real captures show some packets get
-    # confirmed more than once (42 of 2,585 in one real session) — genuine
-    # RF-layer retransmissions, not duplicate log lines. Overwriting with the
-    # latest would silently discard evidence of a retry. Attribution follows
-    # the same "attach to whichever packet is current" rule as drops, since
-    # confirmation does not always immediately follow "Added packet to xmit
-    # queue" (other lines can intervene).
+    # A LIST, not a single scalar: some packets get more than one confirmation
+    # attributed to them, and keeping only the latest would discard a real
+    # observation. Attribution follows the same "attach to whichever packet is
+    # current" rule as drops, since a confirmation does not always immediately
+    # follow "Added packet to xmit queue" (other lines can intervene).
+    #
+    # READ retransmit_count WITH CARE — it is not a retry count. 'Packet
+    # Transmitted' carries no packetID, so attribution is positional, and the
+    # modem sometimes begins encoding the next packet before the previous
+    # one's confirmation is logged, shifting it forward by one packet. In the
+    # one real capture with this data, 43 packets have no confirmation and 42
+    # have two, 40 of the 42 immediately following a zero-confirmation packet
+    # — so most extra confirmations are the previous packet's, not a retry.
+    # The ambiguity is reported as a DATA LIMITATION in parse_errors.
     transmissions:  list["HtModemTransmitConfirmation"] = field(default_factory=list)
 
     @property
     def transmitted(self) -> bool:
+        """At least one confirmation was attributed to this packet — see the
+        positional-attribution caveat on `transmissions`."""
         return len(self.transmissions) > 0
 
     @property
     def retransmit_count(self) -> int:
+        """Extra confirmations beyond the first. NOT a confirmed retry count —
+        see the caveat on `transmissions`."""
         return max(0, len(self.transmissions) - 1)
 
 

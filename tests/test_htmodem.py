@@ -196,17 +196,45 @@ def test_transmitted_confirmations_parsed_from_second_sample():
     assert len(transmitted) == 2542
 
 
-def test_retransmission_preserved_not_overwritten():
+def test_second_confirmation_preserved_not_overwritten():
     """42 packets in this real capture get a second 'Packet Transmitted'
-    confirmation — a genuine RF retry, not a duplicate log line. Both must
-    survive, not just the latest."""
+    confirmation attributed to them. Both must survive — whichever packet a
+    confirmation really belongs to, keeping only the latest would discard a
+    real observation. See the ambiguity test below for what the 42 means."""
     hm = parse_htmodem_log(SAMPLE2).htmodem_result
-    retransmitted = [p for p in hm.tx_packets if p.retransmit_count > 0]
-    assert len(retransmitted) == 42
+    multi_confirmed = [p for p in hm.tx_packets if p.retransmit_count > 0]
+    assert len(multi_confirmed) == 42
     p = next(p for p in hm.tx_packets if p.packet_id == 285)
     assert len(p.transmissions) == 2
     assert p.transmissions[0].rev_val == 2942
     assert p.transmissions[1].rev_val == 2935
+
+
+def test_multi_confirmation_is_positional_ambiguity_not_a_retry_count():
+    """The guard against re-asserting a hardware fact this log can't support.
+
+    'Packet Transmitted' carries no packetID, so attribution is positional.
+    The modem sometimes starts encoding the next packet before the previous
+    one's confirmation is logged, which credits it to the wrong packet — see
+    htmodem_sample2.log around packet 289/290, where 289 gets none and 290
+    gets two. The population-level signature: zero-confirmation packets and
+    two-confirmation packets pair up almost exactly, and nearly every
+    two-confirmation packet directly follows a zero-confirmation one.
+
+    If a future change makes retransmit_count a real retry count (by matching
+    packetIDs), this test should fail and be rewritten — not deleted.
+    """
+    packets = parse_htmodem_log(SAMPLE2).htmodem_result.tx_packets
+    unconfirmed = [p for p in packets if not p.transmitted]
+    multi_confirmed = [i for i, p in enumerate(packets) if p.retransmit_count > 0]
+    assert len(unconfirmed) == 43
+    assert len(multi_confirmed) == 42
+
+    preceded_by_unconfirmed = [
+        i for i in multi_confirmed
+        if i > 0 and not packets[i - 1].transmitted
+    ]
+    assert len(preceded_by_unconfirmed) == 40
 
 
 def test_transmission_confirmation_fields():
@@ -224,9 +252,27 @@ def test_orphaned_transmitted_line_counted_not_fabricated():
     assert hm.orphaned_transmitted_count == 1
 
 
-def test_retransmission_note_in_parse_errors():
+def test_multi_confirmation_ambiguity_reported_as_a_data_limitation():
+    """Prefixed DATA LIMITATION — the confirmation line carries no packetID, so
+    which packet an extra confirmation belongs to is genuinely undecidable from
+    this log. The prefix also makes it visible: the tab banners filter on it,
+    so an un-prefixed entry would fire the file-list red warning glyph with no
+    text anywhere to explain it."""
     result = parse_htmodem_log(SAMPLE2)
-    assert any("42 packet(s)" in e and "retransmission" in e for e in result.parse_errors)
+    entry = next(e for e in result.parse_errors if "more than one 'Packet Transmitted'" in e)
+    assert entry.startswith("DATA LIMITATION — 42 TX packet(s)")
+    assert "43 have none" in entry
+    assert "carries no packetID" in entry
+    assert "cannot distinguish" in entry
+
+
+def test_multi_confirmation_entry_does_not_claim_a_retransmission():
+    """The entry used to read 'a real RF-layer retransmission, not a duplicate
+    log line' — a hardware claim the same capture contradicts. Nothing in
+    parse_errors may assert a retry occurred."""
+    result = parse_htmodem_log(SAMPLE2)
+    assert not any("retransmission" in e or "RF retry occurred" in e
+                   for e in result.parse_errors)
 
 
 def test_every_transmitted_line_is_either_attributed_or_counted_orphaned():
