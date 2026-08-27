@@ -18,6 +18,7 @@ regex-extraction guard next door.
 """
 
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -37,9 +38,20 @@ HOUR_MS = 3_600_000
 @pytest.fixture(scope="module")
 def node():
     exe = shutil.which("node")
-    if not exe:
-        pytest.skip("node not on PATH — this guard needs the runtime Vite already requires")
-    return exe
+    if exe:
+        return exe
+    # Skipping locally is fine — a contributor without node still gets the rest
+    # of the suite. Skipping in CI is not: this file exists precisely because the
+    # only execution of extractTimeRange used to live outside CI, and a silent
+    # skip would quietly restore that. The workflow sets node up for this job;
+    # if that step is ever removed, fail here rather than pass with 11 skips.
+    if os.environ.get("CI"):
+        pytest.fail(
+            "node is not on PATH in CI, so the only test that actually executes "
+            "extractTimeRange did not run. Restore the 'Set up Node' step in "
+            ".github/workflows/ci.yml — do not silence this by deleting the test."
+        )
+    pytest.skip("node not on PATH — this guard needs the runtime Vite already requires")
 
 
 def _range(node, *fixture_names, paths=None):

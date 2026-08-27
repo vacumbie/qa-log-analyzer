@@ -367,10 +367,16 @@ Two test files guard `ui/src/components/FileUpload.jsx`'s time-window scanner
 from Python, since there is no JS test runner and the stack rules forbid adding
 one: `test_time_range_scan.py` re-runs its regex literals, and
 `test_time_range_exec.py` executes the real `extractTimeRange` under **node**
-(already required for Vite — no npm package added). The latter skips if node
-isn't on PATH. Keep the scanner's regexes as top-level single-line `const NAME =
-/…/g` literals and its helpers as top-level functions, or both guards fail
-loudly — which is the intent, not a reason to delete them.
+(already required for Vite — no npm package added). Keep the scanner's regexes
+as top-level single-line `const NAME = /…/g` literals and its helpers as
+top-level functions, or both guards fail loudly — which is the intent, not a
+reason to delete them.
+
+The node tests **skip** when node is absent locally, so a contributor without it
+still gets the rest of the suite — but they **fail** when `CI` is set, because
+this file exists precisely because the only execution of `extractTimeRange` once
+lived outside CI, and a silent skip would restore that. The `test-parser` job in
+`.github/workflows/ci.yml` sets node up for this reason; don't remove that step.
 
 ### Start the dev environment
 ```bash
