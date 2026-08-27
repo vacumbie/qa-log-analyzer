@@ -2,9 +2,10 @@
 parser/tak.py
 Parses goTenna TAK server CoT (Cursor-on-Target) event streams.
 
-Input format
-------------
-A JSON array of pre-parsed CoT events, e.g.:
+Input format — two real shapes seen in the wild
+-------------------------------------------------
+1. A JSON array of pre-parsed CoT events (the original sample this parser
+   was built against):
 
     [
       {
@@ -18,10 +19,24 @@ A JSON array of pre-parsed CoT events, e.g.:
       ...
     ]
 
-Each record is a CoT event already extracted from the TAK server's stream
-(the original CoT XML is preserved in `raw` for anything the derived fields
-don't cover). This is NOT a raw multicast/UDP CoT capture — if a raw XML
-stream ever needs support, this module would need a separate ingestion path.
+2. JSON Lines (NDJSON) — a real production capture, one JSON object per
+   line, each wrapping the same event shape inside a logger envelope:
+
+    {"level":"info","message":{...same fields as above...},"timestamp":"..."}
+    {"level":"info","message":{...},"timestamp":"..."}
+    ...
+
+   The outer `level`/`timestamp` are logging-framework metadata, not TAK
+   data — only `message` is unwrapped. This shape was discovered from a real
+   capture (tak-capture-*.log) after the original array-shaped sample and
+   this NDJSON shape turned out to be genuinely different files, not one
+   parser handling a filename variant.
+
+Each record (whichever shape it came from) is a CoT event already extracted
+from the TAK server's stream (the original CoT XML is preserved in `raw` for
+anything the derived fields don't cover). This is NOT a raw multicast/UDP
+CoT capture — if a raw XML stream ever needs support, this module would need
+a separate ingestion path.
 
 category values observed:
   PLI     — a-f-G-U-* friendly ground unit position report
@@ -43,10 +58,13 @@ Data limitations (returned in parse_errors)
   (see backlog item P8, cross-device timestamp skew).
 - Chat (b-t-f) message bodies are not extracted from `raw` in this version;
   only the envelope (sender callsign, timestamps) is captured.
+- NDJSON lines that fail to parse as JSON, or whose "message" isn't an
+  object, are counted and skipped rather than aborting the whole file.
 
 Usage:
     from parser.tak import parse_tak_log
     result = parse_tak_log(Path("tak-stream-2026-07-30T19-42-44.json"))
+    result = parse_tak_log(Path("tak-capture-Stratfi_Tak_Stream.log"))
 """
 
 from __future__ import annotations
@@ -71,11 +89,83 @@ _API_VERSION_RE = re.compile(r'apiVersion="([^"]*)"')
 
 
 def is_tak_log(content: str) -> bool:
-    """Heuristic content check for the TAK server stream format."""
+    """
+    Heuristic content check for the TAK server stream format — either shape.
+
+    Array shape: content starts with '[' and the signature keys appear.
+    NDJSON shape: content starts with '{' and the FIRST LINE both looks like
+    a logger envelope ("message") and carries the signature keys inside it —
+    checking only the first line (not the whole 4000-char snippet) avoids
+    false-positiving on some other JSON-Lines format that happens to mention
+    these key names anywhere in the file.
+    """
     snippet = content[:4000]
-    if not snippet.lstrip().startswith("["):
-        return False
-    return all(key in snippet for key in _SIGNATURE_KEYS)
+    stripped = snippet.lstrip()
+    if stripped.startswith("["):
+        return all(key in snippet for key in _SIGNATURE_KEYS)
+    if stripped.startswith("{"):
+        first_line = content.split("\n", 1)[0]
+        if '"message"' in first_line:
+            return all(key in first_line for key in _SIGNATURE_KEYS)
+    return False
+
+
+def _load_records(text: str, result: ParseResult) -> Optional[list]:
+    """
+    Load the list of raw CoT event dicts from either supported shape.
+    Returns None (with a parse_errors entry already appended) if nothing
+    usable could be extracted.
+    """
+    stripped = text.lstrip()
+
+    if stripped.startswith("["):
+        try:
+            records = json.loads(text)
+        except json.JSONDecodeError as e:
+            result.parse_errors.append(f"Could not parse TAK stream as JSON: {e}")
+            return None
+        if not isinstance(records, list):
+            result.parse_errors.append(
+                "TAK stream JSON root is not an array — expected a list of CoT event records."
+            )
+            return None
+        return records
+
+    if stripped.startswith("{"):
+        records = []
+        skipped_lines = 0
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                wrapper = json.loads(line)
+            except json.JSONDecodeError:
+                skipped_lines += 1
+                continue
+            msg = wrapper.get("message") if isinstance(wrapper, dict) else None
+            if isinstance(msg, dict):
+                records.append(msg)
+            else:
+                skipped_lines += 1
+        if skipped_lines:
+            result.parse_errors.append(
+                f"{skipped_lines} line(s) in this JSON-Lines capture could not "
+                "be parsed as a TAK event envelope ({\"message\": {...}}) and "
+                "were skipped."
+            )
+        if not records:
+            result.parse_errors.append(
+                "No valid CoT event records found in this JSON-Lines file."
+            )
+            return None
+        return records
+
+    result.parse_errors.append(
+        "TAK stream content is neither a JSON array nor JSON-Lines — "
+        "unrecognized root character."
+    )
+    return None
 
 
 # Elements carried in the CoT XML that this parser does not promote to fields.
@@ -155,16 +245,8 @@ def parse_tak_log(path: Path) -> ParseResult:
         result.parse_errors.append(f"Could not read file: {e}")
         return result
 
-    try:
-        records = json.loads(text)
-    except json.JSONDecodeError as e:
-        result.parse_errors.append(f"Could not parse TAK stream as JSON: {e}")
-        return result
-
-    if not isinstance(records, list):
-        result.parse_errors.append(
-            "TAK stream JSON root is not an array — expected a list of CoT event records."
-        )
+    records = _load_records(text, result)
+    if records is None:
         return result
 
     events: list[TakEvent] = []

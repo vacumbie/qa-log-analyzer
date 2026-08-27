@@ -152,11 +152,17 @@ def test_json_object_instead_of_array_returns_error(tmp_path):
 
 def test_json_object_root_error_names_the_shape_problem(tmp_path):
     """The hard-stop message has to say what was wrong — there is no partial
-    recovery path here, so this string is all the QA engineer gets."""
+    recovery path here, so this string is all the QA engineer gets.
+
+    A bare JSON object with no "message" key matches neither supported shape
+    (array of events, or NDJSON envelope {"message": {...}} per line) — the
+    parser now tries NDJSON for anything starting with '{', so the accurate
+    failure reason is "couldn't find a message envelope," not "not an array."
+    """
     bad_file = tmp_path / "wrong_shape.json"
     bad_file.write_text('{"not": "an array"}')
     result = parse_tak_log(bad_file)
-    assert "root is not an array" in result.parse_errors[0]
+    assert any("could not be parsed as a TAK event envelope" in e for e in result.parse_errors)
 
 
 def test_empty_array_reports_no_events_found(tmp_path):
@@ -538,4 +544,58 @@ def test_server_info_is_none_without_a_handshake_record():
 
 def test_clean_stream_still_parses_every_event():
     result = parse_tak_log(CLEAN_FIXTURE)
+    assert len(result.tak_events) == 6
+
+
+# ── NDJSON (JSON-Lines) shape — real production capture format ────────────────
+# Discovered from an actual tak-capture-*.log file: each line wraps the event
+# in a logger envelope ({"level":...,"message":{...event...},"timestamp":...})
+# rather than the whole file being one JSON array. Genuinely different shape,
+# not a filename variant of the array format.
+
+NDJSON_FIXTURE = FIXTURE_DIR / "tak_ndjson_sample.log"
+
+
+def test_ndjson_content_detection():
+    assert is_tak_log(NDJSON_FIXTURE.read_text()) is True
+
+
+def test_ndjson_log_format():
+    result = parse_tak_log(NDJSON_FIXTURE)
+    assert result.log_format == "tak"
+
+
+def test_ndjson_events_unwrapped_from_message_envelope():
+    result = parse_tak_log(NDJSON_FIXTURE)
+    assert len(result.tak_events) == 3
+    assert [e.category for e in result.tak_events] == ["PLI", "Other", "Marker"]
+
+
+def test_ndjson_server_info_extracted_same_as_array_shape():
+    result = parse_tak_log(NDJSON_FIXTURE)
+    assert result.tak_server_info is not None
+    assert result.tak_server_info.server_version == "5.6-RELEASE-57-HEAD"
+
+
+def test_ndjson_malformed_lines_skipped_not_fatal():
+    """One unparseable line and one line whose 'message' isn't an object —
+    both counted and skipped, the other 3 valid lines still parse."""
+    result = parse_tak_log(NDJSON_FIXTURE)
+    assert any("2 line(s)" in e and "could not be parsed as a TAK event envelope" in e
+               for e in result.parse_errors)
+
+
+def test_ndjson_all_malformed_lines_returns_no_events_error(tmp_path):
+    bad_file = tmp_path / "all_bad.log"
+    bad_file.write_text('{"level":"info","message":"not an object"}\nnot json\n')
+    result = parse_tak_log(bad_file)
+    assert result.tak_events == []
+    assert any("No valid CoT event records found" in e for e in result.parse_errors)
+
+
+def test_array_shape_still_works_unaffected_by_ndjson_support():
+    """Regression guard: adding NDJSON support must not change array-shape
+    behavior at all."""
+    result = parse_tak_log(CLEAN_FIXTURE)
+    assert result.log_format == "tak"
     assert len(result.tak_events) == 6

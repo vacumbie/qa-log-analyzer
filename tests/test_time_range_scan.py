@@ -80,9 +80,20 @@ def test_strip_keeps_every_json_timestamp_member(scanner):
     assert len(scanner["TS_RE"].findall(stripped)) == 182
 
 
+def test_ndjson_real_capture_range_matches_session_bounds(scanner):
+    """The NDJSON shape (tak-capture-*.log) embeds the same dense CoT XML
+    attributes as the array shape, just wrapped per-line in a logger
+    envelope — the strip must handle it the same way, at real-file scale
+    (804 lines, ~800KB), without pathological slowdown."""
+    text = (FIXTURE_DIR / "tak_ndjson_real_sample.log").read_text(encoding="utf-8")
+    span = _span_hours(text, scanner)
+    # Real session runs 2026-08-25 14:56:51 -> 16:58:02, ~2h1m
+    assert 1.9 < span < 2.2
+
+
 @pytest.mark.parametrize("fixture_name", sorted(
     f.name for f in FIXTURE_DIR.glob("*")
-    if f.is_file() and not f.name.startswith("tak_stream_")
+    if f.is_file() and not f.name.startswith("tak_")
 ))
 def test_non_tak_fixtures_are_untouched_by_the_strip(fixture_name, scanner):
     """The other five formats write bare timestamps with no preceding `=`, so
