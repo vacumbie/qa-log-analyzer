@@ -1167,6 +1167,20 @@ function HtRouterCumulativeFailures({ results }) {
     borderColor: color, backgroundColor: color + '22',
     tension: 0.2, pointRadius: 0, borderWidth: 2,
   })))
+
+  // Having snapshots is not the same as having these counters in them. A session
+  // that never transmitted omits the whole output.* group, so every dataset comes
+  // back all-null and Chart.js paints an empty 0–1 grid with no explanation —
+  // the "an empty map must say it's empty" case, for a chart. Says which fields
+  // are missing rather than just "no data", since absent here means "never
+  // reported by this session", not "zero failures".
+  const hasAnyPoint = datasets.some(d => d.data.some(v => v != null))
+  if (!hasAnyPoint) {
+    return (
+      <NoData message="No output.modem_xmit_failed or output.time_outs counters in this log — this session never transmitted, so those counters were never reported (not reported ≠ zero failures)" />
+    )
+  }
+
   return (
     <ChartCard
       title="Cumulative Modem TX Failures & Timeouts"

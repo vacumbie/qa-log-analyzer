@@ -477,7 +477,15 @@ the same visually separated Next-Gen Radio tab group as `ht-modem` (section
   the router-side counterpart to the modem tab's dropped-packet metric,
   and the two should be visually comparable when both logs are loaded
   together (not necessarily merged, just presented so a QA engineer can
-  eyeball correlation)
+  eyeball correlation).
+  **Must say when it's empty.** Having snapshots is not the same as having
+  these counters in them — a session that never transmitted omits the whole
+  `output.*` group, so every dataset is all-null and Chart.js paints a bare
+  0–1 grid with no explanation. `HtRouterCumulativeFailures` guards on
+  "does any dataset have a non-null point", not just on snapshot count, and
+  the message names the missing counters and says *not reported ≠ zero
+  failures*. This is the "an empty map must say it's empty" rule applied to a
+  chart; `HtRouterMsgTypes` next to it already had the equivalent guard.
 - **Protocol Message Activity** — breakdown of `client-hdr`/`mgt-hdr`
   message types and `mgt_hub_forward` send/skip counts
 - **Socket Warnings** — count and first-seen timestamp of `us_warn`

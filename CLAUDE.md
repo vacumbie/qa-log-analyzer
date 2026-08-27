@@ -543,6 +543,7 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | ht-modem — zero `Packet Transmitted` confirmations is indistinguishable from no transmission | ⏳ Pending — a log with TX packets and no confirmations emits no entry, unlike the sibling `temp_samples` case which does |
 | Next-Gen Radio — `_CSV_TYPES` entry or JSON-only note for `htmodem`/`htrouter` | ⏳ Pending — decision not yet recorded in `api/routes/export.py` |
 | Thermal chart repeated its three sensor colours per session — two sessions gave two identical-cyan "LPD" legend entries | ✅ Done (2026-08-27) — multi-session switches to colour = session (`PALETTE[i]`, matching the KPI block header) with the sensor carried by line style; subtitle states the encoding |
+| `HtRouterCumulativeFailures` painted a blank 0–1 grid when no snapshot carried the `output.*` counters | ✅ Done (2026-08-27) — guards on "any dataset has a non-null point", not snapshot count; message names the missing counters and states *not reported ≠ zero failures*. The "an empty map must say it's empty" rule, applied to a chart |
 
 ---
 
