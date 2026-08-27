@@ -3162,7 +3162,20 @@ export default function App() {
         gpsd_connect_error:      r.summary?.gpsd_connect_error,
         tx_packet_count:         htmodemTx.length,
         queued_count:            htmodemTx.filter(p => p.queued === true).length,
-        dropped_count:           htmodemTx.filter(p => p.queued === false).length,
+        // Must include orphaned drops to match the parser's definition
+        // (HtModemResult.dropped_count = queued-false + orphaned_drop_count).
+        // Omitting them made the KPI fall by the orphan count the moment any
+        // window was applied, with no window that restored it. Orphans carry no
+        // timestamp of their own — they're drop lines with no open packet record
+        // — so they can't be windowed and are counted in every window.
+        dropped_count:           htmodemTx.filter(p => p.queued === false).length
+                                   + (r.htmodem?.orphaned_drop_count || 0),
+        // Whole-session values, deliberately not recomputed: a confirmation is
+        // attributed positionally to whichever packet was open, so slicing by
+        // window would split pairs and shift the ambiguity these count. Add the
+        // recompute here if either ever gets a KPI card — see ui-requirements.md.
+        transmitted_count:       r.summary?.transmitted_count,
+        retransmit_packet_count: r.summary?.retransmit_packet_count,
         freq_change_count:       htmodemFreq.length,
         power_change_count:      htmodemPower.length,
         temp_sample_count:       htmodemTemps.length,
