@@ -555,6 +555,8 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | Time-window scanner missed `ctime` timestamps, so `ht-modem` lost the slider *and* was told its timestamps didn't exist | ✅ Done (2026-08-27) — `CTIME_RE` unioned into `extractTimeRange`, weekday-anchored, read as UTC. Verified by executing the real function: both fixtures now return the same bounds the parser reports, where they previously returned `null`. `fw_log` is again the sole `range-unavailable` trigger |
 | Next-gen-only session fell through to the device KPI row — five dashes plus `APP VERSION: 0 versions` | ✅ Done (2026-08-27) — `NextGenKpiRow` in `App.jsx`, the third scoped row after `RelayKpiRow`/`TakKpiRow`. The rule now lives in `docs/ui-requirements.md` → "KPI Header Row" with a table of all three, instead of being restated inside format sections — which is why this got missed twice |
 | Windowed `dropped_count` omitted `orphaned_drop_count`, so the KPI fell whenever any time window was applied | ✅ Done (2026-08-27) — recompute now matches the parser's `dropped_count` property. Orphans carry no timestamp of their own, so they count in every window |
+| `HtRouterTab` Modem PID card promised a cross-link to a loaded ht-modem session | ✅ Done (2026-08-27) — ht-modem parses no PID, so nothing could ever match. Sub-label now says "ht-modem process spawned by this router" |
+| `TakTab` empty state advertised `.json` only, after NDJSON support landed | ✅ Done (2026-08-27) — names both the array export and the JSON-Lines capture |
 
 ---
 

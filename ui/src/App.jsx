@@ -2474,8 +2474,12 @@ function HtRouterTab({ results }) {
 
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
               <KpiCard label="Stat Snapshots" value={(sum.snapshot_count || 0).toLocaleString()} color={C.accent} />
+              {/* Sub-label deliberately does NOT promise a cross-link to a
+                  loaded ht-modem session: ht-modem parses no PID of its own, so
+                  there is nothing on the other side to match against. This is
+                  the router's record of the process it spawned, nothing more. */}
               <KpiCard label="Modem PID" value={sum.modem_pid ?? '—'} color="#6366f1"
-                sub={sum.modem_pid != null ? 'cross-links to ht-modem log' : undefined} />
+                sub={sum.modem_pid != null ? 'ht-modem process spawned by this router' : 'no nb_modem_start line'} />
               <KpiCard label="Modem TX Failures" value={xmitFail ?? '—'}
                 color={xmitFail == null ? C.muted : xmitFail ? '#ff4757' : '#00e5a0'}
                 sub={xmitFail == null ? 'not reported in this log' : 'session-lifetime total'} />

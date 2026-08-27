@@ -232,7 +232,7 @@ export default function TakTab({ results }) {
   const takResults = results.filter(r => r.log_format === 'tak')
 
   if (!takResults.length) {
-    return <Note>No TAK Server logs loaded. Upload a TAK server CoT event stream (.json) to see position and latency data.</Note>
+    return <Note>No TAK Server logs loaded. Upload a TAK server CoT event stream — a JSON array export (.json) or a JSON-Lines capture (.log) — to see position and latency data.</Note>
   }
 
   const allEvents = takResults.flatMap(r => r.tak_events || [])
