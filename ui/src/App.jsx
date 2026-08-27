@@ -117,6 +117,17 @@ function KpiRow({ results }) {
   const allTak = results.length > 0 && results.every(r => r.log_format === 'tak')
   if (allTak) return <TakKpiRow results={results} />
 
+  // Third format group to need this, so the rule now lives in ui-requirements.md
+  // under "KPI Header Row" rather than being restated per format: a format whose
+  // logs carry none of the device row's inputs needs its own scoped row. The
+  // next-gen radio logs have no callsign, GID, serial, firmware version, battery
+  // or hop count at all, so the device cards render five dashes plus a literal
+  // "APP VERSION: 0 versions" — a zero standing in for "no such concept".
+  const allNextGen = results.length > 0
+    && results.every(r => r.log_format === 'htmodem' || r.log_format === 'htrouter')
+  if (allNextGen) return <NextGenKpiRow results={results} />
+
+
   // Hop counts — diagnostic, ATAK, and RSDK via GRIP_Receiver incoming messages
   const allHops = results.flatMap(r => {
     if (r.log_format === 'atak')
@@ -2660,6 +2671,67 @@ function TakKpiRow({ results }) {
           because a stream genuinely can arrive with no handshake record. */}
       <KpiCard label="Clock Skew"     value={skew}           sub="events received before sent" color={skew ? '#ef4444' : '#64748b'} />
       <KpiCard label="Server Version" value={serverVersions.join(', ') || '—'} sub="from the CoT handshake" color='#22d3ee' />
+    </div>
+  )
+}
+
+function NextGenKpiRow({ results }) {
+  // Compact KPI strip shown in the Overview when every loaded log is a next-gen
+  // radio log (ht-modem and/or ht-router). These carry no radio identity of any
+  // kind — no callsign, GID, serial or firmware version — and no hop count or
+  // RSSI, so the device row cannot be filled in. Same reasoning as RelayKpiRow
+  // and TakKpiRow; see the KPI Header Row section in docs/ui-requirements.md.
+  const modem  = results.filter(r => r.log_format === 'htmodem')
+  const router = results.filter(r => r.log_format === 'htrouter')
+
+  // Absent counters stay null so a card can say "not reported" rather than "0".
+  // A session that never transmitted omits the whole output.* group, and only
+  // some captures report the input.* error counters — see the ht-router rows in
+  // CLAUDE.md's known data limitations.
+  const sumReported = (rows, pick) => {
+    const vals = rows.map(pick).filter(v => v != null)
+    return vals.length ? vals.reduce((a, b) => a + b, 0) : null
+  }
+  const sumCount = (rows, key) => rows.reduce((n, r) => n + (r.summary?.[key] || 0), 0)
+
+  const txPackets = sumCount(modem, 'tx_packet_count')
+  const dropped   = sumCount(modem, 'dropped_count')
+  const peaks     = modem.map(r => r.summary?.peak_pl_temp_f).filter(v => v != null)
+  const peakTemp  = peaks.length ? Math.max(...peaks) : null
+  const xmitFail  = sumReported(router, r => r.summary?.total_modem_xmit_failed)
+  const badCrc    = sumReported(router, r => {
+    // Cumulative session counters: the total is the LAST snapshot's value, never
+    // a sum across snapshots. Absent throughout means never reported, not zero.
+    const snaps = (r.htrouter?.stat_snapshots || []).filter(s => s.input_bad_crc != null)
+    return snaps.length ? snaps[snaps.length - 1].input_bad_crc : null
+  })
+
+  return (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '12px 36px', borderBottom: '1px solid var(--border2)', background: 'rgba(5,8,15,0.75)', flexShrink: 0, backdropFilter: 'blur(4px)' }}>
+      <KpiCard label="Logs Loaded" value={results.length}
+        sub={`${modem.length} modem · ${router.length} router`} color="var(--accent2)" />
+      {/* Modem-only and router-only cards each render only when that half is
+          loaded — an all-router session showing "TX PACKETS 0" would be the
+          same zero-for-absent problem this whole row exists to avoid. */}
+      {modem.length > 0 && <>
+        <KpiCard label="TX Packets" value={txPackets.toLocaleString()} sub="encoded for transmit" color={C.accent} />
+        <KpiCard label="Dropped" value={dropped.toLocaleString()}
+          sub={txPackets ? `${Math.round((dropped / txPackets) * 100)}% of TX packets` : undefined}
+          color={dropped ? '#ff4757' : '#00e5a0'} />
+        <KpiCard label="Peak PL Temp" value={peakTemp != null ? `${peakTemp}°F` : '—'}
+          sub={peakTemp == null ? 'no thermal samples' : 'hottest zone observed'}
+          color={peakTemp != null && peakTemp >= 131 ? '#ff4757' : peakTemp != null && peakTemp >= 113 ? '#ffd166' : '#00e5a0'} />
+      </>}
+      {router.length > 0 && <>
+        <KpiCard label="Stat Snapshots" value={sumCount(router, 'snapshot_count').toLocaleString()}
+          sub="periodic counter blocks" color={C.accent} />
+        <KpiCard label="Modem TX Failures" value={xmitFail ?? '—'}
+          sub={xmitFail == null ? 'not reported in this log' : 'session-lifetime total'}
+          color={xmitFail == null ? C.muted : xmitFail ? '#ff4757' : '#00e5a0'} />
+        <KpiCard label="Bad CRC" value={badCrc ?? '—'}
+          sub={badCrc == null ? 'not reported in this log' : 'link-layer, session total'}
+          color={badCrc == null ? C.muted : badCrc ? '#ffd166' : '#00e5a0'} />
+      </>}
     </div>
   )
 }

@@ -102,12 +102,42 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
 
 > **Temperature rule:** Always display in °F. Source data is Celsius — convert before display.
 
+### A format that can't fill this row needs its own scoped row
+
+The table above is the **device** row: it assumes each log describes one radio
+that reports identity, firmware, thermal and RF data. When every loaded log
+comes from a format carrying none of that, the row must be replaced, not
+rendered with dashes.
+
+Left unreplaced it renders `Network Nodes —`, `Peak Temp —`, `Avg Hop Count —`,
+`Chat Messages —`, `Radio Firmware —` sub-labelled a green **"all match"** over
+zero observed versions, and — worst — `APP VERSION: 0 versions`. That `0` is a
+zero standing in for "this format has no such concept", which is exactly what
+CLAUDE.md's honesty rule and its scoped-count corollary forbid ("a scoped count
+also renders at zero — `0` doesn't mean everything is included").
+
+`KpiRow` in `App.jsx` escapes to a scoped row when **every** loaded log belongs
+to such a format:
+
+| Condition | Row | Why the device row can't apply |
+|---|---|---|
+| all `relay_manager` | `RelayKpiRow` | No RF messages, PLI or chat |
+| all `tak` | `TakKpiRow` | Server-side view of many clients — no serial, GID, firmware, battery or thermal |
+| all `htmodem`/`htrouter` | `NextGenKpiRow` | No radio identity of any kind, and no hop count or RSSI |
+
+This rule was written down only after the third format hit it — it had been
+stated twice inside format-specific sections instead, which is why next-gen
+repeated the defect. **A new format that can't fill the device row gets a row
+here, and a line in this table.** Within a scoped row the same absent-vs-zero
+discipline applies: a counter no loaded log reports is `—` with
+"not reported in this log", while a real measured zero renders as `0`.
+
 ---
 
 ## Tabs
 
 > **Tab grouping (new requirement, 2026-08-24):** Next-Gen Radio tabs
-> (`ht-modem`, `ht-router` — sections 16–17) are visually separated from the
+> (`ht-modem`, `ht-router` — sections 17–18) are visually separated from the
 > rest of the tab bar, not simply another dimmed/badged entry mixed into the
 > existing flat row alongside `atakOnly`/`relayOnly`/`fwOnly`/`takOnly` tabs.
 > This is a deliberate product decision: the next-gen radio is a different

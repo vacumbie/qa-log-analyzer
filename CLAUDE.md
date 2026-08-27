@@ -553,6 +553,7 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | Thermal chart repeated its three sensor colours per session — two sessions gave two identical-cyan "LPD" legend entries | ✅ Done (2026-08-27) — multi-session switches to colour = session (`PALETTE[i]`, matching the KPI block header) with the sensor carried by line style; subtitle states the encoding |
 | `HtRouterCumulativeFailures` painted a blank 0–1 grid when no snapshot carried the `output.*` counters | ✅ Done (2026-08-27) — guards on "any dataset has a non-null point", not snapshot count; message names the missing counters and states *not reported ≠ zero failures*. The "an empty map must say it's empty" rule, applied to a chart |
 | Time-window scanner missed `ctime` timestamps, so `ht-modem` lost the slider *and* was told its timestamps didn't exist | ✅ Done (2026-08-27) — `CTIME_RE` unioned into `extractTimeRange`, weekday-anchored, read as UTC. Verified by executing the real function: both fixtures now return the same bounds the parser reports, where they previously returned `null`. `fw_log` is again the sole `range-unavailable` trigger |
+| Next-gen-only session fell through to the device KPI row — five dashes plus `APP VERSION: 0 versions` | ✅ Done (2026-08-27) — `NextGenKpiRow` in `App.jsx`, the third scoped row after `RelayKpiRow`/`TakKpiRow`. The rule now lives in `docs/ui-requirements.md` → "KPI Header Row" with a table of all three, instead of being restated inside format sections — which is why this got missed twice |
 
 ---
 
