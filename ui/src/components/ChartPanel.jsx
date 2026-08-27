@@ -1046,16 +1046,33 @@ function HtModemTempOverTime({ results }) {
     return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`
   }
 
+  // One colour per sensor for a single session. With two or more sessions the
+  // sensor colours alone would repeat — two "LPD" legend entries in identical
+  // cyan, indistinguishable where the sessions overlap — so the sensor is
+  // carried by line style instead and the colour identifies the session, using
+  // the same PALETTE index as that session's KPI block header.
   const metrics = [['lpd_f', '#00d4ff', 'LPD'], ['fpd_f', '#ff6b35', 'FPD'], ['pl_f', '#ffd166', 'PL']]
-  const datasets = perDevice.flatMap(({ r, samples }) => metrics.map(([key, color, name]) => ({
-    label: hm.length > 1 ? `${shortLabel(r)} — ${name}` : `${name} Temp (°F)`,
-    data: samples.map(s => ({ x: s.elapsedMs, y: s[key], _abs: s.ms })),
-    borderColor: color, backgroundColor: color + '22',
-    tension: 0.3, pointRadius: 0, borderWidth: 2,
-  })))
+  const DASHES = [[], [6, 3], [2, 2]]   // LPD solid, FPD dashed, PL dotted
+  const multi = hm.length > 1
+  const datasets = perDevice.flatMap(({ r, samples }, deviceIdx) =>
+    metrics.map(([key, sensorColor, name], metricIdx) => {
+      const color = multi ? PALETTE[deviceIdx % PALETTE.length] : sensorColor
+      return {
+        label: multi ? `${shortLabel(r)} — ${name}` : `${name} Temp (°F)`,
+        data: samples.map(s => ({ x: s.elapsedMs, y: s[key], _abs: s.ms })),
+        borderColor: color, backgroundColor: color + '22',
+        borderDash: multi ? DASHES[metricIdx] : [],
+        tension: 0.3, pointRadius: 0, borderWidth: 2,
+      }
+    }))
 
   return (
-    <ChartCard title="Next-Gen Modem Thermal (LPD / FPD / PL)" subtitle="Zynq MPSoC thermal zones · °F · elapsed time since each session's start">
+    <ChartCard
+      title="Next-Gen Modem Thermal (LPD / FPD / PL)"
+      subtitle={multi
+        ? "Zynq MPSoC thermal zones · °F · elapsed time since each session's start · colour = session, line style = sensor (LPD solid, FPD dashed, PL dotted)"
+        : "Zynq MPSoC thermal zones · °F · elapsed time since each session's start"}
+    >
       <Line data={{ datasets }} options={LINE_OPTS({
         parsing: false,
         scales: {

@@ -542,6 +542,7 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | `RelayLimitationBanner` filters out un-prefixed `parse_errors`, so the ⚠ glyph can fire with no visible explanation | ⏳ Pending — `TakTab.jsx`'s `LimitationBanner` already renders prefixed and un-prefixed as two groups; adopt that pattern in `HtModemTab`/`HtRouterTab`/`FwLogTab` |
 | ht-modem — zero `Packet Transmitted` confirmations is indistinguishable from no transmission | ⏳ Pending — a log with TX packets and no confirmations emits no entry, unlike the sibling `temp_samples` case which does |
 | Next-Gen Radio — `_CSV_TYPES` entry or JSON-only note for `htmodem`/`htrouter` | ⏳ Pending — decision not yet recorded in `api/routes/export.py` |
+| Thermal chart repeated its three sensor colours per session — two sessions gave two identical-cyan "LPD" legend entries | ✅ Done (2026-08-27) — multi-session switches to colour = session (`PALETTE[i]`, matching the KPI block header) with the sensor carried by line style; subtitle states the encoding |
 
 ---
 

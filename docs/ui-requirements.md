@@ -433,6 +433,14 @@ above), not the main tab row.
   **X-axis is per-session elapsed time**, not the normalized 0–100% axis the
   other charts use — see the note under the Cross-File Offset item below for
   the trade-off that choice makes.
+  **Colour encoding switches with session count.** One session: colour = sensor
+  (LPD cyan, FPD orange, PL yellow), which is the readable default. Two or
+  more: colour = **session** (`PALETTE[i]`, matching that session's KPI block
+  header) and the sensor moves to line style — LPD solid, FPD dashed, PL
+  dotted. Without this the three sensor colours repeat per session, so two
+  sessions produce two identical-cyan "LPD" legend entries that are
+  indistinguishable wherever the sessions overlap. The subtitle states the
+  encoding when it applies.
 - **GPS/Clock** — `gpsd` connection status, clock calibration offset,
   SI4460 calibration offset (surfaced as informational, not necessarily a
   fault)
