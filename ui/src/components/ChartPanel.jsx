@@ -17,6 +17,18 @@ const TT_CFG  = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// Log timestamps arrive in two serialized shapes — "2026-08-12 05:13:23.000000"
+// and "2026-08-25T14:56:51.402Z" — and none of the formats carry a timezone, so
+// a bare stamp is read as UTC. Falls back to the raw string for anything the
+// normalized form can't parse. Module-level: four charts parsed timestamps with
+// byte-identical private copies, so a fix to one silently missed the others.
+function toMs(ts) {
+  if (!ts) return NaN
+  const s = ts.includes('T') ? ts : ts.replace(' ', 'T')
+  const ms = new Date(s.endsWith('Z') ? s : s + 'Z').getTime()
+  return isNaN(ms) ? new Date(ts).getTime() : ms
+}
+
 function shortLabel(r) {
   // Parsers with no identity field to read write the literal string 'unknown'
   // (next-gen radio logs carry no callsign at all). That means "absent", not a
@@ -54,13 +66,6 @@ function downsample(arr, max = 50) {
  * X labels show % of each device's own session (0%, 10%, … 100%).
  */
 function buildRelativeTimeSeries(results, key = 'system_samples', maxPoints = 15) {
-  const toMs = ts => {
-    if (!ts) return NaN
-    const s = ts.includes('T') ? ts : ts.replace(' ', 'T')
-    const ms = new Date(s.endsWith('Z') ? s : s + 'Z').getTime()
-    return isNaN(ms) ? new Date(ts).getTime() : ms
-  }
-
   const hasAny = results.some(r => (r[key] || []).some(s => s.timestamp))
   if (!hasAny) return { labels: [], getDataset: () => [] }
 
@@ -181,13 +186,6 @@ function BatteryOverTime({ results }) {
   // normalizing to 0-100% session, so the chart shows real time of day.
   // Multi-device sessions with different start times are shown on a shared
   // absolute time axis — gaps appear where a device has no data.
-
-  const toMs = ts => {
-    if (!ts) return NaN
-    const s = ts.includes('T') ? ts : ts.replace(' ', 'T')
-    const ms = new Date(s.endsWith('Z') ? s : s + 'Z').getTime()
-    return isNaN(ms) ? new Date(ts).getTime() : ms
-  }
 
   const fmtTime = ms => {
     if (!ms || isNaN(ms)) return ''
@@ -762,13 +760,6 @@ function AtakEventsTimeline({ results }) {
  * smooth averaged line rather than noisy per-message scatter.
  */
 function buildGripRssiSeries(results, maxPoints = 40) {
-  const toMs = ts => {
-    if (!ts) return NaN
-    const s = ts.includes('T') ? ts : ts.replace(' ', 'T')
-    const ms = new Date(s.endsWith('Z') ? s : s + 'Z').getTime()
-    return isNaN(ms) ? new Date(ts).getTime() : ms
-  }
-
   const labels = Array.from({ length: maxPoints }, (_, i) =>
     `${Math.round((i / (maxPoints - 1)) * 100)}%`
   )
@@ -1003,13 +994,6 @@ function TakLatency({ results }) {
 function HtModemTempOverTime({ results }) {
   const hm = results.filter(r => r.log_format === 'htmodem')
   if (!hm.length) return <NoData message="No ht-modem logs loaded" />
-
-  const toMs = ts => {
-    if (!ts) return NaN
-    const s = ts.includes('T') ? ts : ts.replace(' ', 'T')
-    const ms = new Date(s.endsWith('Z') ? s : s + 'Z').getTime()
-    return isNaN(ms) ? new Date(ts).getTime() : ms
-  }
 
   // Downsample the SAMPLE rows together (not each metric separately) so
   // LPD/FPD/PL stay aligned at the same points rather than drifting apart.
