@@ -31,10 +31,13 @@ def _regexes() -> dict:
     return found
 
 
+_SCANNER_NAMES = ("TS_RE", "XML_TS_ATTR_RE", "CTIME_RE")
+
+
 @pytest.fixture(scope="module")
 def scanner():
     found = _regexes()
-    missing = {"TS_RE", "XML_TS_ATTR_RE"} - set(found)
+    missing = set(_SCANNER_NAMES) - set(found)
     if missing:
         pytest.fail(
             f"FileUpload.jsx no longer defines {sorted(missing)} as a top-level "
@@ -42,7 +45,7 @@ def scanner():
             "do not delete it; it is the only guard on that code path."
         )
     try:
-        return {name: re.compile(found[name]) for name in ("TS_RE", "XML_TS_ATTR_RE")}
+        return {name: re.compile(found[name]) for name in _SCANNER_NAMES}
     except re.error as e:
         pytest.fail(f"Regex is no longer Python-translatable, so this guard cannot run: {e}")
 
@@ -105,6 +108,73 @@ def test_ndjson_strip_keeps_every_json_timestamp_member(scanner):
     text = (FIXTURE_DIR / "tak_ndjson_real_sample.log").read_text(encoding="utf-8")
     stripped = scanner["XML_TS_ATTR_RE"].sub("", text)
     assert len(scanner["TS_RE"].findall(stripped)) == 804 * 3
+
+
+# ── ctime timestamps (ht-modem) ───────────────────────────────────────────────
+# ht-modem writes "Wed Aug 12 05:13:23 2026" on every line, matching neither
+# TS_RE nor EPOCH_MS_RE. Both ht-modem fixtures therefore routed to
+# `range-unavailable` and were told "no parseable timestamps were found" — about
+# files whose timestamps the parser reads and the Overview timeline prints. Same
+# defect the ATAK epoch-ms item closed, for a different timestamp dialect.
+
+_CTIME_MONTHS = {m: i for i, m in enumerate(
+    "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(), start=1)}
+
+
+def _ctime_span_hours(text: str, scanner: dict) -> float:
+    """Mirror of extractTimeRange's ctime path, read as UTC like the JS does."""
+    stamps = [
+        datetime(int(year), _CTIME_MONTHS[mon], int(day), int(hh), int(mm), int(ss))
+        for mon, day, hh, mm, ss, year in scanner["CTIME_RE"].findall(text)
+    ]
+    if not stamps:
+        return 0.0
+    return (max(stamps) - min(stamps)).total_seconds() / 3600
+
+
+@pytest.mark.parametrize("fixture_name", [
+    "htmodem_sample.log", "htmodem_sample2.log", "htmodem_edge_cases.log",
+])
+def test_ctime_timestamps_are_found_in_every_htmodem_fixture(fixture_name, scanner):
+    """The bug was a total miss, not a wrong range — so the assertion that
+    matters is simply that the scan finds something."""
+    text = (FIXTURE_DIR / fixture_name).read_text(encoding="utf-8", errors="replace")
+    assert scanner["CTIME_RE"].search(text) is not None
+
+
+def test_ctime_range_matches_the_real_session_bounds(scanner):
+    """htmodem_sample.log runs 05:13:23 -> 05:49:44 on 2026-08-12 — the same
+    bounds the parser reports as session_start/session_end (see
+    test_htmodem.py::test_session_bounds), so the slider and the parsed session
+    agree instead of the slider showing nothing at all."""
+    text = (FIXTURE_DIR / "htmodem_sample.log").read_text(encoding="utf-8")
+    assert _ctime_span_hours(text, scanner) == pytest.approx(36.35 / 60, abs=0.01)
+
+
+def test_ctime_accepts_both_zero_padded_and_space_padded_days(scanner):
+    """Real ctime() space-pads a single-digit day ("Apr  8"); the observed
+    captures zero-pad ("Jan 05"). Both must match or a log drops out on the
+    first nine days of a month."""
+    assert scanner["CTIME_RE"].search("Mon Jan 05 08:00:00 2026") is not None
+    assert scanner["CTIME_RE"].search("Tue Apr  8 08:00:00 2026") is not None
+
+
+def test_ctime_requires_the_leading_weekday(scanner):
+    """Anchoring on the weekday is what stops a bare date-like fragment
+    elsewhere in a log from being read as a session timestamp."""
+    assert scanner["CTIME_RE"].search("Aug 12 05:13:23 2026") is None
+
+
+@pytest.mark.parametrize("fixture_name", sorted(
+    f.name for f in FIXTURE_DIR.glob("*")
+    if f.is_file() and not f.name.startswith("htmodem_")
+))
+def test_ctime_pattern_matches_nothing_outside_htmodem(fixture_name, scanner):
+    """The regression guard, mirroring the XML-strip sweep below: ht-modem is
+    the only format writing ctime, so a widened pattern that starts matching
+    another format's text would corrupt that format's range."""
+    text = (FIXTURE_DIR / fixture_name).read_text(encoding="utf-8", errors="replace")
+    assert scanner["CTIME_RE"].search(text) is None
 
 
 @pytest.mark.parametrize("fixture_name", sorted(

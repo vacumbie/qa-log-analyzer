@@ -78,6 +78,21 @@ const TS_RE = /\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/g
 // on the exact key name plus exactly 13 digits keeps durations and sentinels out.
 const EPOCH_MS_RE = /"(?:timestampInMillis|launchTimeInMillis|messageTimestampInMillis)"\s*:\s*(\d{13})\b/g
 
+// ht-modem timestamps every line with ctime() — "Wed Aug 12 05:13:23 2026" —
+// which matches neither TS_RE nor EPOCH_MS_RE. So the format lost the slider
+// and, worse, the modal told the user "no parseable timestamps were found" for
+// a file whose timestamps the parser reads perfectly well and prints on the
+// Overview timeline. Same failure the ATAK epoch-ms fix closed, recurring for a
+// different timestamp dialect.
+//
+// Anchored on the leading weekday so a bare "Aug 12 05:13:23 2026" elsewhere
+// can't match. Day accepts one or two spaces and an optional leading zero: real
+// ctime() space-pads single digits ("Apr  8"), but the observed captures
+// zero-pad ("Jan 05"). Verified to match nothing in any non-ht-modem fixture.
+const CTIME_RE = /[A-Z][a-z]{2} ([A-Z][a-z]{2}) +(\d{1,2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})/g
+
+const CTIME_MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 }
+
 // A TAK stream embeds a whole CoT XML document in each record's `raw` field,
 // and that XML carries its own time/start/stale attributes. `stale` is an
 // expiry, not an observation — markers routinely set it a full day out — so
@@ -111,9 +126,19 @@ function extractTimeRange(text) {
   // EPOCH_MS_RE is safe to reuse across calls. Do NOT switch to a .exec() loop
   // here without resetting lastIndex — that would skip matches on later files.
   for (const m of text.matchAll(EPOCH_MS_RE)) consider(Number(m[1]))
+  for (const m of text.matchAll(CTIME_RE)) consider(ctimeToMs(m))
 
   if (minMs === Infinity) return null
   return { minMs, maxMs }
+}
+
+// Read as UTC, matching normaliseTs()'s treatment of bare wall-clock stamps —
+// these logs carry no zone, and mixing UTC and local across formats would
+// silently offset one session against another in the combined range.
+function ctimeToMs(m) {
+  const month = CTIME_MONTHS[m[1]]
+  if (month === undefined) return NaN
+  return Date.UTC(Number(m[6]), month, Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5]))
 }
 
 function normaliseTs(ts) {

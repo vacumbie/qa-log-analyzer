@@ -838,6 +838,37 @@ remains the sole `range-unavailable` trigger. Premise pinned in
 `tests/test_timewindow_trigger.py`. Purely client-side — no parser/API change
 (the slider window is a browser-only filter applied in `App.jsx`, never sent to `/parse`).
 
+### Time-Window Scanner — ctime timestamps (`ht-modem`) — ✅ Done (2026-08-27)
+
+**The same defect, a third timestamp dialect.** `ht-modem` prefixes every line
+with `ctime()` — `Wed Aug 12 05:13:23 2026` — which matches neither `TS_RE`
+(needs `YYYY-MM-DD`) nor `EPOCH_MS_RE`. Both ht-modem fixtures therefore routed
+to `range-unavailable` and the modal told the user *"No parseable timestamps
+were found in this file"* — about a file whose timestamps the parser reads fine
+and whose bounds the Overview timeline prints. `ht-router`, using ISO, got a
+working slider, so the behaviour was inconsistent *within* the next-gen pair.
+
+**Fix:** a third source unioned into `extractTimeRange`, anchored on the leading
+weekday so a bare `Aug 12 05:13:23 2026` elsewhere can't match:
+`CTIME_RE = /[A-Z][a-z]{2} ([A-Z][a-z]{2}) +(\d{1,2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})/g`.
+Day accepts one or two spaces and an optional leading zero — real `ctime()`
+space-pads single digits (`Apr  8`) but the observed captures zero-pad
+(`Jan 05`). Read as UTC via `Date.UTC`, matching `normaliseTs()`'s treatment of
+bare wall-clock stamps; mixing UTC and local would silently offset one session
+against another in a combined range.
+
+Verified by executing the real `extractTimeRange` against the fixtures:
+`htmodem_sample.log` now yields `05:13:23 → 05:49:44` — the same bounds the
+parser reports as `session_start`/`session_end` — and `htmodem_sample2.log`
+yields `2036-04-28 02:48:28 → 05:24:53`. Both previously returned `null`. No
+other format's range changes. Scan cost is 71 ms on the 6 MB capture.
+
+Pinned in `tests/test_time_range_scan.py`, including a sweep asserting the
+pattern matches **nothing** in any non-ht-modem fixture — ht-modem is the only
+format writing ctime, so a widened pattern would corrupt another format's range.
+`fw_log` (relative ms from boot) remains the sole `range-unavailable` trigger,
+which makes that step's "no full-date timestamps" copy accurate again.
+
 > Note: the scanner samples only the first + last 64 KB of each file, so a
 > mid-file timestamp outlier is not seen — acceptable because the slider snaps to
 > the hour. Do not widen `EPOCH_MS_RE` to bare 13-digit integers: it must stay
@@ -872,8 +903,15 @@ combined min/max across all uploaded files, so loading an ht-modem capture
 (year-2036 timestamps, unset RTC — see `parsing-requirements.md`) alongside any
 real-dated log yields a **ten-year slider range** snapped to hours. The slider
 becomes unusable for narrowing to either session, and nothing tells the user
-why. That is a concrete, reproducible defect with committed fixtures, and it is
-independent of any chart's axis choice.
+why. Independent of any chart's axis choice.
+
+**Measured, not assumed:** running the real `extractTimeRange` over
+`htmodem_sample2.log` + `diagnostic_sample.txt` concatenated returns
+`2026-04-27T07:35:59Z → 2036-04-28T05:24:53Z` — **10.00 years**. Note this only
+became reproducible once the ctime scanner landed (see the section above);
+before that ht-modem returned `null` and contributed nothing to the combined
+range, so the case genuinely could not arise. The fix that made the slider work
+for ht-modem is what makes this item real.
 
 **Fix (not yet built):** during the existing client-side timestamp scan in
 `FileUpload.jsx`'s `onDrop`, track each file's own min/max range (not just
