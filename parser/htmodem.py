@@ -37,6 +37,7 @@ from pathlib import Path
 from .models import (
     ParseResult, DeviceInfo,
     HtModemResult, HtModemTxPacket, HtModemFreqChange, HtModemPowerChange, HtModemTempSample,
+    HtModemTransmitConfirmation,
 )
 
 # ── Regex patterns ────────────────────────────────────────────────────────────
@@ -68,6 +69,10 @@ _SYMBOL_COUNT_RE  = re.compile(
 _PAYLOAD_EXT_RE   = re.compile(r'Extended the payload length from\s+(\d+)\s+to\s+(\d+)')
 _QUEUED_RE        = re.compile(r'Added packet to xmit queue numinqueue\s*=\s*(\d+)')
 _DROPPED_RE       = re.compile(r'CSMA QUEUE is Full,\s*dropping packet')
+_TRANSMITTED_RE   = re.compile(
+    r'Packet Transmitted\s*:\s*Rev Val\s*=\s*(-?\d+)\s*:\s*Fwd Val\s*=\s*(-?\d+)\s*'
+    r'S11\s*=\s*(-?\d+)\s*dB\s*:\s*Temp Val\s*=\s*(-?\d+)'
+)
 _TEMP_RE          = re.compile(
     r'LPD Temp\s*=\s*([\d.]+)\s+FPD Temp\s*=\s*([\d.]+)\s+PL Temp\s*=\s*([\d.]+)'
 )
@@ -269,6 +274,27 @@ def parse_htmodem_log(path: Path) -> ParseResult:
                 hm.orphaned_drop_count += 1
             continue
 
+        tram = _TRANSMITTED_RE.search(msg)
+        if tram:
+            # Does not always immediately follow "Added packet to xmit
+            # queue" (2,585 occurrences vs. 2,288 immediately adjacent in a
+            # real capture — other lines like a temp reading can intervene),
+            # so attach to whichever packet is current, same as the drop
+            # attribution above, rather than requiring strict adjacency.
+            # Appended, not overwritten: 42 of 2,585 confirmations in a real
+            # capture were a second confirmation for the same packet (a real
+            # RF retransmission) — overwriting would silently discard that.
+            if current_packet is not None:
+                current_packet.transmissions.append(HtModemTransmitConfirmation(
+                    rev_val=int(tram.group(1)),
+                    fwd_val=int(tram.group(2)),
+                    s11_db=int(tram.group(3)),
+                    temp_val=int(tram.group(4)),
+                ))
+            else:
+                hm.orphaned_transmitted_count += 1
+            continue
+
         # ── Thermal ────────────────────────────────────────────────────────────
         tm = _TEMP_RE.search(msg)
         if tm:
@@ -318,6 +344,22 @@ def parse_htmodem_log(path: Path) -> ParseResult:
             f"DATA LIMITATION — {hm.orphaned_drop_count} 'CSMA QUEUE is Full' "
             "drop event(s) could not be attributed to a specific TX packet "
             "(no open packet record at the time the drop line appeared)."
+        )
+
+    if hm.orphaned_transmitted_count:
+        result.parse_errors.append(
+            f"DATA LIMITATION — {hm.orphaned_transmitted_count} 'Packet "
+            "Transmitted' RF confirmation event(s) could not be attributed "
+            "to a specific TX packet."
+        )
+
+    retransmitted = [p for p in hm.tx_packets if p.retransmit_count > 0]
+    if retransmitted:
+        total_retries = sum(p.retransmit_count for p in retransmitted)
+        result.parse_errors.append(
+            f"{len(retransmitted)} packet(s) show more than one 'Packet "
+            f"Transmitted' confirmation ({total_retries} extra confirmation(s) "
+            "total) — a real RF-layer retransmission, not a duplicate log line."
         )
 
     if not hm.temp_samples:

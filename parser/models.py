@@ -735,6 +735,39 @@ class HtModemTxPacket:
     payload_extended_to:   Optional[int] = None
     queued:         Optional[bool] = None   # True = added to xmit queue, False = dropped, None = outcome not seen
     numinqueue:     Optional[int] = None
+    # RF transmission confirmations — a separate, later event from "queued."
+    # A LIST, not a single scalar: real captures show some packets get
+    # confirmed more than once (42 of 2,585 in one real session) — genuine
+    # RF-layer retransmissions, not duplicate log lines. Overwriting with the
+    # latest would silently discard evidence of a retry. Attribution follows
+    # the same "attach to whichever packet is current" rule as drops, since
+    # confirmation does not always immediately follow "Added packet to xmit
+    # queue" (other lines can intervene).
+    transmissions:  list["HtModemTransmitConfirmation"] = field(default_factory=list)
+
+    @property
+    def transmitted(self) -> bool:
+        return len(self.transmissions) > 0
+
+    @property
+    def retransmit_count(self) -> int:
+        return max(0, len(self.transmissions) - 1)
+
+
+@dataclass
+class HtModemTransmitConfirmation:
+    """
+    One "Packet Transmitted" RF confirmation line. Units are the radio's own
+    raw scale, not independently verified against a hardware spec — Rev/Fwd
+    are almost certainly reflected/forward power in raw ADC counts (VSWR /
+    return-loss related, alongside the explicit S11 dB figure). temp_val is
+    on its own scale — NOT the same units/sensor as the LPD/FPD/PL
+    temp_samples elsewhere in this result; do not merge or compare them.
+    """
+    rev_val:  int
+    fwd_val:  int
+    s11_db:   int
+    temp_val: int
 
 
 @dataclass
@@ -778,6 +811,7 @@ class HtModemResult:
     power_changes:          list[HtModemPowerChange] = field(default_factory=list)
     tx_packets:             list[HtModemTxPacket] = field(default_factory=list)
     orphaned_drop_count:    int = 0   # CSMA-full drop lines with no preceding TX packet block
+    orphaned_transmitted_count: int = 0   # "Packet Transmitted" lines with no preceding TX packet block
     temp_samples:           list[HtModemTempSample] = field(default_factory=list)
     total_lines:            int = 0
 

@@ -662,6 +662,12 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
                 "payload_extended_to":   p.payload_extended_to,
                 "queued":        p.queued,
                 "numinqueue":    p.numinqueue,
+                "transmitted":   p.transmitted,
+                "retransmit_count": p.retransmit_count,
+                "transmissions": [
+                    {"rev_val": t.rev_val, "fwd_val": t.fwd_val, "s11_db": t.s11_db, "temp_val": t.temp_val}
+                    for t in p.transmissions
+                ],
             }
             for p in hm.tx_packets
         ]
@@ -711,6 +717,8 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             "power_change_count":      len(hm.power_changes),
             "temp_sample_count":       len(hm.temp_samples),
             "peak_pl_temp_f":          round(max(pl_vals) * 9 / 5 + 32, 1) if pl_vals else None,
+            "transmitted_count":       sum(1 for p in hm.tx_packets if p.transmitted),
+            "retransmit_packet_count": sum(1 for p in hm.tx_packets if p.retransmit_count > 0),
         }
 
     elif r.log_format == "htrouter":

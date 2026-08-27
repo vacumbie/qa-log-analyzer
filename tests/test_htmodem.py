@@ -183,3 +183,56 @@ def test_empty_file_returns_no_data_gracefully(tmp_path):
     assert r.log_format == "htmodem"
     assert r.htmodem_result.tx_packets == []
     assert r.session_start == ""
+
+
+# ── RF telemetry ("Packet Transmitted") — real second sample ──────────────────
+
+SAMPLE2 = FIXTURE_DIR / "htmodem_sample2.log"
+
+
+def test_transmitted_confirmations_parsed_from_second_sample():
+    hm = parse_htmodem_log(SAMPLE2).htmodem_result
+    transmitted = [p for p in hm.tx_packets if p.transmitted]
+    assert len(transmitted) == 2542
+
+
+def test_retransmission_preserved_not_overwritten():
+    """42 packets in this real capture get a second 'Packet Transmitted'
+    confirmation — a genuine RF retry, not a duplicate log line. Both must
+    survive, not just the latest."""
+    hm = parse_htmodem_log(SAMPLE2).htmodem_result
+    retransmitted = [p for p in hm.tx_packets if p.retransmit_count > 0]
+    assert len(retransmitted) == 42
+    p = next(p for p in hm.tx_packets if p.packet_id == 285)
+    assert len(p.transmissions) == 2
+    assert p.transmissions[0].rev_val == 2942
+    assert p.transmissions[1].rev_val == 2935
+
+
+def test_transmission_confirmation_fields():
+    hm = parse_htmodem_log(SAMPLE2).htmodem_result
+    p = next(p for p in hm.tx_packets if p.transmitted)
+    t = p.transmissions[0]
+    assert isinstance(t.rev_val, int)
+    assert isinstance(t.fwd_val, int)
+    assert isinstance(t.s11_db, int)
+    assert isinstance(t.temp_val, int)
+
+
+def test_orphaned_transmitted_line_counted_not_fabricated():
+    hm = parse_htmodem_log(SAMPLE2).htmodem_result
+    assert hm.orphaned_transmitted_count == 1
+
+
+def test_retransmission_note_in_parse_errors():
+    result = parse_htmodem_log(SAMPLE2)
+    assert any("42 packet(s)" in e and "retransmission" in e for e in result.parse_errors)
+
+
+def test_untransmitted_packet_has_empty_transmissions_list():
+    """A packet that was queued but never got a 'Packet Transmitted' line
+    (e.g. file cut off) has an empty list, not a fabricated confirmation."""
+    hm = parse_htmodem_log(FIXTURE).htmodem_result  # original sample, all-dropped-or-queued
+    for p in hm.tx_packets:
+        if not p.transmitted:
+            assert p.transmissions == []
