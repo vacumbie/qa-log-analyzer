@@ -54,11 +54,16 @@ def _detect_format(filename: str, content: str) -> str:
       3. ht-router     — distinctive stat-counter key vocabulary (input.total_m2m,
                          output.*) or explicit ht-router process markers.
       4. TAK           — filename contains 'tak-stream'/'tak_server' AND the content
-                         is not positively ATAK, or content is a
-                         JSON array of CoT event records (receivedAt/nodeType/category
-                         fields). Must stay immediately before ATAK — both are JSON
-                         and the filename guard below depends on that adjacency.
-                         The ht-* formats above are plaintext and cannot collide
+                         is not positively ATAK, or the content carries the
+                         receivedAt/nodeType/category signature in either of the
+                         two real shapes: a JSON array of CoT event records, or
+                         JSON Lines where each line wraps one event in a
+                         {"message": {...}} logger envelope. Must stay immediately
+                         before ATAK. Both are JSON *and both can be newline-
+                         delimited*, so the root character no longer separates
+                         them — only the disjoint signature keys do (scoped to
+                         the first non-empty line for the NDJSON shape). The
+                         ht-* formats above are plaintext and cannot collide
                          with either, so sitting ahead of TAK is harmless.
       5. ATAK          — filename starts with 'diagnostic_ATAK_' (legacy), or
                          content is JSON with ATAK-specific fields (logId,

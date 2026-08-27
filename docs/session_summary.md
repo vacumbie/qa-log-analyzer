@@ -328,22 +328,99 @@ defects.
   2585 raw lines = 2584 attributed + 1 orphaned), `test_time_range_scan.py`
   (+1, the 804 × 3 = 2412 count assertion its array-shape sibling already had).
 
-*Three items `vera` raised that need a decision, not a test:*
+---
 
-1. A session with TX packets but **zero** RF confirmations is an
-   indistinguishable `0` — "this firmware build doesn't emit Packet
-   Transmitted" reads the same as "nothing transmitted". `temp_samples` emits a
-   `DATA LIMITATION` in the equivalent case; this doesn't.
-2. The retransmission `parse_errors` entry **renders nowhere**.
-   `RelayLimitationBanner` filters on the `DATA LIMITATION` prefix, which this
-   entry correctly lacks (nothing is missing or undecodable). Net effect: 42
-   real RF retransmissions are invisible, while the file-list red ⚠ fires with
-   no visible explanation. A KPI card fed by the already-serialized
-   `retransmit_packet_count` would fix both halves.
-3. `HtModemTempOverTime` moved off the normalized 0–100% x-axis to an
-   elapsed-ms axis — justified by the year-2036 unset-RTC timestamps in samples
-   2/3/4, but it contradicts a documented CLAUDE.md architecture decision that
-   doesn't yet record the exception.
+**2026-08-27 (same day, later) — quality gate run, and the overclaim it caught.
+`vera` → `task-completion-validator` → `karen` / `peer-reviewer` /
+`claude-md-compliance-checker`. Two gates FAILED. pytest: 475 passed, 2 skipped.**
+
+### The substantive finding: `retransmit_count` was never a retry count
+
+`peer-reviewer` found, and I verified independently, that the ht-modem RF
+confirmation attribution shifts across TX-packet boundaries — and that the
+parser was asserting a hardware fact the same capture contradicts.
+
+`Packet Transmitted` carries no `packetID`, so attribution is positional. The
+modem sometimes begins encoding the *next* packet before the previous one's
+confirmation is logged, which credits it to the wrong packet. Visible directly
+at `htmodem_sample2.log:8277-8286`: packet 289 queued, packet 290 queued, then
+two confirmations — both to 290, leaving 289 with none.
+
+Population signature in that capture: **43 packets with no confirmation, 42
+with two, and 40 of the 42 directly following a zero-confirmation packet.** The
+near-exact pairing is the tell — most "extra" confirmations are the previous
+packet's, not an RF retry.
+
+The `parse_errors` entry had read *"a real RF-layer retransmission, not a
+duplicate log line."* Fixed by **reframing rather than softening**: the real
+fact is an *attribution* limitation, which makes it a genuine
+`DATA LIMITATION —` entry. That also fixes the visibility problem below for
+free, since the tab banners filter on that prefix. `models.py` docstrings, the
+two derived properties, and four tests updated to match; two new tests pin the
+ambiguity (`test_multi_confirmation_is_positional_ambiguity_not_a_retry_count`,
+`test_multi_confirmation_entry_does_not_claim_a_retransmission`) so it can't be
+re-asserted as fact. Resolving attribution properly needs `packetID` matching
+against the queue, which these lines don't carry.
+
+Earlier notes in this file described "42 real RF retransmissions" — that was
+wrong and is corrected here.
+
+### Docs brought in line with the code
+
+Both failing gates failed on documentation, not code. `parsing-requirements.md`
+and `log-field-definitions.md` contained **nothing** about any of the three
+features, and `ui-requirements.md` contradicted the shipped chart. Fixed:
+
+- **`parsing-requirements.md`** — `Packet Transmitted` row; a new
+  "Confirmation attribution is positional" subsection with the evidence table;
+  the nine `input.*` keys; TAK's two shapes; the corrected detection rule
+  (first *non-empty* line, and why); the disjointness table's `Root` row, which
+  claimed the root character separated TAK from ATAK — no longer true, so the
+  order's safety now rests solely on the disjoint keys; four false "not yet
+  implemented" claims deleted; observations section for the NDJSON capture.
+- **`log-field-definitions.md`** — the same three additions, plus two
+  pre-existing field-name errors (`input_m2m_by_type{}`, `modem_xmit_failed`).
+- **`ui-requirements.md`** — §16/§17 flipped to Implemented and the per-session
+  block layout documented; the "real absolute timestamps" claim corrected to
+  per-session elapsed.
+- **`CLAUDE.md`** — NDJSON in the format table and detection narrative; test
+  counts 25/27 → 34/34; TAK fixture row; the normalized-axis decision now
+  records both exceptions and asks that a third be documented; six backlog rows.
+
+### The Cross-File Offset backlog item was justified by a false premise
+
+It claimed the thermal chart "now plots real absolute timestamps," so disjoint
+dates would stretch the axis. The chart plots **per-session elapsed** time,
+which is exactly what makes that a non-issue. Re-justified on a real,
+reproducible basis instead: `extractTimeRange` builds one combined min/max
+across files, so a year-2036 ht-modem capture beside any real-dated log gives a
+**ten-year slider range**. Kept, not withdrawn.
+
+### Still open (decisions, not defects)
+
+1. **UI surface for 14 serialized fields.** ht-modem TX confirmations and the
+   nine ht-router `input.*` counters reach the API and are read by nothing —
+   `compliance-checker` called this the ParseResult chain stopping at the UI
+   step, and it's right. Now an explicit deferral in `ui-requirements.md` §17
+   rather than silence. Whichever lands must also add `transmitted_count` /
+   `retransmit_packet_count` to the `filteredResults` recompute — they're
+   outside it today, so they'd show whole-session values beside a windowed
+   `tx_packet_count`.
+2. **`HtModemTempOverTime` unequal-duration compression.** The elapsed axis
+   solves disjoint dates but reintroduces width compression (36 min beside
+   2h36m ≈ a quarter width). Note `buildRelativeTimeSeries()` normalizes
+   per-device off `samples[0].ms`, so the 2036 timestamps would *not* have
+   broken it — de-normalization was incidental to the fix, not required by it.
+   Three options recorded.
+3. **`RelayLimitationBanner` prefix filter** — un-prefixed entries render
+   nowhere while still tripping the red ⚠. `TakTab.jsx`'s `LimitationBanner`
+   already renders both groups; adopt that pattern.
+4. **Zero-confirmation indistinguishability** — unchanged; a log with TX
+   packets and no confirmations still emits no entry.
+5. **`_CSV_TYPES`** for `htmodem`/`htrouter` and the two ATAK command tables.
+
+`jenny` (step 3) was deliberately held until these doc fixes landed — running
+it against docs known to be wrong would only have re-found them.
 
 ---
 

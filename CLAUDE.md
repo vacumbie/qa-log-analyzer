@@ -129,9 +129,16 @@ Eight formats, auto-detected by `_detect_format()` in `api/routes/parse.py`.
 the others. ht-modem and ht-router run next — also highly distinctive (ctime
 prefix + modem markers; stat-counter key vocabulary, respectively) and both
 plaintext, so they cannot collide with either JSON format below and sitting
-ahead of `tak` is harmless. `tak` must precede `atak`: both are JSON, but their field sets are
-disjoint (`receivedAt`/`nodeType`/`category` vs
-`logId`/`connectionState`/`atakVersion`). That disjointness covers the *content*
+ahead of `tak` is harmless. `tak` must precede `atak`: both are JSON, and since
+`tak` gained NDJSON support **both can also be newline-delimited**, so the root
+character no longer tells them apart — the *only* thing keeping an ATAK log out
+of the TAK parser is that their field sets are disjoint
+(`receivedAt`/`nodeType`/`category` vs `logId`/`connectionState`/`atakVersion`).
+For the NDJSON shape those keys must all appear in the **first non-empty line**
+alongside `"message"`, which is what stops an unrelated JSON-Lines format that
+merely mentions them somewhere from matching. Widening `_SIGNATURE_KEYS` will
+fail `test_ndjson_branch_does_not_capture_atak_logs` plus 22 ATAK-fixture
+ordering tests — keep it that way. That disjointness covers the *content*
 check only — the `tak` **filename** hints are substring tests, and `tak_server`
 matches the legacy ATAK convention whenever the callsign starts with `SERVER`
 (`diagnostic_ATAK_SERVER_…` → misrouted, every record dropped as missing `time`,
@@ -147,7 +154,7 @@ markers that distinguish it. `diagnostic` is always the catch-all fallback.
 | 1 | `fw_log` | `parser/fw_log.py` | goTenna relay radio firmware (UART/USB debug) |
 | 2 | `htmodem` | `parser/htmodem.py` | Next-gen radio — ht-modem (SDR/RF layer) |
 | 3 | `htrouter` | `parser/htrouter.py` | Next-gen radio — ht-router (network/link layer) |
-| 4 | `tak` | `parser/tak.py` | TAK server CoT event stream (JSON export) |
+| 4 | `tak` | `parser/tak.py` | TAK server CoT event stream (JSON array **or** NDJSON export) |
 | 5 | `atak` | `parser/atak.py` | Android ATAK plug-in |
 | 6 | `relay_manager` | `parser/relay_manager.py` | Android logcat, `com.gotenna.relaymanager` |
 | 7 | `rsdk` | `parser/rsdk.py` | iOS/Android SDK logs |
@@ -163,22 +170,36 @@ UI only depend on that shape — never import parser internals into routes or
 UI components.
 
 **ht-modem / ht-router status:** complete through the UI — parsers, models,
-detection, API serialization, tests (25 + 27 against real samples and synthetic
-edge cases), and the `HtModemTab` / `HtRouterTab` pair with five `CHART_MAP`
-entries. Full requirements in `docs/parsing-requirements.md` and
+detection, API serialization, tests (34 + 34 against four real captures each
+plus synthetic edge cases), and the `HtModemTab` / `HtRouterTab` pair with five
+`CHART_MAP` entries. Full requirements in `docs/parsing-requirements.md` and
 `docs/log-field-definitions.md` (Formats 5–6). **The UI rule these follow:**
 they live in a visually separate tab group — own row, own `--accent2` accent,
 own section label — not another dimmed/badged tab in the existing row; see
 `docs/ui-requirements.md` Tabs section intro. Still outstanding: no `_CSV_TYPES`
-entry or JSON-only note in `api/routes/export.py` for either format.
+entry or JSON-only note in `api/routes/export.py` for either format, and the
+newer parsed fields (ht-modem TX confirmations, the nine ht-router `input.*`
+link-layer counters) are serialized but **not yet rendered anywhere** — an
+explicit deferral, recorded in `docs/ui-requirements.md` §17, not an oversight.
 
-Two things worth knowing about the router parser specifically: its periodic
+Three things worth knowing about the router parser specifically: its periodic
 stat-snapshot fields are **cumulative session-lifetime counters, not
 per-interval deltas** — a "total" is the last snapshot's value, never a sum
-across snapshots (see `RouterStatSnapshot` docstring in `models.py`). And its
-two real sample files have genuinely different snapshot schemas — one
-session never transmitted, so several `output.*` fields are absent (not
-zero) throughout.
+across snapshots (see `RouterStatSnapshot` docstring in `models.py`). Its
+real sample files have genuinely different snapshot schemas — one session never
+transmitted, so several `output.*` fields are absent (not zero) throughout, and
+two of the four carry no `input.*` error counters at all. And a rotated capture
+(`htrouter_sample4_rotated.log`) hands off to the live one 163 ms later; each
+file is still parsed as its own independent session, with no cross-file merge.
+
+**ht-modem `retransmit_count` is not a retry count.** `Packet Transmitted`
+carries no `packetID`, so confirmations are attributed positionally, and a
+confirmation logged after the next packet began encoding is credited to that
+next packet. In the real capture 43 packets have no confirmation and 42 have
+two, 40 of the 42 directly following a zero-confirmation packet — so most
+"extra" confirmations are the previous packet's, not an RF retry. Reported as a
+`DATA LIMITATION`; see `docs/parsing-requirements.md` → "Confirmation
+attribution is positional".
 
 ---
 
@@ -211,6 +232,22 @@ map each device's session to 0–100% independently. This prevents
 sparse-data problems when sessions of different lengths are loaded together
 — a 10-minute log and a 7-hour log both render fully across the chart
 width. Do not switch to absolute timestamps without thinking through this.
+
+**Two documented exceptions, both non-normalized:**
+- `BatteryOverTime` uses real wall-clock UTC by design, accepting gaps where a
+  device has no data (its own comment states the trade-off).
+- `HtModemTempOverTime` uses a shared **per-session elapsed-ms** axis. It gains
+  sample-row-aligned LPD/FPD/PL downsampling and real duration ticks, and it
+  makes the year-2036 unset-RTC captures overlay sensibly. But it **reintroduces
+  the exact problem this rule prevents**: sessions of unequal length no longer
+  each fill the width (36 min beside 2h36m renders as ~a quarter). Note that
+  normalization was *not* what the 2036 timestamps broke —
+  `buildRelativeTimeSeries()` normalizes per-device off `samples[0].ms` and
+  would have handled them — so the de-normalization was incidental to the fix,
+  not required by it. Tracked as a pending item in `docs/ui-requirements.md`.
+
+If you add a third exception, record it here with its trade-off. An
+undocumented one is the failure mode this section exists to prevent.
 
 ### Temperature is always Fahrenheit in the UI
 Log files record temperatures in Celsius. `_result_to_dict()` converts to
@@ -412,7 +449,7 @@ project's lifecycle, not a sign something is broken.
 | `tak` | GeoChat (`b-t-f`) message bodies are not extracted — only the envelope (sender callsign, timestamps); the `<remarks>` text stays in `raw_cot`. Also unextracted from the raw XML: `<status battery>`, `<takv>` device/OS strings, `<track>` speed/course. These are **two separate `DATA LIMITATION —` entries**: the Chat one fires only when Chat records are present, the telemetry one only for the elements a given stream actually carries (with per-element counts). Both note that `raw_cot` itself is not serialized, so none of it is reachable from the UI or an export |
 | `tak` | The `parse_errors` no-position sentence is PLI/Marker-scoped and **derived from `tak_no_fix_events`** — the same property `summary.no_fix_count` serializes — so the sentence's leading number and the KPI can't drift apart. Other categories are still reported, in a trailing clause that names them as categories which never carry a position rather than as lost fixes (`1 PLI/Marker … A further 4 Chat/server-control …`). Previously the sentence counted all categories and read as 5 devices losing GPS when 1 did |
 | `tak` | `parentCallsign` always null in observed samples, and `platform` is often absent (18 of 91, including all Chat records) even when `nodeType` is known — stored as `None`, never guessed |
-| `tak` | Single-stream validation — one real sample plus three hand-built fixtures (edge cases, clean PLI-only, zero-coordinate positions). Multi-server, multi-day and larger streams unobserved. The `lat == 0`/`lon == 0` sentinel rule **is** covered: `tak_stream_zero_coordinate_positions.json` exercises a real prime-meridian position, a real equator position, and the `(0,0)` sentinel — but no *observed* sample has ever contained one, so the fixture is hand-built, not field-confirmed |
+| `tak` | Two real captures, one per shape — `tak_stream_sample.json` (91 events, JSON array) and `tak_ndjson_real_sample.log` (804 events, NDJSON) — plus six hand-built fixtures and `tak_ndjson_sample.log` for the NDJSON malformed-line branches. Multi-server and multi-day streams still unobserved. The `lat == 0`/`lon == 0` sentinel rule **is** covered: `tak_stream_zero_coordinate_positions.json` exercises a real prime-meridian position, a real equator position, and the `(0,0)` sentinel — hand-built, since no observed sample has contained a genuine zero coordinate. The NDJSON capture *does* supply real field data for the sibling rule: 35 of its 804 records carry an incomplete lat/lon pair, so both-or-neither is field-confirmed even though the zero-coordinate case is not |
 
 ---
 
@@ -495,8 +532,15 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | P8: TAK server receipt latency / clock skew | ⏳ Open — defined 2026-08-24 in `docs/parsing-requirements.md` so the `parser/tak.py` and `models.py` references resolve |
 | `extractTimeRange` matches `stale=` inside embedded CoT XML — 18-min session reads as a 25-hour slider range | ✅ Done — XML attribute timestamps (`attr="…"` / escaped `attr=\"…\"`) are stripped before the wall-clock scan; JSON members (`"time"`, `"receivedAt"`) are kept. The `=` is what tells them apart. Sample now reads 0.30 h (its true 18.2 min) instead of 24.24 h. **Hour-snapping is unchanged** — a sub-hour session still occupies one bucket, which is slider design, not this bug |
 | TAK map legend lists unplotted callsigns; `PALETTE` collides past 10 callsigns | ⏳ Pending — cosmetic; `colorByCallsign` iterates all events rather than plotted ones |
-| Next-Gen Radio — `ht-modem` format (SDR/RF layer: TX packets, CSMA drops, LPD/FPD/PL thermal) | ✅ Done (2026-08-25) — parser (25 tests) + HT-Modem tab, live-verified |
-| Next-Gen Radio — `ht-router` format (network/link layer: periodic stat snapshots, connection state, spawns ht-modem) | ✅ Done (2026-08-25) — parser (27 tests) + HT-Router tab, live-verified; snapshot retention decided (keep all, defer trimming to UI's existing time-window slider) |
+| Next-Gen Radio — `ht-modem` format (SDR/RF layer: TX packets, CSMA drops, LPD/FPD/PL thermal) | ✅ Done (2026-08-25) — parser (34 tests) + HT-Modem tab, live-verified |
+| Next-Gen Radio — `ht-router` format (network/link layer: periodic stat snapshots, connection state, spawns ht-modem) | ✅ Done (2026-08-25) — parser (34 tests) + HT-Router tab, live-verified; snapshot retention decided (keep all, defer trimming to UI's existing time-window slider) |
+| TAK — NDJSON (JSON-Lines) capture shape | ✅ Done (2026-08-27) — `is_tak_log()` `{`-rooted branch + `_load_records()` envelope unwrap; 804-event real capture as fixture. Detection safety now rests solely on disjoint signature keys, pinned by test |
+| ht-modem — `Packet Transmitted` RF confirmations | ✅ Done (2026-08-27) — `HtModemTransmitConfirmation`, `transmissions[]` list, `orphaned_transmitted_count`. **`retransmit_count` is an extra-confirmation count, not a retry count** — attribution is positional; reported as a `DATA LIMITATION` |
+| ht-router — nine `input.*` link-layer validity/error counters | ✅ Done (2026-08-27) — `Optional[int]`, absent stays `None` never `0`; two of four real captures don't report them |
+| Next-Gen Radio — UI surface for TX confirmations and `input.*` error counters | ⏳ Pending — serialized but rendered nowhere. Explicit deferral recorded in `docs/ui-requirements.md` §17, incl. the requirement to add both summary fields to the `filteredResults` recompute at the same time |
+| `HtModemTempOverTime` — unequal-duration compression on the shared elapsed axis | ⏳ Pending — documented exception to the normalized-axis rule; a 36-min session beside a 2h36m one renders as ~a quarter width. Three options in `docs/ui-requirements.md` |
+| `RelayLimitationBanner` filters out un-prefixed `parse_errors`, so the ⚠ glyph can fire with no visible explanation | ⏳ Pending — `TakTab.jsx`'s `LimitationBanner` already renders prefixed and un-prefixed as two groups; adopt that pattern in `HtModemTab`/`HtRouterTab`/`FwLogTab` |
+| ht-modem — zero `Packet Transmitted` confirmations is indistinguishable from no transmission | ⏳ Pending — a log with TX packets and no confirmations emits no entry, unlike the sibling `temp_samples` case which does |
 | Next-Gen Radio — `_CSV_TYPES` entry or JSON-only note for `htmodem`/`htrouter` | ⏳ Pending — decision not yet recorded in `api/routes/export.py` |
 
 ---

@@ -1038,8 +1038,10 @@ catch-all `diagnostic` parser never sees these because fw_log is checked first.
 
 ## Next-Gen Radio — Modem (ht-modem) Log
 
-> **Status: requirements drafted, not yet implemented.** No parser, models, or
-> tests exist yet for this format. This section is the spec to build against.
+> **Status: implemented.** `parser/htmodem.py` → `HtModemResult` in
+> `models.py` → `_result_to_dict()` → `HtModemTab`. 34 tests in
+> `tests/test_htmodem.py` over two real captures (`htmodem_sample.log`,
+> `htmodem_sample2.log`) plus a synthetic edge-case fixture.
 
 ### Overview
 
@@ -1104,6 +1106,7 @@ early (high specificity, low collision risk), similar to `fw_log`.
 | `symbol count (I/Q Pairs) after postamble = <n>, sample count = <n>, encoded Len = <n>, BCH Val = 0x<hex>` | fields on the matching `TxPacket` (by adjacency — always the line immediately following `Received packet for encoding`) | |
 | `Added packet to xmit queue numinqueue = <n>` | `tx_packets[].queued` = True, `numinqueue` | |
 | `ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet` | `tx_packets[].queued` = False, `dropped_count` (+1) | **Packet-loss metric.** This line does not repeat the `packetID`, so it must be attributed to the most recent `Received packet for encoding` block, not parsed standalone |
+| `Packet Transmitted :  Rev Val = <n> :  Fwd Val = <n> S11 = <n> dB :  Temp Val = <n>` | `tx_packets[].transmissions[]` (`HtModemTransmitConfirmation`: `rev_val`, `fwd_val`, `s11_db`, `temp_val`) | **RF-layer confirmation** — a separate, later event from `queued`. Like the CSMA drop line it carries **no `packetID`**, so attribution is positional. Stored as a **list**, not a scalar. `temp_val` is the radio's own raw scale from a **different sensor** than `LPD`/`FPD`/`PL` below — never merge or compare the two. Rev/Fwd are almost certainly reflected/forward power in raw ADC counts, unverified against a hardware spec. See "Confirmation attribution is positional" below before using `retransmit_count` |
 | `Extended the payload length from <a> to <b>` | `tx_packets[].payload_extended_from/to` | Precedes its packet's `Received packet for encoding` line |
 | `LPD Temp = <f>   FPD Temp = <f>   PL Temp = <f>` | `temp_samples[]` (`timestamp`, `lpd_c`, `fpd_c`, `pl_c`) | Periodic (~10s), Zynq MPSoC thermal zones — **Celsius in the raw log**, convert to °F per the project-wide temperature rule. `LPD`/`FPD`/`PL` are new sensor names, not the existing platform's `NRF52`/`Si4460`/`PA` — do not conflate in shared temperature-chart code |
 
@@ -1124,12 +1127,64 @@ early (high specificity, low collision risk), similar to `fw_log`.
 4. Temperatures are Celsius in the raw log; convert to Fahrenheit at parse
    time or display time — follow whichever convention `fw_log.py`/existing
    temp-chart code already uses so the two formats stay consistent.
+5. `Packet Transmitted` follows the same no-`packetID` rule as the CSMA drop
+   line: attach it to the most recently seen `Received packet for encoding`
+   block, and count it as an orphaned confirmation
+   (`orphaned_transmitted_count`) if no packet block is open. It is **not**
+   always adjacent to its packet's queue line — 2,585 occurrences vs. 2,288
+   immediately adjacent in the real capture, since a temp reading or other
+   line can intervene — so strict adjacency would lose most of them.
+
+#### Confirmation attribution is positional — `retransmit_count` is not a retry count
+
+Because the confirmation line carries no `packetID`, and the modem sometimes
+begins encoding the **next** packet before the previous one's confirmation is
+logged, a confirmation can be credited to the wrong packet. The shift is
+visible directly in `htmodem_sample2.log` around packets 289/290: 289 is
+received and queued, 290 is received and queued, and only then do two
+`Packet Transmitted` lines appear — both attributed to 290, leaving 289 with
+none.
+
+The population-level signature in that capture:
+
+| Observation | Count |
+|---|---|
+| TX packets | 2,585 |
+| Confirmations parsed | 2,585 (2,584 attributed + 1 orphaned) |
+| Packets with **no** confirmation | 43 |
+| Packets with **two** confirmations | 42 |
+| …of those 42, directly following a zero-confirmation packet | 40 |
+
+The near-exact pairing is the tell: most "extra" confirmations are the
+previous packet's, not an RF retry. So `retransmit_count` means *extra
+confirmations attributed to this packet*, nothing more, and
+`parse_errors` reports the ambiguity as a `DATA LIMITATION` rather than
+claiming a retransmission occurred. (An earlier version of that entry did
+claim it — "a real RF-layer retransmission, not a duplicate log line" — which
+the same capture contradicts.)
+
+Both confirmations are still kept rather than overwritten: whichever packet a
+given confirmation truly belongs to, discarding one would lose a real
+observation. Resolving the attribution properly would require matching
+`packetID`s against the transmit queue, which these lines do not carry —
+pending either a firmware change or a documented ordering guarantee.
 
 ### Known Limitations — Next-Gen Radio Modem Log
 
-- **Not yet implemented.** No `parser/htmodem.py`, no `HtModemResult`
-  model, no tests, no fixtures beyond the one raw sample provided
-  (`ht-modem.log`).
+- **Confirmation attribution is positional, not by `packetID`** — so
+  `retransmit_count` counts extra confirmations, not confirmed RF retries.
+  Reported as a `DATA LIMITATION` in `parse_errors`. See "Confirmation
+  attribution is positional" above for the evidence.
+- **`Packet Transmitted` absence is indistinguishable from no transmission.**
+  A log with TX packets and zero confirmations (`htmodem_sample.log` — 63
+  packets, 0 confirmations) emits no `parse_errors` entry, so "this firmware
+  build doesn't log confirmations" reads the same as "nothing transmitted".
+  The sibling `temp_samples` case *does* emit one; the asymmetry is open.
+- **Unset RTC.** Captures 2–4 carry year-2036 timestamps (`Mon Apr 28
+  … 2036`) because the radio's clock was never set. Sessions cannot be
+  pinned to absolute time, and loading one alongside a real-dated log gives a
+  ten-year time-window range. This is why `HtModemTempOverTime` plots elapsed
+  time rather than absolute dates — see `docs/ui-requirements.md`.
 - **`Found <N> devices` is ambiguous per-occurrence** — appears at least
   twice (IIO device enumeration, then AD5592 device enumeration) with no
   distinguishing context beyond surrounding lines. A naive "last value
@@ -1163,8 +1218,10 @@ early (high specificity, low collision risk), similar to `fw_log`.
 
 ## Next-Gen Radio — Router (ht-router) Log
 
-> **Status: requirements drafted, not yet implemented.** No parser, models, or
-> tests exist yet for this format. This section is the spec to build against.
+> **Status: implemented.** `parser/htrouter.py` → `RouterStatSnapshot` /
+> `HtRouterResult` in `models.py` → `_result_to_dict()` → `HtRouterTab`. 34
+> tests in `tests/test_htrouter.py` over four real captures plus a synthetic
+> edge-case fixture.
 
 ### Overview
 
@@ -1193,6 +1250,15 @@ Example: `2026-08-12T05:13:23.447396Z: ag_warn @ aghub_init.401: created aghub_t
 ~20 individually timestamped lines emitted together roughly every 10
 seconds:
 ```
+<ts>Z: input.too_short.link_hdr <n>
+<ts>Z: input.too_short.link_payload <n>
+<ts>Z: input.too_short.link_crc <n>
+<ts>Z: input.wrong_link_version <n>
+<ts>Z: input.crc_present <n>
+<ts>Z: input.bad_crc <n>
+<ts>Z: input.subframe.no_protocol <n>
+<ts>Z: input.subframe.logical_recv_error <n>
+<ts>Z: input.subframe.family_recv_error <n>
 <ts>Z: input.subframe.count <n>
 <ts>Z: input.traffic[aggr_next_proto_ag] <n>
 <ts>Z: input.ctl <n>
@@ -1278,12 +1344,18 @@ detection uses both content and a filename hint. Ordering relative to
 
 ### Known Limitations — Next-Gen Radio Router Log
 
-- **Not yet implemented.** No `parser/htrouter.py`, no `RouterStatSnapshot`
-  model, no tests, no fixtures beyond the two raw samples provided.
-- **Snapshot volume is large and undesigned.** Two sample files run 61,716
-  and 24,312 lines; at ~20 lines per snapshot every ~10s, a single capture
-  can contain thousands of snapshot records. Storage/UI strategy (full
-  retention vs. downsampling) is an open decision — see Parsing Rule 2.
+- **Snapshot schemas differ between sessions.** A session that never
+  transmitted omits the whole `output.*` group, and a session with no RF
+  noise omits the nine `input.*` validity/error counters. Absent fields are
+  `None`, never `0` — "not reported" and "measured, none seen" are different
+  facts. `htrouter_sample.log` / `sample2.log` carry no `input.*` error
+  counters; `sample3.log` / `sample4_rotated.log` do.
+- **Snapshot volume is large.** Sample files run 24k–138k lines; at ~20 lines
+  per snapshot every ~10s a capture holds 447–2,286 snapshot records.
+  Resolved as **keep all snapshots** — trimming is deferred to the UI's
+  existing time-window slider rather than being decided in the parser.
+- **Link-layer counters are cumulative, like every other snapshot field.** A
+  total is the last snapshot's value, never a sum across snapshots.
 - **Socket warning semantics unconfirmed** — `us_warn @ udp_write.486:
   sendto: (22) Invalid argument` repeats identically 5× at startup with no
   further context distinguishing which socket/interface each belongs to.
@@ -1328,7 +1400,11 @@ Consequences of being server-side, all of which the UI must respect:
 
 ### Log Format
 
-A single JSON array of pre-parsed CoT event records:
+**Two shapes are observed in the wild, both real.** The record contents are
+identical; only the container differs, and `_load_records()` in `parser/tak.py`
+normalizes both to the same list of event dicts.
+
+**Shape 1 — JSON array** (`tak-stream-*.json`, the original sample):
 
 ```json
 [
@@ -1344,29 +1420,66 @@ A single JSON array of pre-parsed CoT event records:
 ]
 ```
 
+**Shape 2 — JSON Lines / NDJSON** (`tak-capture-*.log`, a real production
+capture): one JSON object per line, each wrapping the same event shape inside a
+**logging-framework envelope**:
+
+```json
+{"level":"info","message":{ …same fields as above… },"timestamp":"2026-08-25T14:56:51.402Z"}
+{"level":"info","message":{ … },"timestamp":"2026-08-25T14:56:52.113Z"}
+```
+
+Only `message` is unwrapped — the outer `level` and `timestamp` are logger
+metadata, not TAK data. Lines that don't parse as JSON, or whose `message` isn't
+an object, are **counted and skipped** rather than aborting the file, and the
+count is reported in `parse_errors`. A file whose lines all fail yields a "no
+valid CoT event records" entry, not a silent empty result.
+
 The server has already extracted the useful fields; the original CoT XML is
 retained in `raw` for anything the derived fields don't cover (WebTAK-specific
 `detail` children, `<status battery=…>`, `<takv>` device strings).
 
 > **This is the server's JSON export, not a raw CoT capture.** A raw
 > multicast/UDP XML stream would need a separate ingestion path — `parse_tak_log`
-> would not read it.
+> would not read it. That holds for both shapes.
 
 ### Detection
 
-Priority **2**, ahead of ATAK. `is_tak_log()` requires the content to start with
-`[` and to contain all three of `"receivedAt"`, `"nodeType"` and `"category"`
-within the first 4000 characters. Filenames containing `tak-stream`,
-`tak_server` or `tak-server` also route here.
+Priority **4**, immediately ahead of ATAK. `is_tak_log()` branches on the first
+non-`[`/`{` character after stripping leading whitespace:
 
-Both TAK and ATAK are JSON, so ordering matters — but the field sets are
-**disjoint**, which is what makes the order safe rather than lucky:
+- **`[`-rooted** — requires all three of `"receivedAt"`, `"nodeType"` and
+  `"category"` within the first 4000 characters.
+- **`{`-rooted (NDJSON)** — requires the **first non-empty line** to contain
+  `"message"` *and* all three signature keys. Scoping to one line matters: it
+  stops another JSON-Lines format that merely mentions those key names somewhere
+  in the file from false-positiving.
+
+Reading the *first non-empty* line rather than line 0 is deliberate. An earlier
+version read `content.split("\n", 1)[0]`, so a capture with a leading blank line
+— what concatenating, re-saving or rotating a file produces — made the envelope
+test see `""`, decline the NDJSON branch, and fall through to the `diagnostic`
+catch-all, where an 804-event capture parsed as empty with no error at all.
+
+Filenames containing `tak-stream`, `tak_server` or `tak-server` also route here.
+
+Both TAK and ATAK are JSON, so ordering matters. **The root character no longer
+separates them** — TAK is now newline-delimited JSON too — so the safety of the
+order rests entirely on the **disjoint signature keys**, checked within a single
+line for the NDJSON shape:
 
 | | TAK stream | ATAK plugin log |
 |---|---|---|
 | Signature keys | `receivedAt`, `nodeType`, `category` | `logId`, `connectionState`, `atakVersion` |
-| Root | Single JSON array | Newline-delimited JSON / array |
+| Root | JSON array **or** NDJSON | Newline-delimited JSON / array |
 | Viewpoint | Server, many devices | One device, itself |
+
+Because the shapes now overlap, the key disjointness is the *only* thing
+keeping an ATAK log out of the TAK parser. `test_ndjson_branch_does_not_capture_atak_logs`
+in `tests/test_detect_format.py` pins that against a bare `{`-rooted ATAK
+record, and 22 further tests sweep every real ATAK fixture. Widening
+`_SIGNATURE_KEYS` in `parser/tak.py` will fail those loudly — which is the
+intent.
 
 **The disjointness argument covers `is_tak_log()`, not the filename hints.** The
 hints are substring tests, and `tak_server` is a substring of the legacy ATAK
@@ -1510,11 +1623,15 @@ Timestamps are normalized from ISO-8601 with a `Z` suffix to the project's
   both correct for what they measured, but the text read as five devices
   losing GPS when one did. A test asserts the sentence's leading number equals
   `len(tak_no_fix_events)`, so the conflation cannot return silently.
-- **Single-stream validation.** Behavior is proven against one real sample plus
-  four hand-built fixtures (`tak_stream_edge_cases.json`,
-  `tak_stream_clean_pli_only.json`, `tak_stream_zero_coordinate_positions.json`,
-  `tak_stream_partial_coordinates.json`).
-  Multi-server, multi-day, and larger streams are unobserved.
+- **Two-stream validation, one per shape.** Behavior is proven against two real
+  captures — `tak_stream_sample.json` (91 events, array shape) and
+  `tak_ndjson_real_sample.log` (804 events, NDJSON shape) — plus six hand-built
+  fixtures (`tak_stream_edge_cases.json`, `tak_stream_clean_pli_only.json`,
+  `tak_stream_zero_coordinate_positions.json`,
+  `tak_stream_partial_coordinates.json`, `tak_stream_unknown_categories.json`,
+  `tak_stream_envelope_only.json`) and `tak_ndjson_sample.log` for the NDJSON
+  malformed-line branches. Multi-server and multi-day streams are still
+  unobserved.
 - **Rule 3 is covered by test, but not by field data.**
   `tak_stream_zero_coordinate_positions.json` exercises all three cases — a real
   position on the prime meridian (`lon == 0`), a real position on the equator
@@ -1535,6 +1652,27 @@ Timestamps are normalized from ISO-8601 with a `Z` suffix to the project's
 - 5 events with no GPS fix — of which **1** is a PLI/Marker (a real gap) and 4
   are Chat/server-control (never carry a position).
 - `parentCallsign` null on all 91 records.
+
+### Sample File Observations (tak_ndjson_real_sample.log)
+
+The NDJSON shape, and a very different stream from the array sample — worth
+reading before assuming the array capture is representative.
+
+- 804 events over ~2h01m (14:56:51 → 16:58:02 UTC, 2026-08-25), 804 lines, none
+  malformed. 23 unique callsigns.
+- Categories: 492 Marker · 273 PLI · 37 Other · 2 Chat. **Marker-dominant**,
+  unlike the array sample's PLI-dominant 71/16 split.
+- Latency: min **−2,097 ms** · max 42,080 ms — and **793 of 804 events are
+  negative**. Near-universal clock skew rather than the array sample's 10 of 91.
+  This is the P8 signal, preserved and never clamped.
+- 67 events carry no position: **30** PLI/Marker (real gaps) and 37
+  Chat/server-control. Of the positionless records, 32 are the `(0,0)` sentinel
+  and 35 are **incomplete lat/lon pairs** — the both-or-neither rule fires on
+  real data here, not only in the hand-built fixture.
+- Server: `5.6-RELEASE-57-HEAD`, API version `3` — same server as the array
+  sample.
+- Unextracted telemetry present: battery on 12 events, `<takv>` device/OS on
+  497, `<track>` speed/course on 12.
 
 ---
 

@@ -389,20 +389,34 @@ battery or thermal. See the format limitations in `parsing-requirements.md`.
 
 ---
 
-### 16. Next-Gen Modem (`ht-modem`) — ⏳ Not Yet Implemented
+### 16. Next-Gen Modem (`ht-modem`) — ✅ Implemented
 
-> Spec drafted 2026-08-24 alongside the parsing requirements for this format.
-> No parser, models, tab component, or tests exist yet — this section
-> describes the target design.
+> Spec drafted 2026-08-24; `HtModemTab` in `App.jsx` built 2026-08-25 and
+> live-verified. Reworked 2026-08-27 from one cross-session aggregate KPI row
+> to **one header + KPI block per session** (see below).
 
 `ht-modem`-only tab — appears only when a next-gen modem log is loaded, in
 the visually separated Next-Gen Radio tab group (see grouping requirement
 above), not the main tab row.
 
+- **Per-session blocks, not cross-session aggregates.** Each loaded log gets
+  its own header bar (accent stripe in `PALETTE[i]` + source filename) and its
+  own KPI row, matching `RelayHealthTab`'s convention. The earlier aggregate
+  row summed `tx_packet_count` / `queued` / `dropped` across every loaded log
+  and took `some()`/`every()` for the pass-fail badges, which reads as a single
+  unit when two captures are open and hides which session had the fault.
 - **Data Limitations Banner** — surfaces the AD936X init-failure cascade
-  (collapsed count, not 20+ rows), the ambiguous `Found <N> devices`
-  parse, and the not-yet-implemented status itself while this remains
-  spec-only
+  (collapsed count, not 20+ rows), the ambiguous `Found <N> devices` parse,
+  and the positional-attribution limitation on `Packet Transmitted`
+  confirmations. Rendered per session, inside that session's block.
+
+> **Un-prefixed `parse_errors` entries are currently invisible on this tab.**
+> `RelayLimitationBanner` filters on `startsWith('DATA LIMITATION')`, while the
+> file-list ⚠ glyph fires on `parse_errors.length > 0` — so an entry without
+> the prefix produces a red warning with no text anywhere explaining it.
+> `TakTab.jsx`'s `LimitationBanner` already solves this by rendering prefixed
+> and un-prefixed entries as two labelled groups; this tab should adopt that
+> pattern. Tracked in the backlog.
 - **Session header** — session start/end, FPGA version check result
   (pass/fail badge), LIBIIO version, filter bank
 - **RF Control Timeline** — frequency changes and power level changes
@@ -414,25 +428,36 @@ above), not the main tab row.
 - **Thermal** — `LPD`/`FPD`/`PL` temperature chart over time, °F display
   per the project-wide temperature rule, same charting pattern as the
   existing Thermal tab but a distinct sensor set (do not merge with
-  `NRF52`/`Si4460`/`PA` data)
+  `NRF52`/`Si4460`/`PA` data, and do not merge with the raw `Temp Val` on
+  `Packet Transmitted` confirmations — a different sensor on its own scale).
+  **X-axis is per-session elapsed time**, not the normalized 0–100% axis the
+  other charts use — see the note under the Cross-File Offset item below for
+  the trade-off that choice makes.
 - **GPS/Clock** — `gpsd` connection status, clock calibration offset,
   SI4460 calibration offset (surfaced as informational, not necessarily a
   fault)
 
-### 17. Next-Gen Router (`ht-router`) — ⏳ Not Yet Implemented
+### 17. Next-Gen Router (`ht-router`) — ✅ Implemented
 
-> Spec drafted 2026-08-24 alongside the parsing requirements for this format.
-> No parser, models, tab component, or tests exist yet — this section
-> describes the target design.
+> Spec drafted 2026-08-24; `HtRouterTab` in `App.jsx` built 2026-08-25 and
+> live-verified. Reworked 2026-08-27 to per-session blocks, same as section 16.
 
 `ht-router`-only tab — appears only when a next-gen router log is loaded, in
 the same visually separated Next-Gen Radio tab group as `ht-modem` (section
 16), but as its own distinct tab, not merged into one.
 
-- **Data Limitations Banner** — surfaces the not-yet-implemented status,
-  the unconfirmed `dst`/`src` identity-space question, unconfirmed socket
-  warning semantics, and the open retention-vs-downsampling decision for
-  snapshot data
+- **Per-session blocks, not cross-session aggregates** — same rework and same
+  reasoning as section 16.
+- **Absent counters must render as `—`, not `0`.** A session that never
+  transmitted omits the whole `output.*` group; a session with no RF noise
+  omits the nine `input.*` error counters. Summed via `sumReported()`, which
+  stays `null` when no loaded log carries the field, and the card shows `—`
+  with "not reported in this log". A genuine `0` (e.g. `socket_warning_count`)
+  renders as `0` via `?? '—'`, never collapsed to `—` by `||`.
+- **Data Limitations Banner** — surfaces the unconfirmed `dst`/`src`
+  identity-space question and the unconfirmed socket-warning semantics.
+  (Snapshot retention is no longer open: all snapshots are kept and trimming
+  is delegated to the time-window slider.)
 - **Session header** — router PID, spawned modem PID (cross-links to a
   loaded `ht-modem` session by PID when both are present in the same
   upload), session start, rotation markers (`reopened log file`) shown as
@@ -449,6 +474,27 @@ the same visually separated Next-Gen Radio tab group as `ht-modem` (section
   message types and `mgt_hub_forward` send/skip counts
 - **Socket Warnings** — count and first-seen timestamp of `us_warn`
   entries, flagged for follow-up rather than treated as fully understood
+
+> **Deliberately not yet surfaced — recorded so the gap is a decision, not an
+> oversight.** Two groups of parsed, serialized fields have no UI consumer:
+>
+> - The nine `input.*` link-layer counters (`input_bad_crc`,
+>   `input_wrong_link_version`, `input_too_short_*`, `input_subframe_*_error`).
+>   These are RF-health signals and arguably belong on this tab; a "Link-Layer
+>   Errors" KPI group or a cumulative chart alongside Throughput & Reliability
+>   is the obvious home. Must respect the absent-is-`—` rule above, since four
+>   of the five real captures don't report them at all.
+> - ht-modem's `transmitted_count`, `retransmit_packet_count`, and the
+>   per-packet `transmissions[]` (section 16). A KPI card is the natural
+>   surface, but the label must not call `retransmit_packet_count` a retry
+>   count — see `parsing-requirements.md` → "Confirmation attribution is
+>   positional".
+>
+> Whichever lands first must also be added to the `filteredResults` recompute
+> in `App.jsx` — `transmitted_count` and `retransmit_packet_count` are
+> currently outside it, so they would show whole-session values next to a
+> windowed `tx_packet_count`. Same defect the ATAK command-array backlog item
+> already fixed once.
 
 ---
 
@@ -552,7 +598,7 @@ no behavior change.
 ### ATAK Enhanced Log (SDK Logging 2.0) — ✅ Implemented
 Full support for the enhanced ATAK log format. The `SdkLogSummaryCard` renders the aggregated `atak_sdk_error_summary` (counts by tag and by `additionalInfo`, distinct radio types, and a retained sample) — high-volume `sdkError` records are aggregated, never rendered per-record, with the volume-baseline `DATA LIMITATION` surfaced in the banner. Also covers the enhanced message/event fields: `loggingUserLocation` / `transmittedLocation`, `originatorUUID`, the `-99` open-segments sentinel shown as `unknown`, `firmwareUpdate` events, and `deviceDisconnected` location. See ATAK tab spec (section 12).
 
-### Next-Gen Radio — Modem & Router Parsers & Tabs — ⏳ Spec drafted, not implemented (2026-08-24)
+### Next-Gen Radio — Modem & Router Parsers & Tabs — ✅ Implemented (2026-08-25)
 Two new formats scoped from raw sample logs (`ht-modem.log`, `ht-router.log`,
 `ht-router__1_.log`): `ht-modem` (SDR/RF layer, ctime timestamps, TX packet
 lifecycle including `CSMA QUEUE is Full` drops, `LPD`/`FPD`/`PL` thermal) and
@@ -563,9 +609,10 @@ block-grouping at parse time). Full field mappings in
 questions in `parsing-requirements.md`. **New UI requirement carried by this
 work:** Next-Gen Radio tabs must be visually grouped separately from the
 existing tab row, not just another dimmed/badged tab mixed in — see the
-Tabs section intro above. Open decisions before implementation: exact
-tab-grouping treatment, and whether router stat snapshots are fully
-retained or downsampled given sample files run 24k–62k lines.
+Tabs section intro above. Both open decisions are now resolved: the grouping
+is its own row with an `--accent2` accent and section label, and router stat
+snapshots are **fully retained** — trimming is delegated to the existing
+time-window slider rather than decided at parse time.
 
 ### FW Log — Relay Firmware Parser & Tab — ✅ Implemented
 Relay radio firmware (UART/USB debug) logs are auto-detected (detection priority 1) and parsed by `parser/fw_log.py` into `FwLogResult`. The FW Log tab (section 13) renders origin hash, RF configuration, message bucket history, relay routing decisions, channel energy (the RSSI proxy), neighbor table, and errors/warnings, with the three firmware-log `DATA LIMITATION` notes surfaced honestly. See parser spec in `parsing-requirements.md` (Relay Firmware section) and field definitions Format 4. **Note:** decoding the binary RHC payload (hash → serial, firmware version) is tracked separately below as RHC Response Field Mappings, still pending.
@@ -795,15 +842,22 @@ What *does* exist and is easy to confuse it with:
   between two *communicating devices* within one session. Unrelated: a
   same-session, same-upload metric, not a cross-file/cross-upload check.
 
-**Motivating case:** the Next-Gen Modem thermal chart
-(`HtModemTempOverTime` in `ChartPanel.jsx`) now plots real absolute
-timestamps (2026-08-26 fix, replacing a normalized 0–100% axis). If two
-ht-modem sessions with disjoint time ranges are loaded together, the shared
-x-axis stretches across the full gap between them, which will look broken.
-This warning is a prerequisite for either (a) telling the user why the
-chart looks that way, or (b) automatically switching to a "small multiples"
-layout (one chart panel per session) when ranges don't overlap — see that
-component's comments for the deferred design.
+**Motivating case — corrected 2026-08-27.** This item was originally
+justified by the Next-Gen Modem thermal chart "now plotting real absolute
+timestamps," so that two sessions with disjoint dates would stretch the shared
+x-axis across the gap. **That premise was wrong.** `HtModemTempOverTime` plots
+**per-session elapsed time** (`x: s.elapsedMs`, each session's own first sample
+at 0), which is precisely what makes disjoint dates a non-issue for that chart.
+The stated motivating case cannot occur.
+
+The item is still worth doing, on a different and verifiable justification:
+**the time-window slider.** `extractTimeRange` in `FileUpload.jsx` builds one
+combined min/max across all uploaded files, so loading an ht-modem capture
+(year-2036 timestamps, unset RTC — see `parsing-requirements.md`) alongside any
+real-dated log yields a **ten-year slider range** snapped to hours. The slider
+becomes unusable for narrowing to either session, and nothing tells the user
+why. That is a concrete, reproducible defect with committed fixtures, and it is
+independent of any chart's axis choice.
 
 **Fix (not yet built):** during the existing client-side timestamp scan in
 `FileUpload.jsx`'s `onDrop`, track each file's own min/max range (not just
@@ -813,9 +867,45 @@ files' ranges don't overlap and the gap between them exceeds some threshold
 surface a warning in the upload modal before the user confirms the time
 window. Exact threshold and warning UX not yet designed.
 
-**Priority:** Low — cosmetic/UX polish, not a data-correctness issue. No
-parser or API change; purely a `FileUpload.jsx` addition mirroring the
-pattern of the existing epoch-ms scanner fix above.
+**Priority:** Low — UX polish, not a data-correctness issue. No parser or API
+change; purely a `FileUpload.jsx` addition mirroring the pattern of the
+existing epoch-ms scanner fix above.
+
+### HtModemTempOverTime — unequal-duration compression — ⏳ Pending (2026-08-27)
+
+The real trade-off the elapsed-time axis makes, as distinct from the disjoint-
+date case above which it solves.
+
+`HtModemTempOverTime` plots every loaded session on **one shared linear
+elapsed-ms axis** (`min: 0`, max auto-scaled by Chart.js to the longest
+session). So sessions of different lengths no longer each occupy the full chart
+width: with the two committed fixtures — `htmodem_sample.log` at ~36 min and
+`htmodem_sample2.log` at ~2h36m — the shorter session renders across roughly a
+quarter of the width. That is the sparse-data problem the project-wide
+normalized 0–100% axis exists to prevent, per the CLAUDE.md architecture
+decision, and this chart is the documented exception to it.
+
+**Why the exception was taken anyway** (the reasoning the original change
+failed to state): the gains are downsampling the *sample rows* together so
+LPD/FPD/PL stay aligned instead of drifting apart, and 150 points with real
+duration ticks (`1:23:45`) instead of 15 percentage buckets. Neither of those
+required abandoning normalization — `buildRelativeTimeSeries()` normalizes
+per-device off `samples[0].ms`, so the year-2036 unset-RTC timestamps cited as
+the motivation would not have broken it. The de-normalization was incidental,
+not required.
+
+**Options, none built:**
+- (a) Normalize to the longest *loaded* session rather than absolute ms —
+  keeps duration ticks and alignment, removes the compression.
+- (b) "Small multiples": one chart panel per session when durations differ by
+  more than ~10×, which also reads better for cross-session comparison.
+- (c) Keep the shared axis and add an on-screen note when loaded durations
+  differ materially — consistent with the "an empty map must say it's empty"
+  and "a scoped count must state its scope" rules.
+
+**Priority:** Medium. Not a correctness bug — no data is wrong or hidden — but
+a chart that renders one of two loaded sessions as a narrow sliver is more than
+cosmetic, and it is a live deviation from a documented architecture decision.
 
 ### Rename "Relay Firmware" / "Relay radio firmware" to "Firmware" — ⏳ Pending
 Cosmetic/naming cleanup: standardize the user-facing label "Relay Firmware" /

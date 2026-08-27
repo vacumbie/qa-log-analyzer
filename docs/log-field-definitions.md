@@ -776,6 +776,14 @@ would live in `parser/models.py` alongside the existing `Fw*` models.
 | `Extended the payload length from <a> to <b>` | ints | `tx_packets[].payload_extended_from/to` | |
 | `Added packet to xmit queue numinqueue = <n>` | bool, int | `tx_packets[].queued = True`, `.numinqueue` | |
 | `ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet` | bool, count | `tx_packets[].queued = False`, `dropped_count` | **Packet-loss metric.** No `packetID` on this line — attributed to the most recently seen TX packet block |
+| `Packet Transmitted :  Rev Val = <n> :  Fwd Val = <n> S11 = <n> dB :  Temp Val = <n>` | ints | `tx_packets[].transmissions[]` (`rev_val`, `fwd_val`, `s11_db`, `temp_val`) | **RF-layer confirmation**, separate from `queued`. A **list** — a packet can have more than one. No `packetID` on this line either, so attribution is positional and not always adjacent to the queue line. Unattributable lines → `orphaned_transmitted_count` |
+| — (derived) | bool | `tx_packets[].transmitted` | `len(transmissions) > 0` |
+| — (derived) | int | `tx_packets[].retransmit_count` | `len(transmissions) - 1`. **Extra confirmations, NOT confirmed RF retries** — a confirmation logged after the next packet began encoding is credited to that next packet. See `parsing-requirements.md` → "Confirmation attribution is positional" |
+
+> **`Temp Val` is not a temperature you can chart alongside the thermal
+> samples below.** It is the radio's own raw scale from a different sensor than
+> `LPD`/`FPD`/`PL`, is not converted to °F, and must never be merged with
+> `temp_samples`.
 
 ### Thermal (`temp_samples`)
 
@@ -792,16 +800,15 @@ would live in `parser/models.py` alongside the existing `Fw*` models.
 > **Structure:** Two interleaved shapes — discrete `<ISO8601>Z: <message>` event
 > lines, and a repeating ~20-line periodic counter snapshot block.
 >
-> **Status: spec only — not yet implemented.** No `HtRouterResult` model, no
-> parser, no tests exist yet. Field mappings below are the target design.
+> **Status: implemented.** `parser/htrouter.py` → `HtRouterResult` /
+> `RouterStatSnapshot` in `models.py` → `_result_to_dict()` → `HtRouterTab`.
 
 > Timestamps are **ISO8601 with microseconds, `Z`-suffixed (UTC)** — the same
 > style as the TAK server format, distinct from `ht-modem`'s `ctime` style
 > above. See `parsing-requirements.md` → Next-Gen Radio — Router for the full
 > field-by-field parsing rules, including how snapshot blocks are grouped.
 
-Would be parsed into a new `HtRouterResult` (attached to
-`ParseResult.htrouter_result`, name TBD when implemented).
+Parsed into `HtRouterResult`, attached to `ParseResult.htrouter_result`.
 
 ### Identity & Session
 
@@ -825,14 +832,19 @@ Would be parsed into a new `HtRouterResult` (attached to
 
 | Raw Field | Parsed As | Model Field | Notes |
 |-----------|-----------|-------------|-------|
-| `input.total_frames` / `input.total_bytes` / `input.total_m2m` | ints | `stat_snapshots[].input_*` | |
-| `input.m2m_by_type[m2m_type_xmit\|control\|recv\|status\|xmit_status]` | ints | `stat_snapshots[].input_m2m_by_type{}` | |
-| `output.traffic[aggr_next_proto_ag].ok/fail`, `.ctl.ok/fail`, `.sts.ok/fail` | ints | `stat_snapshots[].output_*` | |
-| `output.aggregation.subframes/frames`, `.total_bytes` | ints | `stat_snapshots[].output_aggregation_*` | |
-| `output.time_outs`, `output.bottom.timed_out` | ints | `stat_snapshots[].timeouts`, `.bottom_timed_out` | |
-| `output.modem_xmit_failed` | int | `stat_snapshots[].modem_xmit_failed` | Clearest cross-reference point to `ht-modem`'s `CSMA QUEUE is Full` drops — correlation feature is future scope, not this parser |
-| `output.overhead[N] ([min, max] bytes) <n>` | struct | `stat_snapshots[].overhead_histogram` | |
-| `output.xmit_completion[N] ([min, max] ms) <n>` | struct | `stat_snapshots[].xmit_completion_histogram` | |
+| `input.too_short.link_hdr` / `.link_payload` / `.link_crc` | ints | `stat_snapshots[].input_too_short_link_hdr`, `.input_too_short_link_payload`, `.input_too_short_link_crc` | **Link-layer validity counters.** Absent (`None`) in a session with no RF noise — never `0`. Present in `htrouter_sample3.log` / `sample4_rotated.log`, absent throughout `sample.log` / `sample2.log` |
+| `input.wrong_link_version` | int | `stat_snapshots[].input_wrong_link_version` | Same absence convention |
+| `input.crc_present` / `input.bad_crc` | ints | `stat_snapshots[].input_crc_present`, `.input_bad_crc` | **RF-health signal** — `bad_crc` rises 112 → 130 across `sample3`'s session. Same absence convention |
+| `input.subframe.no_protocol` / `.logical_recv_error` / `.family_recv_error` | ints | `stat_snapshots[].input_subframe_no_protocol`, `.input_subframe_logical_recv_error`, `.input_subframe_family_recv_error` | Same absence convention |
+| `input.subframe.count`, `input.traffic[aggr_next_proto_ag]`, `input.ctl`, `input.sts` | ints | `stat_snapshots[].input_subframe_count`, `.input_traffic_ag`, `.input_ctl`, `.input_sts` | |
+| `input.total_frames` / `input.total_bytes` / `input.total_m2m` | ints | `stat_snapshots[].input_total_frames`, `.input_total_bytes`, `.input_total_m2m` | |
+| `input.m2m_by_type[m2m_type_xmit\|control\|recv\|status\|xmit_status]` | ints | `stat_snapshots[].input_m2m_xmit`, `.input_m2m_control`, `.input_m2m_recv`, `.input_m2m_status`, `.input_m2m_xmit_status` | Five flat fields, not a dict |
+| `output.traffic[aggr_next_proto_ag].ok/fail`, `.ctl.ok/fail`, `.sts.ok/fail` | ints | `stat_snapshots[].output_traffic_ag_ok/_fail`, `.output_ctl_ok/_fail`, `.output_sts_ok/_fail` | Absent in a session that never transmitted |
+| `output.aggregation.subframes/frames`, `.total_bytes` | ints | `stat_snapshots[].output_aggregation_subframes`, `.output_aggregation_frames`, `.output_total_bytes` | |
+| `output.time_outs`, `output.bottom.timed_out` | ints | `stat_snapshots[].output_time_outs`, `.output_bottom_timed_out` | |
+| `output.modem_xmit_failed` | int | `stat_snapshots[].output_modem_xmit_failed` | Clearest cross-reference point to `ht-modem`'s `CSMA QUEUE is Full` drops — correlation feature is future scope, not this parser |
+| `output.overhead[N] ([min, max] bytes) <n>` | int | `stat_snapshots[].output_overhead` | |
+| `output.xmit_completion[N] ([min, max] ms) <n>` | int | `stat_snapshots[].output_xmit_completion` | |
 | `connected <0\|1>` | bool | `stat_snapshots[].connected` | Terminates each snapshot block; also usable standalone as a connection-state timeline |
 
 > **Grouping requirement:** the ~20 lines above are **one measurement**, not
@@ -841,16 +853,27 @@ Would be parsed into a new `HtRouterResult` (attached to
 > ending at `connected`), never stored as flat per-line records. See
 > `parsing-requirements.md` Parsing Rule 1 for this format.
 
-> **Open design question — retention vs. downsampling:** sample captures run
-> 24k–62k lines at ~20 lines/snapshot every ~10s, meaning thousands of
-> snapshot records per session. Whether all are retained or downsampled at
-> parse time is undecided — flag to Valerie before implementation, not a
-> silent default.
+> **Retention — resolved as keep everything.** Sample captures run 24k–138k
+> lines at ~20 lines/snapshot every ~10s, giving 447–2,286 snapshot records per
+> session. All are retained; trimming is left to the UI's existing time-window
+> slider rather than being decided at parse time.
+
+> **Cumulative, not per-interval.** Every counter above is a session-lifetime
+> total. A "total" is the **last** snapshot's value, never a sum across
+> snapshots — summing 2,286 snapshots would overcount by orders of magnitude.
+
+---
+
 ## Format 7: TAK Server CoT Event Stream
 
-**File type:** `.json`
+**File type:** `.json` (array shape) or `.log` (NDJSON shape)
 **Platform:** TAK server (server-side — **not** a device or app log)
-**Structure:** A single JSON array of pre-parsed Cursor-on-Target event records.
+**Structure:** Two observed shapes, same record contents:
+1. **JSON array** of pre-parsed Cursor-on-Target event records.
+2. **JSON Lines / NDJSON** — one object per line, each wrapping the same event
+   in a logging envelope: `{"level":…,"message":{…event…},"timestamp":…}`. Only
+   `message` is unwrapped; `level`/`timestamp` are logger metadata. Unparseable
+   lines are counted and skipped, not fatal.
 
 > The server has already extracted the useful fields; the original CoT XML stays
 > in `raw`. This is the server's JSON export, **not** a raw multicast/UDP CoT
