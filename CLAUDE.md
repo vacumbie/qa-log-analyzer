@@ -363,6 +363,15 @@ pytest tests/test_rsdk.py -v   # single file, verbose
 pytest tests/ -x       # stop on first failure
 ```
 
+Two test files guard `ui/src/components/FileUpload.jsx`'s time-window scanner
+from Python, since there is no JS test runner and the stack rules forbid adding
+one: `test_time_range_scan.py` re-runs its regex literals, and
+`test_time_range_exec.py` executes the real `extractTimeRange` under **node**
+(already required for Vite — no npm package added). The latter skips if node
+isn't on PATH. Keep the scanner's regexes as top-level single-line `const NAME =
+/…/g` literals and its helpers as top-level functions, or both guards fail
+loudly — which is the intent, not a reason to delete them.
+
 ### Start the dev environment
 ```bash
 # Terminal 1 — API
@@ -560,6 +569,7 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | `ui-requirements.md` §16–§18 asserted features that were never built | ✅ Done (2026-08-27) — `sumReported()` attribution corrected (it belongs to the KPI row, and didn't exist when that text was written), plus RF Control Timeline, `output.bottom.timed_out`, socket-warning first-seen, rotation-marker boundaries, header contents and two banner claims all marked not-built rather than described as shipping |
 | `log-field-definitions.md` documented a `control_packets` collection that was never built | ✅ Done (2026-08-27) — recorded as **not parsed** in both specs, with the reason: `control type = 10` appears with both Transmit Level and SETTXRXFREQ, so the type alone identifies nothing and `freq_changes`/`power_changes` already carry the meaning |
 | Duplicate `### 16.` tab sections in `ui-requirements.md` | ✅ Done (2026-08-27) — next-gen renumbered to 17/18; cross-references updated. (Section 14, Network Topology, remains out of order at the end of the file — unimplemented, pre-existing) |
+| `extractTimeRange` was guarded only by re-running its regex literals in Python — nothing executed the function | ✅ Done (2026-08-27) — `tests/test_time_range_exec.py` runs the real function under node via `tests/js/run_extract_time_range.mjs`, covering the union order, `ctimeToMs`, UTC-vs-local and `range-unavailable` routing. **No npm packages** — node is already required for Vite, and the driver lifts the pure functions out by name rather than importing the JSX. Skips if node is absent |
 
 ---
 

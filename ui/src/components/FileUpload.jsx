@@ -107,8 +107,18 @@ const CTIME_MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, A
 const XML_TS_ATTR_RE = /\w+=\\?"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[^"\\]*/g
 
 // Returns the min/max timestamp in the text as epoch ms, or null if none found.
-// Unions wall-clock matches (diagnostic/rsdk/relay_manager, and ATAK sdkError
-// ISO timestamps) with ATAK epoch-ms matches, so a mixed enhanced log uses both.
+// Unions THREE timestamp dialects, so a file carrying more than one — an ATAK
+// enhanced log mixes two — contributes all of them to one range:
+//   1. wall-clock `YYYY-MM-DD HH:MM:SS`  (diagnostic / rsdk / relay_manager /
+//      TAK, and ATAK sdkError ISO stamps)      — TS_RE, after the XML strip
+//   2. ATAK epoch-ms, key-anchored              — EPOCH_MS_RE
+//   3. ctime `Ddd Mmm D HH:MM:SS YYYY` (ht-modem) — CTIME_RE
+// All three are read as UTC. Returning null routes the upload to the disabled
+// `range-unavailable` step, which fw_log is now the only format to hit (its
+// timestamps are relative ms from boot, so it genuinely has no wall-clock).
+// Behaviour is guarded two ways: tests/test_time_range_scan.py re-runs the
+// regex literals in Python, and tests/test_time_range_exec.py executes this
+// function itself under node.
 function extractTimeRange(text) {
   let minMs = Infinity
   let maxMs = -Infinity

@@ -10,6 +10,11 @@ This does NOT execute the JSX. It extracts the regex literals by name and
 re-runs them in Python, which is why the patterns must stay ECMAScript/Python
 compatible. If someone rewrites one using a JS-only construct, the translation
 assertion below fails loudly rather than silently testing nothing.
+
+What that leaves uncovered — the union order, `ctimeToMs`, UTC-vs-local, the
+head/tail sampling — is covered by `test_time_range_exec.py`, which runs the
+real `extractTimeRange` under node. Three correct regexes composed wrongly still
+give a wrong slider, so the two files guard different halves of the same code.
 """
 
 import re
