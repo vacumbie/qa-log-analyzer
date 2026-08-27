@@ -93,18 +93,23 @@ def is_tak_log(content: str) -> bool:
     Heuristic content check for the TAK server stream format — either shape.
 
     Array shape: content starts with '[' and the signature keys appear.
-    NDJSON shape: content starts with '{' and the FIRST LINE both looks like
-    a logger envelope ("message") and carries the signature keys inside it —
-    checking only the first line (not the whole 4000-char snippet) avoids
+    NDJSON shape: content starts with '{' and the FIRST NON-EMPTY LINE both
+    looks like a logger envelope ("message") and carries the signature keys
+    inside it — checking one line (not the whole 4000-char snippet) avoids
     false-positiving on some other JSON-Lines format that happens to mention
     these key names anywhere in the file.
+
+    "First non-empty" rather than "first": a concatenated, re-saved or rotated
+    capture can arrive with leading blank lines, and reading line 0 literally
+    made the envelope test see "" and decline — sending the whole file to the
+    diagnostic catch-all, where it parsed as empty with no error at all.
     """
     snippet = content[:4000]
     stripped = snippet.lstrip()
     if stripped.startswith("["):
         return all(key in snippet for key in _SIGNATURE_KEYS)
     if stripped.startswith("{"):
-        first_line = content.split("\n", 1)[0]
+        first_line = next((ln for ln in content.splitlines() if ln.strip()), "")
         if '"message"' in first_line:
             return all(key in first_line for key in _SIGNATURE_KEYS)
     return False
