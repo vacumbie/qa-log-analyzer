@@ -104,7 +104,17 @@ def export_csv(session_id: str, data_type: str = "received_messages") -> Streami
                    f"Valid options: {sorted(valid_types)}",
         )
 
+    # Most formats serialize their tables at the top level of the result, but
+    # htmodem and htrouter nest theirs under a per-format block
+    # (base["htmodem"], base["htrouter"]) — see _result_to_dict(). Looking only
+    # at the top level made every next-gen entry below 400 while /types happily
+    # advertised all eight. Checking the nested block second keeps the payload
+    # as-is rather than duplicating 2,585-row tables to satisfy the lookup.
     rows = session.get(data_type)
+    if rows is None:
+        nested = session.get(log_format)
+        if isinstance(nested, dict):
+            rows = nested.get(data_type)
     if rows is None:
         raise HTTPException(status_code=400, detail=f"Unknown data_type '{data_type}'.")
     if not rows:

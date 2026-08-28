@@ -33,6 +33,24 @@ def _post(filename: str, content: bytes) -> dict:
     return asyncio.run(parse_logs(files=[upload]))
 
 
+def _export_client():
+    """A TestClient over the export router.
+
+    Mounts the router rather than importing `api.main`, whose flat
+    `from routes.export import ...` only resolves with `api/` on sys.path (how
+    uvicorn runs it). Importing it here would mean a sys.path hack in tests/,
+    which this suite deliberately has none of. `main.py` mounts this same
+    router, so the routes under test are the ones that ship.
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.routes.export import router as export_router
+
+    app = FastAPI()
+    app.include_router(export_router)
+    return TestClient(app)
+
+
 def _diagnostic_bytes(line_ending: str) -> bytes:
     # read_text() normalizes to "\n" regardless of how git checked the fixture
     # out (autocrlf), so re-encoding lets the test control the line ending it
@@ -356,28 +374,54 @@ def test_htrouter_snapshot_serialization_exposes_the_link_layer_fields():
     ("htrouter_sample3.log", "htrouter"),
     ("htrouter_sample.log", "htrouter"),
 ])
-def test_next_gen_csv_export_types_all_resolve_to_writable_tables(fixture_name, fmt):
-    """Every name in _CSV_TYPES must be a real key in the serialized response
-    and survive csv.DictWriter, which takes its fieldnames from row 0 and
-    raises if a later row carries a key row 0 lacks. The two next-gen formats
-    are the ragged-schema case — snapshots omit whole field groups depending on
-    what a session reported — so this is where that would bite."""
-    import csv, io as _io
+def test_next_gen_csv_export_types_all_download_through_the_endpoint(fixture_name, fmt):
+    """Every name in _CSV_TYPES must actually download.
+
+    The first version of this test asserted the serializer's *shape* instead —
+    it read the table from the response dict, falling back to the nested
+    per-format block when the top-level lookup missed. That fallback was
+    precisely the lookup `export_csv` did not do, so the test reached the data
+    by a path the endpoint couldn't and passed while all eight exports returned
+    HTTP 400. Asserting through the real endpoint is the only version of this
+    test worth having.
+
+    Also covers the ragged-schema hazard: csv.DictWriter takes its fieldnames
+    from row 0 and raises if a later row carries a key row 0 lacks, and these
+    two formats omit whole field groups depending on what a session reported.
+    """
     from api.routes.export import _CSV_TYPES
 
+    client = _export_client()
     result = _upload_fixture(fixture_name)
     assert result["log_format"] == fmt
+    session_id = client.post("/export/session", json=result).json()["session_id"]
+
     for data_type in sorted(_CSV_TYPES[fmt]):
-        rows = result.get(data_type)
-        if rows is None:
-            rows = result.get(fmt, {}).get(data_type)
-        assert rows is not None, f"{fmt}.{data_type} is exported but not serialized"
-        if not rows:
-            continue          # export returns 404 for an empty table, by design
-        out = _io.StringIO()
-        writer = csv.DictWriter(out, fieldnames=rows[0].keys())
-        writer.writeheader()
-        writer.writerows(rows)
+        response = client.get(f"/export/{session_id}/csv", params={"data_type": data_type})
+        # 404 is the documented answer for a table this session genuinely has
+        # no rows for; anything else means the type is advertised but unusable.
+        assert response.status_code in (200, 404), (
+            f"{fmt}/{data_type} -> {response.status_code} {response.text[:120]}"
+        )
+        if response.status_code == 200:
+            header = response.text.splitlines()[0]
+            assert header, f"{fmt}/{data_type} returned an empty CSV"
+
+
+def test_export_types_endpoint_only_advertises_downloadable_types():
+    """/types is what a client builds its export menu from, so anything it
+    lists must be fetchable — the two must not drift apart again."""
+    client = _export_client()
+    result = _upload_fixture("htrouter_sample3.log")
+    session_id = client.post("/export/session", json=result).json()["session_id"]
+
+    advertised = client.get(f"/export/{session_id}/types").json()["valid_types"]
+    assert advertised, "htrouter advertises no export types"
+    for data_type in advertised:
+        response = client.get(f"/export/{session_id}/csv", params={"data_type": data_type})
+        assert response.status_code in (200, 404), (
+            f"advertised but not downloadable: {data_type} -> {response.status_code}"
+        )
 
 
 def test_htrouter_total_bad_crc_reaches_the_summary():
