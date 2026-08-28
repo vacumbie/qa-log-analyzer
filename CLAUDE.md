@@ -177,8 +177,8 @@ UI only depend on that shape — never import parser internals into routes or
 UI components.
 
 **ht-modem / ht-router status:** complete through the UI — parsers, models,
-detection, API serialization, tests (34 each, against two real ht-modem
-captures and four real ht-router captures plus a synthetic edge-case fixture
+detection, API serialization, tests (34 ht-modem, 36 ht-router, against two
+real ht-modem captures and four real ht-router captures plus a synthetic edge-case fixture
 per format), and the `HtModemTab` / `HtRouterTab` pair with five
 `CHART_MAP` entries. Full requirements in `docs/parsing-requirements.md` and
 `docs/log-field-definitions.md` (Formats 5–6). **The UI rule these follow:**

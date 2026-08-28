@@ -89,7 +89,7 @@ def _utc(ms):
 
 # ── ctime (ht-modem) — the dialect the scan test cannot compose ───────────────
 
-def test_htmodem_range_matches_the_parsers_session_bounds(node, ):
+def test_htmodem_range_matches_the_parsers_session_bounds(node):
     """The bug this closes returned null here, so the modal claimed the file had
     no parseable timestamps. The bounds must agree with what the parser reports
     as session_start/session_end (see test_htmodem.py::test_session_bounds),

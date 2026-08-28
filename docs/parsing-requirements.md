@@ -1221,7 +1221,7 @@ pending either a firmware change or a documented ordering guarantee.
 ## Next-Gen Radio — Router (ht-router) Log
 
 > **Status: implemented.** `parser/htrouter.py` → `RouterStatSnapshot` /
-> `HtRouterResult` in `models.py` → `_result_to_dict()` → `HtRouterTab`. 34
+> `HtRouterResult` in `models.py` → `_result_to_dict()` → `HtRouterTab`. 36
 > tests in `tests/test_htrouter.py` over four real captures plus a synthetic
 > edge-case fixture.
 

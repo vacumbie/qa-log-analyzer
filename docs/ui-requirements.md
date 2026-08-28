@@ -562,7 +562,8 @@ the same visually separated Next-Gen Radio tab group as `ht-modem` (section
 >
 > - **Eight of the nine `input.*` link-layer counters** —
 >   `input_wrong_link_version`, `input_too_short_*`, `input_crc_present`,
->   `input_subframe_*_error`. These are RF-health signals and arguably belong on
+>   `input_subframe_no_protocol`, `input_subframe_logical_recv_error`,
+>   `input_subframe_family_recv_error`. These are RF-health signals and arguably belong on
 >   this tab; a "Link-Layer Errors" KPI group or a cumulative chart alongside
 >   Throughput & Reliability is the obvious home. Must respect the
 >   absent-is-`—` rule above, since **two of the four** real ht-router captures
