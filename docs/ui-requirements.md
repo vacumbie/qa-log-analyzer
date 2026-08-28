@@ -555,25 +555,35 @@ the same visually separated Next-Gen Radio tab group as `ht-modem` (section
   and discards the line, so it is unimplementable without a parser change.
 
 > **Deliberately not yet surfaced — recorded so the gap is a decision, not an
-> oversight.** Two groups of parsed, serialized fields have no UI consumer:
+> oversight.** Two groups of parsed, serialized fields are unsurfaced or nearly
+> so. Keep this list accurate as pieces land: it is what makes the gap a
+> decision, and it has already gone stale once (the Bad CRC card below shipped
+> while this paragraph still said all nine counters had no UI consumer).
 >
-> - The nine `input.*` link-layer counters (`input_bad_crc`,
->   `input_wrong_link_version`, `input_too_short_*`, `input_subframe_*_error`).
->   These are RF-health signals and arguably belong on this tab; a "Link-Layer
->   Errors" KPI group or a cumulative chart alongside Throughput & Reliability
->   is the obvious home. Must respect the absent-is-`—` rule above, since four
->   of the five real captures don't report them at all.
+> - **Eight of the nine `input.*` link-layer counters** —
+>   `input_wrong_link_version`, `input_too_short_*`, `input_crc_present`,
+>   `input_subframe_*_error`. These are RF-health signals and arguably belong on
+>   this tab; a "Link-Layer Errors" KPI group or a cumulative chart alongside
+>   Throughput & Reliability is the obvious home. Must respect the
+>   absent-is-`—` rule above, since **two of the four** real ht-router captures
+>   don't report them at all.
+>   The ninth, `input_bad_crc`, **is** surfaced — but only on the Overview via
+>   `NextGenKpiRow`'s Bad CRC card, reading `summary.total_bad_crc`. It has no
+>   card on this tab. Anything added here must read that summary key too rather
+>   than walking `stat_snapshots`: the "last non-null snapshot, never a sum"
+>   rule is owned by `HtRouterResult.total_bad_crc`, and re-deriving it in JSX
+>   is precisely the mistake that made this note stale.
 > - ht-modem's `transmitted_count`, `retransmit_packet_count`, and the
 >   per-packet `transmissions[]` (section 17). A KPI card is the natural
 >   surface, but the label must not call `retransmit_packet_count` a retry
 >   count — see `parsing-requirements.md` → "Confirmation attribution is
 >   positional".
 >
-> Whichever lands first must also be added to the `filteredResults` recompute
-> in `App.jsx` — `transmitted_count` and `retransmit_packet_count` are
-> currently outside it, so they would show whole-session values next to a
-> windowed `tx_packet_count`. Same defect the ATAK command-array backlog item
-> already fixed once.
+> The ht-modem pair must also be added to the `filteredResults` recompute in
+> `App.jsx` when either is surfaced — they are threaded through as deliberate
+> whole-session pass-throughs today, so they would sit next to a windowed
+> `tx_packet_count`. Same defect the ATAK command-array backlog item already
+> fixed once. (`total_bad_crc` is already recomputed there.)
 
 ---
 

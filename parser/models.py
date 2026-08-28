@@ -838,10 +838,11 @@ class HtModemResult:
 # ── Next-Gen Radio — ht-router primitives ──────────────────────────────────────
 # See docs/parsing-requirements.md "Next-Gen Radio — Router (ht-router) Log" and
 # docs/log-field-definitions.md Format 6 for the full field-by-field spec this
-# mirrors. Two real captures showed genuinely different snapshot schemas (one
+# mirrors. Four real captures showed genuinely different snapshot schemas (one
 # session had zero modem-transmit activity, so several output.* fields never
-# appeared at all) — every snapshot field below is Optional for that reason,
-# not just defensive style.
+# appeared at all; two of the four never report the input.* error counters) —
+# every snapshot field below is Optional for that reason, not just defensive
+# style.
 
 @dataclass
 class RouterHistogramBucket:

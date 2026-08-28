@@ -18,9 +18,12 @@ and a handful of genuinely un-timestamped internal trace lines
 ("output.ready <- ...") right at startup, which are counted but not parsed.
 
 Key characteristics:
-- Two real captures showed DIFFERENT snapshot schemas — a session with zero
-  modem-transmit activity never emits output.time_outs / .bottom.timed_out /
-  .modem_xmit_failed / .tap.frames / .overhead[] / .xmit_completion[] at all.
+- Four real captures showed DIFFERENT snapshot schemas, in two independent
+  ways. A session with zero modem-transmit activity never emits
+  output.time_outs / .bottom.timed_out / .modem_xmit_failed / .tap.frames /
+  .overhead[] / .xmit_completion[] at all; and two of the four never report
+  the input.* validity/error counters (bad_crc, wrong_link_version,
+  too_short.*, subframe.*_error) either.
   Every RouterStatSnapshot field is therefore Optional; absence is not zero.
 - Snapshots are retained in full — no downsampling at parse time. Trimming
   for display is deliberately deferred to the API/UI layer.
@@ -341,7 +344,7 @@ def parse_htrouter_log(path: Path) -> ParseResult:
             continue
 
         # Anything else falls through uncounted — this is the residual for
-        # content genuinely not seen in the two sample captures.
+        # content genuinely not seen in the four sample captures.
         hr.unparsed_event_counts["_other"] = hr.unparsed_event_counts.get("_other", 0) + 1
 
     # A trailing pending snapshot with no closing "connected" line (file cut
