@@ -1,5 +1,5 @@
 # QA Log Analyzer — Session Summary
-_Last updated: 2026-08-27_
+_Last updated: 2026-08-28_
 
 ---
 
@@ -97,7 +97,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 
 ---
 
-## 16 Tabs (Current State)
+## Tabs (Current State) — 15 main + 2 Next-Gen Radio
 
 | # | Tab Key | Name | Gate | Status |
 |---|---------|------|------|--------|
@@ -165,12 +165,12 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | GRIP RSSI Line Graph Over Time | ✅ Done |
 | ATAK Enhanced Log (SDK Logging 2.0) | ✅ Done |
 | FW Log — relay firmware parser & tab | ✅ Done |
-| TAK server CoT stream — parser + TAK Server tab | ✅ Built 2026-08-24 (PR #35, **open**) — karen passed; 5 other gate agents not yet run |
-| TAK — Leaflet npm vs unpkg CDN inconsistency | ⏳ Pending decision — `TakTab.jsx` imports the npm package, Hop Count Map uses the CDN; CLAUDE.md records CDN as the deliberate choice |
+| TAK server CoT stream — parser + TAK Server tab | ✅ Done — folded into PR #36, which supersedes #35. All six gates run 2026-08-27/28 |
+| TAK — Leaflet npm vs unpkg CDN inconsistency | ✅ Done — resolved as **CDN only**; `leaflet` removed from `package.json`, both maps use the shared `useLeaflet()` hook |
 | TAK — `parse_errors` no-fix wording counts all categories while the KPI is PLI/Marker-scoped | ✅ Done (2026-08-24) — sentence derived from `tak_no_fix_events`; regression test asserts its leading number equals `len(tak_no_fix_events)` |
-| TAK — `summary.min_latency_ms` serialized but never rendered | ⏳ Pending — ParseResult chain stops one step short of the UI |
-| TAK — no format-specific KPI row on Overview | ⏳ Pending — TAK-only session shows `NETWORK NODES —`, `PEAK TEMP —`, `APP VERSION: 0 versions` |
-| TAK — `_CSV_TYPES` entry or JSON-only note for `tak_events` | ⏳ Pending — same unrecorded decision as the two ATAK command tables |
+| TAK — `summary.min_latency_ms` serialized but never rendered | ✅ Done — Min Latency KPI; `TakTab` reads avg/max/min and `unique_callsigns` from the summary instead of recomputing them |
+| TAK — no format-specific KPI row on Overview | ✅ Done — `TakKpiRow`. The same defect hit next-gen later, so the rule now lives in `ui-requirements.md` → "KPI Header Row" with a table of all three scoped rows |
+| TAK — `_CSV_TYPES` entry or JSON-only note for `tak_events` | ✅ Done — `"tak": {"tak_events"}`; a flat per-row table, so an entry rather than a JSON-only note |
 | P8: TAK server receipt latency / clock skew | ⏳ Open — documented 2026-08-24 so the `parser/tak.py` and `models.py` references resolve |
 | `extractTimeRange` matches `stale=` inside embedded CoT XML → 18-min session reads as a 25-h slider range | ✅ Done (2026-08-24) — XML attribute timestamps stripped before the scan; sample reads 0.30 h, its true span. Hour-snapping unchanged |
 | PLI tab overhaul + battery chart real UTC timestamps | ✅ Done (PR #6) |
@@ -280,6 +280,77 @@ pytest tests/test_atak.py -v  # single file verbose
 
 ## Most Recent Work (Last Few PRs)
 
+**2026-08-28 — full six-gate quality pass on `integration-test`, PR #36 pushed.
+44 commits ahead of `main`. pytest: 533 passed, 2 skipped. ESLint clean.**
+
+All six gates run; five passed. `claude-md-compliance-checker` failed twice and
+its findings drove most of the work below.
+
+### The gates caught six real defects, not style
+
+1. **NDJSON captures with a leading blank line routed to `diagnostic`** and
+   parsed as empty — no error, no `parse_errors` entry. `is_tak_log()` stripped
+   whitespace before the root-character test but read line 0 literally.
+2. **`orphaned_transmitted_count` set but never serialized** — the ParseResult
+   chain stopping one step short.
+3. **`retransmit_count` was never a retry count.** `peer-reviewer` found the
+   attribution shifts across TX-packet boundaries; the entry claimed "a real
+   RF-layer retransmission". See the 2026-08-27 entry below for the evidence.
+4. **ht-modem `ctime` timestamps lost the time-window slider** *and* the modal
+   told the user the file had no parseable timestamps — about a file whose
+   timestamps the parser reads and the Overview prints.
+5. **`HtRouterCumulativeFailures` painted a blank grid** with no message when no
+   snapshot carried the `output.*` counters.
+6. **The `_CSV_TYPES` entries I added didn't work.** Registered, advertised by
+   `/export/{id}/types`, and all eight returned HTTP 400 — `export_csv` looks up
+   `session[data_type]` at the top level, but next-gen tables serialize nested
+   under `base["htmodem"]`/`base["htrouter"]`. Fixed by having `export_csv`
+   check the nested block, rather than duplicating 2,585-row tables into the
+   payload.
+
+### Two lessons worth more than the fixes
+
+**A test can validate the wrong thing and look green.** The guard shipped with
+the `_CSV_TYPES` entries read the table from the response dict, falling back to
+the nested block when the top-level lookup missed — precisely the lookup
+`export_csv` does not do. It reached the data by a path the endpoint can't and
+passed while every export 400'd. It now asserts through the real endpoint (200
++ a header row), and was mutation-checked: it fails against the old code.
+Related: `test_time_range_exec.py` now executes the real `extractTimeRange`
+under node, because the strongest check on the ctime fix previously lived in a
+commit message rather than in CI — and CI had no node step, so it would have
+skipped silently.
+
+**A stale deferral silently reopens the finding it closed.** The
+chain-at-the-UI-step findings were accepted as closed *because* the deferral was
+accurate. `NextGenKpiRow` then surfaced `input_bad_crc` while the note still
+said all nine `input.*` counters had no consumer. Corrected in three files —
+and the same sentence was missed in this file twice, which is what this entry
+is fixing. If a claim appears in `CLAUDE.md`, `ui-requirements.md` **and** here,
+change all three.
+
+### Also landed
+
+`NextGenKpiRow` (third scoped KPI row — the rule now lives in
+`ui-requirements.md` → "KPI Header Row" with a table of all three formats,
+instead of being restated per format, which is why next-gen repeated the defect
+a third time); `HtRouterResult.total_bad_crc` so the UI stops re-deriving a
+parser rule; windowed `dropped_count` now matching the parser's definition;
+`toMs` hoisted to module scope in `ChartPanel.jsx`; the thermal chart
+distinguishing sessions by colour; and `jenny`'s agent registration restored (a
+leading blank line before its frontmatter meant CLAUDE.md listed six mandatory
+gates while only five could be invoked).
+
+### Still open, by decision
+
+ht-modem's TX-confirmation fields and eight of the nine `input.*` counters are
+serialized but unrendered (`input_bad_crc` is the exception, on the Overview);
+`HtModemTempOverTime`'s unequal-duration compression; `RelayLimitationBanner`'s
+prefix filter hiding un-prefixed entries; zero-confirmation indistinguishability;
+`control_packets` deliberately unparsed. All recorded in the CLAUDE.md backlog.
+
+---
+
 **2026-08-27 — `vera` coverage audit of the uncommitted `integration-test` work,
 36 new tests, and two code defects it found fixed. Branch `integration-test`,
 uncommitted. pytest: 473 passed, 2 skipped (was 437 + 2).**
@@ -380,7 +451,8 @@ features, and `ui-requirements.md` contradicted the shipped chart. Fixed:
   implemented" claims deleted; observations section for the NDJSON capture.
 - **`log-field-definitions.md`** — the same three additions, plus two
   pre-existing field-name errors (`input_m2m_by_type{}`, `modem_xmit_failed`).
-- **`ui-requirements.md`** — §16/§17 flipped to Implemented and the per-session
+- **`ui-requirements.md`** — §16/§17 (renumbered to §17/§18 on 2026-08-28)
+  flipped to Implemented and the per-session
   block layout documented; the "real absolute timestamps" claim corrected to
   per-session elapsed.
 - **`CLAUDE.md`** — NDJSON in the format table and detection narrative; test
@@ -400,8 +472,10 @@ across files, so a year-2036 ht-modem capture beside any real-dated log gives a
 
 1. **UI surface for 14 serialized fields.** ht-modem TX confirmations and the
    nine ht-router `input.*` counters reach the API and are read by nothing —
+   (superseded 2026-08-28: `input_bad_crc` is now on the Overview KPI row;
+   the other eight remain unrendered) —
    `compliance-checker` called this the ParseResult chain stopping at the UI
-   step, and it's right. Now an explicit deferral in `ui-requirements.md` §17
+   step, and it's right. Now an explicit deferral in `ui-requirements.md` §18
    rather than silence. Whichever lands must also add `transmitted_count` /
    `retransmit_packet_count` to the `filteredResults` recompute — they're
    outside it today, so they'd show whole-session values beside a windowed
@@ -417,7 +491,8 @@ across files, so a year-2036 ht-modem capture beside any real-dated log gives a
    already renders both groups; adopt that pattern.
 4. **Zero-confirmation indistinguishability** — unchanged; a log with TX
    packets and no confirmations still emits no entry.
-5. **`_CSV_TYPES`** for `htmodem`/`htrouter` and the two ATAK command tables.
+5. **`_CSV_TYPES`** for the two ATAK command tables. (`htmodem`/`htrouter`
+   closed 2026-08-28.)
 
 `jenny` (step 3) was deliberately held until these doc fixes landed — running
 it against docs known to be wrong would only have re-found them.
@@ -471,7 +546,7 @@ failures / 4 timeouts but **zero** protocol messages. Neither file alone exercis
 three router charts. The two real samples genuinely have different snapshot schemas —
 this is the data, not a parser bug.
 
-*Still open:* no `_CSV_TYPES` entry or JSON-only note in `api/routes/export.py` for
+*Closed 2026-08-28 — entries added for both formats.* Was: no `_CSV_TYPES` entry or JSON-only note in `api/routes/export.py` for
 `htmodem` / `htrouter` (step 9 of "Add a new log format"). The cumulative-failures chart
 renders empty axes rather than a `NoData` message when every value is null.
 **2026-08-24 — TAK server CoT event stream: 6th log format + TAK Server tab.
