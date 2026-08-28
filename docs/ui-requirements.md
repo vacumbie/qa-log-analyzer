@@ -21,6 +21,11 @@
 - **Framework:** React / Vite
 - **API:** FastAPI
 - **Charting:** Chart.js 4.4.1
+- **Maps:** Leaflet 1.9.4 — **unpkg CDN only, never an npm dependency.** Both
+  the Hop Count Map and the TAK position map load it through the shared
+  `useLeaflet()` hook (`ui/src/hooks/useLeaflet.js`), which injects the CSS and
+  script once per page and reports readiness. A map component must wait on that
+  flag before touching `window.L`.
 - **Fonts:** Rajdhani (body), Barlow Condensed (headings/display), Share Tech Mono (monospace/data, via `var(--mono)`). All three are loaded via a Google Fonts `<link>` in `index.html` and referenced by name in `index.css` and inline styles.
 
 ---
@@ -97,9 +102,52 @@ Displayed on the **Overview tab only** (not globally pinned). One `KpiCard` per 
 
 > **Temperature rule:** Always display in °F. Source data is Celsius — convert before display.
 
+### A format that can't fill this row needs its own scoped row
+
+The table above is the **device** row: it assumes each log describes one radio
+that reports identity, firmware, thermal and RF data. When every loaded log
+comes from a format carrying none of that, the row must be replaced, not
+rendered with dashes.
+
+Left unreplaced it renders `Network Nodes —`, `Peak Temp —`, `Avg Hop Count —`,
+`Chat Messages —`, `Radio Firmware —` sub-labelled a green **"all match"** over
+zero observed versions, and — worst — `APP VERSION: 0 versions`. That `0` is a
+zero standing in for "this format has no such concept", which is exactly what
+CLAUDE.md's honesty rule and its scoped-count corollary forbid ("a scoped count
+also renders at zero — `0` doesn't mean everything is included").
+
+`KpiRow` in `App.jsx` escapes to a scoped row when **every** loaded log belongs
+to such a format:
+
+| Condition | Row | Why the device row can't apply |
+|---|---|---|
+| all `relay_manager` | `RelayKpiRow` | No RF messages, PLI or chat |
+| all `tak` | `TakKpiRow` | Server-side view of many clients — no serial, GID, firmware, battery or thermal |
+| all `htmodem`/`htrouter` | `NextGenKpiRow` | No radio identity of any kind, and no hop count or RSSI |
+
+This rule was written down only after the third format hit it — it had been
+stated twice inside format-specific sections instead, which is why next-gen
+repeated the defect. **A new format that can't fill the device row gets a row
+here, and a line in this table.** Within a scoped row the same absent-vs-zero
+discipline applies: a counter no loaded log reports is `—` with
+"not reported in this log", while a real measured zero renders as `0`.
+
 ---
 
 ## Tabs
+
+> **Tab grouping (new requirement, 2026-08-24):** Next-Gen Radio tabs
+> (`ht-modem`, `ht-router` — sections 17–18) are visually separated from the
+> rest of the tab bar, not simply another dimmed/badged entry mixed into the
+> existing flat row alongside `atakOnly`/`relayOnly`/`fwOnly`/`takOnly` tabs.
+> This is a deliberate product decision: the next-gen radio is a different
+> hardware platform from everything else the tool parses, and a QA engineer
+> working a next-gen radio issue should not have to visually filter those
+> tabs out of the same row as the legacy-platform tabs. Exact treatment
+> (a second tab-bar row, a divider + label within the same row, or a
+> collapsible group) is an open implementation decision — not yet designed
+> in detail — but "same row, same styling, just another badge" does **not**
+> satisfy this requirement.
 
 ### 1. Overview (`overview`)
 - **KPI Row** — rendered at top of this tab only (see KPI Header Row section)
@@ -298,6 +346,246 @@ filter unless an ATAK log is loaded. Carries the `α` alpha badge.
 - `⚠ MIXED` badge when more than one confirmed mode or relay state occurred in the session.
 - **Empty state** — the tab is `atakOnly`, so "no ATAK log" is unreachable. The real empty case is an ATAK log carrying none of the three sources, which happens on the v3.0 builds that emit zero `connectionState` records. The note names that limitation explicitly rather than rendering a blank page.
 
+### 16. TAK Server (`tak`) — TAK only
+
+`{ id:'tak', label:'TAK Server', takOnly: true }` in `TABS`, rendered by
+`ui/src/components/TakTab.jsx`. Carries a 🛰️ glyph, dimmed with the tab when no
+TAK log is loaded. Data comes from `r.tak_events`, `r.tak_server_info` and
+`r.summary`; the parser is `parser/tak.py`.
+
+- **Data Limitations banner** — the `DATA LIMITATION —` subset of `parse_errors`
+  (currently the GeoChat body limitation). Same treatment as the FW Log and
+  Relay Health banners.
+- **Header** — `TAK SERVER OVERVIEW` with the server version as a sub-line
+  (`tak_server_info.server_version`), omitted entirely when the stream carries
+  no handshake record rather than showing "unknown".
+- **KPI row** — Total Events · PLI · Marker · Chat · Server Control ·
+  Unrecognized · Unique Callsigns · No GPS Fix · Avg Latency · Min Latency ·
+  Max Latency · Clock Skew Events. The five category cards (PLI, Marker, Chat,
+  Server Control, Unrecognized) **must sum to Total Events on screen** —
+  `Unrecognized` renders at zero for that reason, since a card that appeared
+  only when non-zero would leave the arithmetic silently short the rest of the
+  time. It turns yellow with `new category — see limitations` when a stream
+  carries a category outside the four known ones. The latency cards **read `summary.avg/min/max_latency_ms`** rather
+  than re-deriving them from the events; deriving the same number twice is how
+  the KPI and the JSON export came to round differently. Min Latency is red
+  when negative, with the sub-label `device clock ahead of server`, so it can't
+  be misread as a best-case delivery time.
+- **Device Positions** — Leaflet map, one `circleMarker` per event with a GPS
+  fix, coloured by callsign with a scrollable legend. `fitBounds` to the data;
+  popups show callsign, category, time and latency. Waits on `useLeaflet()`;
+  while the CDN script is still in flight the container is hidden and the
+  placeholder reads `Loading map…` (rule 2 below applies to that window too —
+  an un-tiled container would paint the same blank box).
+- **Server Receipt Latency** — registered in `CHART_MAP` as `tak_latency` and
+  rendered via `<ChartPanel results={takResults} selectedPoints={['tak_latency']} />`,
+  like every other chart in the app. Points-only Chart.js line
+  (`showLine: false`, the same technique as Battery Over Time), one point per
+  event with both timestamps, x-axis labelled `HH:MM:SS` UTC. Negative-latency
+  points are red with a caption naming a fast device clock, not a data error.
+
+**Overview KPI row.** A session where every loaded log is `tak` gets
+`TakKpiRow` (Logs Loaded · CoT Events · Callsigns · PLI · No GPS Fix · Clock
+Skew · Server Version), mirroring `RelayKpiRow`. The device row must not be
+used: TAK carries no serial, GID, firmware version, battery or temperature, so
+it would render dashes and a literal `APP VERSION: 0 versions` — a zero
+standing in for "no such concept".
+
+**Two rules this tab establishes, both learned from live verification:**
+
+> **1. A scoped count must say what it is scoped to.** The `No GPS Fix` KPI is
+> PLI/Marker-scoped, so its sub-label reads `PLI/Marker only` — it must never be
+> labelled as the map-exclusion count, which also includes Chat and
+> server-control events that never carry a position. The map subtitle states
+> both exclusion reasons separately so the arithmetic reconciles on screen
+> (`86 of 91 plotted · excluded: 1 PLI/Marker with no GPS fix, 4
+> Chat/server-control`). The KPI renders at zero too — `0` does not mean
+> everything is plotted.
+
+> **2. A map with nothing to plot must say so, not render an empty map.** A
+> Leaflet container that never gets `fitBounds` loads no tiles and paints as a
+> blank near-white box on the dark dashboard. The container stays mounted (so
+> the creation effect keeps its ref for when data returns) but is hidden with
+> `display: none`, with a centered message and the legend hidden alongside it.
+
+- **Empty state** — the tab is `takOnly`, so "no TAK log" is only reachable by
+  clicking the dimmed tab, which shows `NO TAK SERVER LOGS UPLOADED`. The real
+  empty cases are within-tab: no events in the time window, or no event
+  carrying a position.
+
+**Not on this tab, deliberately:** no Health Score contribution (TAK is outside
+`HEALTH_FORMATS` — no radio telemetry to score), no RSSI, no hop count, no
+battery or thermal. See the format limitations in `parsing-requirements.md`.
+
+---
+
+### 17. Next-Gen Modem (`ht-modem`) — ✅ Implemented
+
+> Spec drafted 2026-08-24; `HtModemTab` in `App.jsx` built 2026-08-25 and
+> live-verified. Reworked 2026-08-27 from one cross-session aggregate KPI row
+> to **one header + KPI block per session** (see below).
+
+`ht-modem`-only tab — appears only when a next-gen modem log is loaded, in
+the visually separated Next-Gen Radio tab group (see grouping requirement
+above), not the main tab row.
+
+- **Per-session blocks, not cross-session aggregates.** Each loaded log gets
+  its own header bar (accent stripe in `PALETTE[i]` + source filename) and its
+  own KPI row, matching `RelayHealthTab`'s convention. The earlier aggregate
+  row summed `tx_packet_count` / `queued` / `dropped` across every loaded log
+  and took `some()`/`every()` for the pass-fail badges, which reads as a single
+  unit when two captures are open and hides which session had the fault.
+- **Data Limitations Banner** — surfaces the AD936X init-failure cascade
+  (collapsed count, not 20+ rows), the positional-attribution limitation on
+  `Packet Transmitted` confirmations, the missing-FPGA-line case, the gpsd
+  connection error, and the no-temperature-samples case. Rendered per session,
+  inside that session's block.
+  ⚠️ **Not surfaced despite an earlier claim here:** the ambiguous
+  `Found <N> devices` parse. The parser resolves it silently by phase
+  (`iio_devices_found` vs `ad5592_devices_found`) and emits no `parse_errors`
+  entry, so nothing reaches the banner. Whether it warrants one is open —
+  the two values are disambiguated correctly, so there may be no gap to report.
+
+> **Un-prefixed `parse_errors` entries are currently invisible on this tab.**
+> `RelayLimitationBanner` filters on `startsWith('DATA LIMITATION')`, while the
+> file-list ⚠ glyph fires on `parse_errors.length > 0` — so an entry without
+> the prefix produces a red warning with no text anywhere explaining it.
+> `TakTab.jsx`'s `LimitationBanner` already solves this by rendering prefixed
+> and un-prefixed entries as two labelled groups; this tab should adopt that
+> pattern. Tracked in the backlog.
+- **Session header** — accent stripe + source filename. ⚠️ **Spec'd but not
+  built:** session start/end, LIBIIO version, filter bank. The FPGA version
+  check ships as a KPI card, not a header pass/fail badge.
+- **TX Packet Activity** — packets encoded vs. queued vs. **dropped**
+  (`CSMA QUEUE is Full`) as a KPI row, plus `htmodem_outcomes`, which is a
+  grouped **bar** chart (not the timeline this spec originally called for —
+  there is no time axis). Dropped-packet rate is the headline QA metric for
+  this tab, analogous to how the FW Log tab headlines relay routing counts.
+  Note the `Dropped` KPI counts `orphaned_drop_count` as well as
+  `queued === false`, matching the parser's `dropped_count` property; the
+  time-window recompute must include orphans too or the number falls the
+  moment a window is applied.
+- ⚠️ **RF Control Timeline — spec'd, not built.** `freq_changes` and
+  `power_changes` are parsed, serialized and time-window filtered, but no
+  component consumes them and there is no `CHART_MAP` key. The "with the
+  originating control packet" part is not buildable as specified: the
+  `Received Control packet, control type = <n>` line is not parsed, and
+  `control type = 10` appears with both Transmit Level and SETTXRXFREQ
+  commands, so the type alone identifies nothing. See
+  `log-field-definitions.md` → RF Control.
+- **Thermal** — `LPD`/`FPD`/`PL` temperature chart over time, °F display
+  per the project-wide temperature rule, same charting pattern as the
+  existing Thermal tab but a distinct sensor set (do not merge with
+  `NRF52`/`Si4460`/`PA` data, and do not merge with the raw `Temp Val` on
+  `Packet Transmitted` confirmations — a different sensor on its own scale).
+  **X-axis is per-session elapsed time**, not the normalized 0–100% axis the
+  other charts use — see the note under the Cross-File Offset item below for
+  the trade-off that choice makes.
+  **Colour encoding switches with session count.** One session: colour = sensor
+  (LPD cyan, FPD orange, PL yellow), which is the readable default. Two or
+  more: colour = **session** (`PALETTE[i]`, matching that session's KPI block
+  header) and the sensor moves to line style — LPD solid, FPD dashed, PL
+  dotted. Without this the three sensor colours repeat per session, so two
+  sessions produce two identical-cyan "LPD" legend entries that are
+  indistinguishable wherever the sessions overlap. The subtitle states the
+  encoding when it applies.
+- **GPS/Clock** — `gpsd` connection status, clock calibration offset,
+  SI4460 calibration offset (surfaced as informational, not necessarily a
+  fault)
+
+### 18. Next-Gen Router (`ht-router`) — ✅ Implemented
+
+> Spec drafted 2026-08-24; `HtRouterTab` in `App.jsx` built 2026-08-25 and
+> live-verified. Reworked 2026-08-27 to per-session blocks, same as section 17.
+
+`ht-router`-only tab — appears only when a next-gen router log is loaded, in
+the same visually separated Next-Gen Radio tab group as `ht-modem` (section
+17), but as its own distinct tab, not merged into one.
+
+- **Per-session blocks, not cross-session aggregates** — same rework and same
+  reasoning as section 17.
+- **Absent counters must render as `—`, not `0`.** A session that never
+  transmitted omits the whole `output.*` group; a session with no RF noise
+  omits the nine `input.*` error counters. Because the tab now renders one
+  block per session there is no cross-session summing inside it — each card
+  reads that session's own value through `?? '—'` with a
+  "not reported in this log" sub-label. A genuine `0` (e.g.
+  `socket_warning_count`) renders as `0`, never collapsed to `—` by `||`.
+  Cross-session summing does happen in the Overview's `NextGenKpiRow`, whose
+  local `sumReported()` helper returns `null` when no loaded log reports the
+  field rather than summing absences to `0`. (An earlier version of this
+  section attributed `sumReported()` to this tab; it belongs to the KPI row,
+  and did not exist at all while the tab used cross-session aggregates.)
+- **Data Limitations Banner** — surfaces the socket-warning count with
+  unconfirmed semantics, and the unparsed-event tally. ⚠️ **Not surfaced
+  despite an earlier claim here:** the unconfirmed `dst`/`src` identity-space
+  question. `htrouter.py` emits four `parse_errors` entries and none covers it;
+  the caveat lives only in `log-field-definitions.md`.
+- **Session header** — accent stripe + source filename, with router PID and
+  spawned modem PID as KPI cards. ⚠️ **Corrected:** the modem PID does **not**
+  cross-link to a loaded `ht-modem` session. ht-modem parses no PID of its own,
+  so there is nothing to match on the other side — the card now reads
+  "ht-modem process spawned by this router", which is all the data supports.
+  **Spec'd but not built:** session start in the header, and rotation markers
+  (`reopened log file`) shown as boundaries — `rotation_markers` is parsed and
+  serialized, and `summary.rotation_count` exists, but neither is rendered.
+- **Connection Timeline** — `connected` 0/1 over time, derived from the
+  periodic snapshot blocks
+- **Throughput & Reliability** — `output.modem_xmit_failed` and
+  `output.time_outs` as time series (`HtRouterCumulativeFailures`); this is
+  the router-side counterpart to the modem tab's dropped-packet metric,
+  and the two should be visually comparable when both logs are loaded
+  together (not necessarily merged, just presented so a QA engineer can
+  eyeball correlation). ⚠️ `output.bottom.timed_out` is serialized as
+  `output_bottom_timed_out` but **not plotted** — the chart carries two series,
+  not three.
+  **Must say when it's empty.** Having snapshots is not the same as having
+  these counters in them — a session that never transmitted omits the whole
+  `output.*` group, so every dataset is all-null and Chart.js paints a bare
+  0–1 grid with no explanation. `HtRouterCumulativeFailures` guards on
+  "does any dataset have a non-null point", not just on snapshot count, and
+  the message names the missing counters and says *not reported ≠ zero
+  failures*. This is the "an empty map must say it's empty" rule applied to a
+  chart; `HtRouterMsgTypes` next to it already had the equivalent guard.
+- **Protocol Message Activity** — breakdown of `client-hdr`/`mgt-hdr`
+  message types and `mgt_hub_forward` send/skip counts
+- **Socket Warnings** — count of `us_warn` entries, flagged for follow-up
+  rather than treated as fully understood. ⚠️ **No first-seen timestamp**, as
+  this spec previously claimed: the parser keeps only `socket_warning_count`
+  and discards the line, so it is unimplementable without a parser change.
+
+> **Deliberately not yet surfaced — recorded so the gap is a decision, not an
+> oversight.** Two groups of parsed, serialized fields are unsurfaced or nearly
+> so. Keep this list accurate as pieces land: it is what makes the gap a
+> decision, and it has already gone stale once (the Bad CRC card below shipped
+> while this paragraph still said all nine counters had no UI consumer).
+>
+> - **Eight of the nine `input.*` link-layer counters** —
+>   `input_wrong_link_version`, `input_too_short_*`, `input_crc_present`,
+>   `input_subframe_no_protocol`, `input_subframe_logical_recv_error`,
+>   `input_subframe_family_recv_error`. These are RF-health signals and arguably belong on
+>   this tab; a "Link-Layer Errors" KPI group or a cumulative chart alongside
+>   Throughput & Reliability is the obvious home. Must respect the
+>   absent-is-`—` rule above, since **two of the four** real ht-router captures
+>   don't report them at all.
+>   The ninth, `input_bad_crc`, **is** surfaced — but only on the Overview via
+>   `NextGenKpiRow`'s Bad CRC card, reading `summary.total_bad_crc`. It has no
+>   card on this tab. Anything added here must read that summary key too rather
+>   than walking `stat_snapshots`: the "last non-null snapshot, never a sum"
+>   rule is owned by `HtRouterResult.total_bad_crc`, and re-deriving it in JSX
+>   is precisely the mistake that made this note stale.
+> - ht-modem's `transmitted_count`, `retransmit_packet_count`, and the
+>   per-packet `transmissions[]` (section 17). A KPI card is the natural
+>   surface, but the label must not call `retransmit_packet_count` a retry
+>   count — see `parsing-requirements.md` → "Confirmation attribution is
+>   positional".
+>
+> The ht-modem pair must also be added to the `filteredResults` recompute in
+> `App.jsx` when either is surfaced — they are threaded through as deliberate
+> whole-session pass-throughs today, so they would sit next to a windowed
+> `tx_packet_count`. Same defect the ATAK command-array backlog item already
+> fixed once. (`total_bad_crc` is already recomputed there.)
+
 ---
 
 ## Known Limitations & Open Questions
@@ -311,11 +599,18 @@ filter unless an ATAK log is loaded. Carries the `α` alpha badge.
 - **Relay Health tab — BLE payload decoding pending:** Relay health attribute values (SNR, battery %, temperature °F, uptime, firmware version) cannot be displayed until BLE protocol decoding is implemented. The tab must surface this limitation via a Data Limitations Banner rather than showing empty fields silently.
 - **Relay Health tab — prod environment:** Prod log behavior and environment badge are undefined until prod samples are analyzed.
 - **FW Log tab — energy as RSSI proxy:** Per-channel RSSI (`RSSI[]`) is DEBUG-level and skipped, so the tab shows channel energy (`energy_summary`) instead. `rssi_summary` is serialized but always empty. Identity is the origin hash only (serial/firmware in binary RHC payload). Relative-ms timestamps mean the upload Time Window step is skipped for this format.
+- **TAK Server tab — server-side data only:** No radio telemetry of any kind (no battery, thermal, RSSI, hop count, serial, GID or firmware version), so TAK is excluded from the Health Score and contributes nothing to the device KPI row. Identity is callsign + CoT `uid`. Position uses the CoT `(0,0)` no-fix sentinel; negative `latency_ms` is a fast device clock, not an error (P8); GeoChat message bodies are not extracted.
+- **TAK Server tab — no format-specific KPI row on Overview:** A TAK-only session lands on Overview and falls through to the device KPI row, showing `NETWORK NODES —`, `PEAK TEMP —`, `AVG HOP COUNT —`, `RADIO FIRMWARE —`, `CHAT MESSAGES —` and `APP VERSION: 0 versions` (a zero where N/A would be honest). `relay_manager` has a `RelayKpiRow` for exactly this reason; TAK needs the equivalent. Session Timeline and the PLI-vs-Chat chart do render TAK data correctly. ⏳ Pending.
+- **TAK Server tab — `stale=` inflated the time-window range:** ✅ Fixed 2026-08-24. `extractTimeRange` scans raw text, so it matched the `time`/`start`/`stale` attributes inside each record's embedded CoT XML. `stale` is an expiry, not an observation — markers set it a full day out — so the 18.2-minute sample session was detected as a 24.2-hour range. `XML_TS_ATTR_RE` now strips attribute-form timestamps (`attr="…"`, or `attr=\"…\"` once escaped inside the JSON string) before the wall-clock scan, keeping the JSON members `"time"` and `"receivedAt"` that are the real session bounds; the `=` is the discriminator. Verified against every fixture: the sample reads 0.30 h, and all five non-TAK formats produce byte-identical ranges to before (their timestamps are bare, so the pattern matches nothing).
+  Guarded by `tests/test_time_range_scan.py`, which reads the regex literals out of the JSX and re-runs them in Python — the scanner is client-side and there is no JS test runner, but the patterns are pure text-in/range-out, so this pins them in CI without adding npm packages.
+  **Still true, and not this bug:** the slider snaps to hours *and* `RangeSlider` enforces a one-hour minimum window, so any sub-hour session — TAK or otherwise — occupies a single bucket and neither handle can move. Confirmed live by `karen` against the TAK sample: the slider renders and drags but changes nothing until a second, older log widens the overall range. That is slider design, not format-specific; it also keeps the map's "No event in this time window carries a GPS position" empty state unreachable for the current sample. ⏳ Worth a backlog item if sub-hour sessions become common.
+- **TAK Server tab — map legend lists unplotted callsigns:** `colorByCallsign` is built from all events rather than plotted ones, so callsigns with no GPS fix still get a legend swatch (6 swatches for 3 markers on the edge-case fixture). `PALETTE` also has 10 colours against 11 legend keys in the sample, so two callsigns share `#00d4ff`. Cosmetic; ⏳ pending.
 - **Topology tab** — Alpha/Beta feature; see Tab 14. Accuracy is inherently limited by what the logs can surface — the hardest data point in the dashboard to get right; must be clearly labeled as experimental in the UI
 - **Multi-log upload** — supported; drag-and-drop or file picker; multiple files processed simultaneously
 - **Duplicate log detection** — files with matching `radio_serial + session_start + session_end` are deduplicated automatically; only first occurrence used.
 - **GID collision** — two devices can share the same GID (observed: CL_B and gt_Sassy_B_Net share `90194071247761`, 2026-06-04). PLI `nodeMap` uses `gid|source_filename` key so both get separate cards. Dev team notified.
-- **Time window filtering** — client-side; filters these time-series arrays: `received_messages`, `system_samples`, `ble_fail_events`, `tx_events`, `atak_messages`, `atak_health_samples`, `grip_messages`, `grip_transfers`, `atak_events`, `atak_frequency_set_attempts`, `atak_radio_mode_queries`. Computable summary fields recomputed from filtered arrays; static fields retain parse-time values.
+- **Time window filtering** — client-side; filters these time-series arrays: `received_messages`, `system_samples`, `ble_fail_events`, `tx_events`, `atak_messages`, `atak_health_samples`, `grip_messages`, `grip_transfers`, `atak_events`, `atak_frequency_set_attempts`, `atak_radio_mode_queries`, `tak_events`. Computable summary fields recomputed from filtered arrays; static fields retain parse-time values.
+  > `tak_events` was added 2026-08-24 with the TAK format, along with a `tak` branch of the summary recompute. `tak_server_info` is **not** windowed — it comes from a single handshake record and is carried over whole, like `ble_fail_count`.
   > `atak_events` and the two radio-command arrays were added 2026-08-04. Before that, the Freq/RSSI and Modes cards mixed two time ranges in one card — health-derived mode segments and RSSI responded to the slider while SET-attempt counts, poll counts, and relay segments did not. `summary.ble_fail_count` is deliberately **not** recomputed from filtered `atak_events`: it derives from the SDK-error aggregate, which is not time-windowable, and is carried over whole.
 - **Chart time axis** — most line charts use per-device normalized session-progress axis (0–100%). **Exception: Battery % Over Time** uses real wall-clock UTC time on the X axis.
 
@@ -393,8 +688,49 @@ no behavior change.
 ### ATAK Enhanced Log (SDK Logging 2.0) — ✅ Implemented
 Full support for the enhanced ATAK log format. The `SdkLogSummaryCard` renders the aggregated `atak_sdk_error_summary` (counts by tag and by `additionalInfo`, distinct radio types, and a retained sample) — high-volume `sdkError` records are aggregated, never rendered per-record, with the volume-baseline `DATA LIMITATION` surfaced in the banner. Also covers the enhanced message/event fields: `loggingUserLocation` / `transmittedLocation`, `originatorUUID`, the `-99` open-segments sentinel shown as `unknown`, `firmwareUpdate` events, and `deviceDisconnected` location. See ATAK tab spec (section 12).
 
+### Next-Gen Radio — Modem & Router Parsers & Tabs — ✅ Implemented (2026-08-25)
+Two new formats scoped from raw sample logs (`ht-modem.log`, `ht-router.log`,
+`ht-router__1_.log`): `ht-modem` (SDR/RF layer, ctime timestamps, TX packet
+lifecycle including `CSMA QUEUE is Full` drops, `LPD`/`FPD`/`PL` thermal) and
+`ht-router` (network/link layer, ISO8601 timestamps, spawns/monitors the
+modem process, periodic ~20-line counter snapshot blocks requiring
+block-grouping at parse time). Full field mappings in
+`log-field-definitions.md` Formats 5–6; parsing rules and known open
+questions in `parsing-requirements.md`. **New UI requirement carried by this
+work:** Next-Gen Radio tabs must be visually grouped separately from the
+existing tab row, not just another dimmed/badged tab mixed in — see the
+Tabs section intro above. Both open decisions are now resolved: the grouping
+is its own row with an `--accent2` accent and section label, and router stat
+snapshots are **fully retained** — trimming is delegated to the existing
+time-window slider rather than decided at parse time.
+
 ### FW Log — Relay Firmware Parser & Tab — ✅ Implemented
 Relay radio firmware (UART/USB debug) logs are auto-detected (detection priority 1) and parsed by `parser/fw_log.py` into `FwLogResult`. The FW Log tab (section 13) renders origin hash, RF configuration, message bucket history, relay routing decisions, channel energy (the RSSI proxy), neighbor table, and errors/warnings, with the three firmware-log `DATA LIMITATION` notes surfaced honestly. See parser spec in `parsing-requirements.md` (Relay Firmware section) and field definitions Format 4. **Note:** decoding the binary RHC payload (hash → serial, firmware version) is tracked separately below as RHC Response Field Mappings, still pending.
+
+### TAK Server Format + Tab — ✅ Implemented (2026-08-24, PR #35)
+TAK server CoT event streams are auto-detected (priority 2, ahead of ATAK) and parsed by `parser/tak.py` into `TakEvent` / `TakServerInfo`. The TAK Server tab (section 16) renders the category KPI row, a Leaflet position map coloured by callsign, and a server receipt-latency chart with negative latency called out as clock skew. `tak_events` joins the time-window filter with its own summary recompute branch, and the upload modal accepts `.json`. See the parser spec in `parsing-requirements.md` (TAK Server section) and field definitions Format 7.
+
+Two presentation rules came out of live verification and are now recorded in the tab spec: a scoped count must state its scope (the `No GPS Fix` KPI is PLI/Marker-only and must not be labelled as the map-exclusion count), and a map with nothing to plot must say so rather than render an un-tiled Leaflet container, which paints as a blank near-white box.
+
+**Closed after the PR #35 quality gate** (2026-08-24): the Overview `TakKpiRow`,
+`summary.min_latency_ms` now rendered (and the other latency/callsign summary
+fields read rather than recomputed), the latency chart moved into `CHART_MAP`,
+the `_CSV_TYPES` entry for `tak_events`, and the Leaflet source decision below.
+
+**Follow-ups still open** (listed under Known Limitations above): the
+legend listing unplotted callsigns and the `PALETTE` colour collision past 10
+callsigns. The `stale=`-inflated slider range is fixed (see above).
+
+### TAK Server — Leaflet dependency source — ✅ Resolved: CDN only (2026-08-24)
+`leaflet` has been removed from `ui/package.json` and `package-lock.json`
+entirely. Both maps now load it from the unpkg CDN through the shared
+`useLeaflet()` hook. The npm import briefly added in PR #35 meant a session
+visiting both tabs loaded Leaflet 1.9.4 *twice* — bundled module plus CDN
+`window.L` — which is the opposite of the lean-stack intent that motivated the
+CDN choice. The known trade-off is unchanged and accepted: the CDN load needs
+network access. That was already true (OSM tiles come over the network either
+way, so neither approach makes the maps work offline), and the hook's readiness
+flag means a failed load now shows `Loading map…` rather than a silent blank.
 
 ### Session Persistence
 Allow a user to save a parsed session so it can be retrieved later and compared alongside other test data.
@@ -576,10 +912,136 @@ remains the sole `range-unavailable` trigger. Premise pinned in
 `tests/test_timewindow_trigger.py`. Purely client-side — no parser/API change
 (the slider window is a browser-only filter applied in `App.jsx`, never sent to `/parse`).
 
+### Time-Window Scanner — ctime timestamps (`ht-modem`) — ✅ Done (2026-08-27)
+
+**The same defect, a third timestamp dialect.** `ht-modem` prefixes every line
+with `ctime()` — `Wed Aug 12 05:13:23 2026` — which matches neither `TS_RE`
+(needs `YYYY-MM-DD`) nor `EPOCH_MS_RE`. Both ht-modem fixtures therefore routed
+to `range-unavailable` and the modal told the user *"No parseable timestamps
+were found in this file"* — about a file whose timestamps the parser reads fine
+and whose bounds the Overview timeline prints. `ht-router`, using ISO, got a
+working slider, so the behaviour was inconsistent *within* the next-gen pair.
+
+**Fix:** a third source unioned into `extractTimeRange`, anchored on the leading
+weekday so a bare `Aug 12 05:13:23 2026` elsewhere can't match:
+`CTIME_RE = /[A-Z][a-z]{2} ([A-Z][a-z]{2}) +(\d{1,2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})/g`.
+Day accepts one or two spaces and an optional leading zero — real `ctime()`
+space-pads single digits (`Apr  8`) but the observed captures zero-pad
+(`Jan 05`). Read as UTC via `Date.UTC`, matching `normaliseTs()`'s treatment of
+bare wall-clock stamps; mixing UTC and local would silently offset one session
+against another in a combined range.
+
+Verified by executing the real `extractTimeRange` against the fixtures:
+`htmodem_sample.log` now yields `05:13:23 → 05:49:44` — the same bounds the
+parser reports as `session_start`/`session_end` — and `htmodem_sample2.log`
+yields `2036-04-28 02:48:28 → 05:24:53`. Both previously returned `null`. No
+other format's range changes. Scan cost is 71 ms on the 6 MB capture.
+
+Pinned in `tests/test_time_range_scan.py`, including a sweep asserting the
+pattern matches **nothing** in any non-ht-modem fixture — ht-modem is the only
+format writing ctime, so a widened pattern would corrupt another format's range.
+`fw_log` (relative ms from boot) remains the sole `range-unavailable` trigger,
+which makes that step's "no full-date timestamps" copy accurate again.
+
 > Note: the scanner samples only the first + last 64 KB of each file, so a
 > mid-file timestamp outlier is not seen — acceptable because the slider snaps to
 > the hour. Do not widen `EPOCH_MS_RE` to bare 13-digit integers: it must stay
 > key-anchored or it will capture durations and corrupt the range.
+
+### Cross-File Date/Time Offset Warning — ⏳ Pending (2026-08-26)
+
+No existing feature warns the user when multiple uploaded files span a
+suspiciously large date/time gap (e.g. two ht-modem captures from different
+years). Checked thoroughly — twice, across both `main` and the working
+branch — since the person recalled implementing this; it does not exist.
+What *does* exist and is easy to confuse it with:
+- The "Scanning timestamps…" loading state in `FileUpload.jsx` — this only
+  builds one **combined** min/max range across all uploaded files for the
+  time-window slider. It never compares individual files against each other
+  or flags a gap between them.
+- The ATAK "clock skew" KPI in `DeviceSummary.jsx` — negative delivery times
+  between two *communicating devices* within one session. Unrelated: a
+  same-session, same-upload metric, not a cross-file/cross-upload check.
+
+**Motivating case — corrected 2026-08-27.** This item was originally
+justified by the Next-Gen Modem thermal chart "now plotting real absolute
+timestamps," so that two sessions with disjoint dates would stretch the shared
+x-axis across the gap. **That premise was wrong.** `HtModemTempOverTime` plots
+**per-session elapsed time** (`x: s.elapsedMs`, each session's own first sample
+at 0), which is precisely what makes disjoint dates a non-issue for that chart.
+The stated motivating case cannot occur.
+
+The item is still worth doing, on a different and verifiable justification:
+**the time-window slider.** `extractTimeRange` in `FileUpload.jsx` builds one
+combined min/max across all uploaded files, so loading an ht-modem capture
+(year-2036 timestamps, unset RTC — see `parsing-requirements.md`) alongside any
+real-dated log yields a **ten-year slider range** snapped to hours. The slider
+becomes unusable for narrowing to either session, and nothing tells the user
+why. Independent of any chart's axis choice.
+
+**Measured, not assumed** — by running the real `extractTimeRange` over
+concatenated fixtures:
+
+| Files | Combined span |
+|---|---|
+| `htmodem_sample2.log` + `diagnostic_sample.txt` | `2026-04-27T07:35:59Z → 2036-04-28T05:24:53Z` — **10.00 years** |
+| `htrouter_sample3.log` + `tak_ndjson_real_sample.log` | **9.67 years** |
+| `htrouter_sample2.log` + `htrouter_sample3.log` | **9.71 years** |
+
+The ht-router pairs matter for dating this item: ht-router writes ISO
+timestamps that `TS_RE` has always matched, so the ten-year range was
+reproducible **before** the ctime scanner landed, not because of it. (An
+earlier draft of this paragraph claimed the ctime fix was what made the case
+possible. It wasn't — it only added ht-modem as a third way to reach it. The
+defect predates both.)
+
+**Fix (not yet built):** during the existing client-side timestamp scan in
+`FileUpload.jsx`'s `onDrop`, track each file's own min/max range (not just
+the combined absolute min/max), then compare ranges pairwise. If any two
+files' ranges don't overlap and the gap between them exceeds some threshold
+(days, not hours — normal multi-hour session offsets are expected and fine),
+surface a warning in the upload modal before the user confirms the time
+window. Exact threshold and warning UX not yet designed.
+
+**Priority:** Low — UX polish, not a data-correctness issue. No parser or API
+change; purely a `FileUpload.jsx` addition mirroring the pattern of the
+existing epoch-ms scanner fix above.
+
+### HtModemTempOverTime — unequal-duration compression — ⏳ Pending (2026-08-27)
+
+The real trade-off the elapsed-time axis makes, as distinct from the disjoint-
+date case above which it solves.
+
+`HtModemTempOverTime` plots every loaded session on **one shared linear
+elapsed-ms axis** (`min: 0`, max auto-scaled by Chart.js to the longest
+session). So sessions of different lengths no longer each occupy the full chart
+width: with the two committed fixtures — `htmodem_sample.log` at ~36 min and
+`htmodem_sample2.log` at ~2h36m — the shorter session renders across roughly a
+quarter of the width. That is the sparse-data problem the project-wide
+normalized 0–100% axis exists to prevent, per the CLAUDE.md architecture
+decision, and this chart is the documented exception to it.
+
+**Why the exception was taken anyway** (the reasoning the original change
+failed to state): the gains are downsampling the *sample rows* together so
+LPD/FPD/PL stay aligned instead of drifting apart, and 150 points with real
+duration ticks (`1:23:45`) instead of 15 percentage buckets. Neither of those
+required abandoning normalization — `buildRelativeTimeSeries()` normalizes
+per-device off `samples[0].ms`, so the year-2036 unset-RTC timestamps cited as
+the motivation would not have broken it. The de-normalization was incidental,
+not required.
+
+**Options, none built:**
+- (a) Normalize to the longest *loaded* session rather than absolute ms —
+  keeps duration ticks and alignment, removes the compression.
+- (b) "Small multiples": one chart panel per session when durations differ by
+  more than ~10×, which also reads better for cross-session comparison.
+- (c) Keep the shared axis and add an on-screen note when loaded durations
+  differ materially — consistent with the "an empty map must say it's empty"
+  and "a scoped count must state its scope" rules.
+
+**Priority:** Medium. Not a correctness bug — no data is wrong or hidden — but
+a chart that renders one of two loaded sessions as a narrow sliver is more than
+cosmetic, and it is a live deviation from a documented architecture decision.
 
 ### Rename "Relay Firmware" / "Relay radio firmware" to "Firmware" — ⏳ Pending
 Cosmetic/naming cleanup: standardize the user-facing label "Relay Firmware" /

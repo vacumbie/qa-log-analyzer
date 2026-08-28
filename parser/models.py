@@ -472,6 +472,102 @@ class RelayManagerEvent:
     raw_message: str = ""
 
 
+# ── TAK server primitives ──────────────────────────────────────────────────────
+
+@dataclass
+class TakEvent:
+    """
+    One Cursor-on-Target (CoT) event captured from a TAK server stream.
+
+    category arrives pre-computed from the TAK server and is copied verbatim —
+    this parser derives nothing from the CoT `type` attribute. Treat the set as
+    open: an unrecognised value is stored as-is, never mapped through an
+    allow-list. The values observed so far correspond to `type` as follows:
+      PLI     — a-f-G-U-* position/location report from a friendly ground unit
+      Marker  — a-f-G-U-C-I "I" (icon/marker) variant, seen from WebTAK clients
+      Chat    — b-t-f GeoChat text message
+      Other   — server plumbing (e.g. t-x-takp-v TAK protocol/version handshake);
+                carries no device identity or position
+
+    has_gps_fix is False in two cases, and consumers should treat lat/lon as
+    meaningless in both:
+      - the 0.0/0.0 sentinel pair, paired with a 9999999.0-family hae/ce/le
+        placeholder — the CoT convention for "no GPS fix", not a real position
+        at (0,0). A *single* zero coordinate is a real position (the equator or
+        the prime meridian) and keeps its fix.
+      - lat/lon is None because the record carried only one of them, or a
+        non-numeric value. The missing half is never defaulted to 0.0, which
+        would fabricate a position and pass the sentinel test above.
+    The two are counted separately in parse_errors: a sentinel means the device
+    had no fix, a None means the record was incomplete.
+
+    latency_ms is receivedAt (TAK server receipt time) minus time (device-
+    generated event time) — the KNOT-style cross-device skew backlog item
+    (P8), but measured server-side. Can be negative if the source device's
+    clock is running fast relative to the TAK server; the sample data has
+    reproduced this (see parse_errors note in parse_tak_log).
+
+    raw_cot retains the original CoT XML for cases the promoted fields don't
+    cover (e.g. WebTAK-specific detail children). It stops at the parser: the
+    API deliberately does not serialize it, so it is not reachable from the UI
+    or an export — see the DATA LIMITATION entry in parse_tak_log for the
+    fields that live only in there.
+    """
+    timestamp: str                          # event 'time' (device-generated), _TS_FMT_OUT
+    category: str                           # "PLI" | "Marker" | "Chat" | "Other"
+    cot_type: str                           # raw CoT type code, e.g. "a-f-G-U-C"
+    uid: str = ""
+    callsign: Optional[str] = None          # None for server plumbing / some chat senders
+    node_type: str = ""                     # "Android" | "WebTAK" | "Other"
+    platform: Optional[str] = None          # "ATAK-CIV" | "WebTAK" | None
+    parent_callsign: Optional[str] = None
+    lat: Optional[float] = None            # None when the record carried no usable pair
+    lon: Optional[float] = None
+    has_gps_fix: bool = True
+    received_at: str = ""                   # TAK server receipt timestamp, _TS_FMT_OUT
+    latency_ms: Optional[int] = None
+    raw_cot: str = ""
+
+    @property
+    def is_pli(self) -> bool:
+        return self.category == "PLI"
+
+    @property
+    def is_chat(self) -> bool:
+        return self.category == "Chat"
+
+    @property
+    def is_marker(self) -> bool:
+        return self.category == "Marker"
+
+    @property
+    def is_server_control(self) -> bool:
+        return self.category == "Other"
+
+    @property
+    def is_unrecognized_category(self) -> bool:
+        """True for a category outside the four seen so far.
+
+        The set is open — the server computes it, and a future TAK release can
+        add one. Such an event gets its own bucket rather than being folded into
+        Other, the same call made for ATAK's unparsed `action` values: folding
+        would hide a new category behind a label that says "server control",
+        and dropping it would break the arithmetic (the category counts must sum
+        to total_events).
+        """
+        return self.category not in ("PLI", "Marker", "Chat", "Other")
+
+
+@dataclass
+class TakServerInfo:
+    """
+    TAK server identity, extracted from a t-x-takp-v TakControl/
+    TakServerVersionInfo handshake record, if present in the stream.
+    """
+    server_version: str = ""    # e.g. "5.6-RELEASE-57-HEAD"
+    api_version: str = ""       # e.g. "3"
+
+
 # ── GRIP transfer primitives ──────────────────────────────────────────────────
 
 @dataclass
@@ -605,6 +701,321 @@ class FwLogResult:
     skipped_debug:        int = 0
 
 
+# ── Next-Gen Radio — ht-modem primitives ───────────────────────────────────────
+# See docs/parsing-requirements.md "Next-Gen Radio — Modem (ht-modem) Log" and
+# docs/log-field-definitions.md Format 5 for the full field-by-field spec this
+# mirrors.
+
+@dataclass
+class HtModemTxPacket:
+    """
+    One TX packet lifecycle, from `Received packet for encoding` through its
+    outcome (queued or dropped).
+
+    `dropped` is True when a `CSMA QUEUE is Full, dropping packet` line
+    followed this packet's encoding block — that line carries no packetID of
+    its own, so it is attributed to the most recently seen packet (see
+    htmodem.py parsing notes). If a drop line appears with no preceding
+    packet in the current session, it is counted in
+    `HtModemResult.orphaned_drop_count` instead of fabricating a packet.
+    """
+    packet_id:      int
+    timestamp:      str = ""
+    chdesc:         int = 0
+    mod_mode:       int = 0
+    fec_mode:       int = 0
+    priority:       int = 0
+    local_flag:     int = 0
+    data_length:    int = 0
+    symbol_count:   Optional[int] = None
+    sample_count:   Optional[int] = None
+    encoded_len:    Optional[int] = None
+    bch_val:        str = ""
+    payload_extended_from: Optional[int] = None
+    payload_extended_to:   Optional[int] = None
+    queued:         Optional[bool] = None   # True = added to xmit queue, False = dropped, None = outcome not seen
+    numinqueue:     Optional[int] = None
+    # RF transmission confirmations — a separate, later event from "queued."
+    # A LIST, not a single scalar: some packets get more than one confirmation
+    # attributed to them, and keeping only the latest would discard a real
+    # observation. Attribution follows the same "attach to whichever packet is
+    # current" rule as drops, since a confirmation does not always immediately
+    # follow "Added packet to xmit queue" (other lines can intervene).
+    #
+    # READ retransmit_count WITH CARE — it is not a retry count. 'Packet
+    # Transmitted' carries no packetID, so attribution is positional, and the
+    # modem sometimes begins encoding the next packet before the previous
+    # one's confirmation is logged, shifting it forward by one packet. In the
+    # one real capture with this data, 43 packets have no confirmation and 42
+    # have two, 40 of the 42 immediately following a zero-confirmation packet
+    # — so most extra confirmations are the previous packet's, not a retry.
+    # The ambiguity is reported as a DATA LIMITATION in parse_errors.
+    transmissions:  list["HtModemTransmitConfirmation"] = field(default_factory=list)
+
+    @property
+    def transmitted(self) -> bool:
+        """At least one confirmation was attributed to this packet — see the
+        positional-attribution caveat on `transmissions`."""
+        return len(self.transmissions) > 0
+
+    @property
+    def retransmit_count(self) -> int:
+        """Extra confirmations beyond the first. NOT a confirmed retry count —
+        see the caveat on `transmissions`."""
+        return max(0, len(self.transmissions) - 1)
+
+
+@dataclass
+class HtModemTransmitConfirmation:
+    """
+    One "Packet Transmitted" RF confirmation line. Units are the radio's own
+    raw scale, not independently verified against a hardware spec — Rev/Fwd
+    are almost certainly reflected/forward power in raw ADC counts (VSWR /
+    return-loss related, alongside the explicit S11 dB figure). temp_val is
+    on its own scale — NOT the same units/sensor as the LPD/FPD/PL
+    temp_samples elsewhere in this result; do not merge or compare them.
+    """
+    rev_val:  int
+    fwd_val:  int
+    s11_db:   int
+    temp_val: int
+
+
+@dataclass
+class HtModemFreqChange:
+    """One TX or RX frequency change command."""
+    timestamp: str
+    direction: str   # "TX" | "RX"
+    hz:        int
+
+
+@dataclass
+class HtModemPowerChange:
+    """One TX power level change command."""
+    timestamp:  str
+    xmit_level: float
+
+
+@dataclass
+class HtModemTempSample:
+    """One periodic Zynq MPSoC thermal reading. Raw log is Celsius."""
+    timestamp: str
+    lpd_c:     float
+    fpd_c:     float
+    pl_c:      float
+
+
+@dataclass
+class HtModemResult:
+    """All structured data extracted from a next-gen radio modem (ht-modem) log."""
+    fpga_version_ok:        Optional[bool] = None   # None if the check line never appears
+    libiio_version:         str = ""
+    filter_bank:            str = ""
+    filter_range_mhz:       str = ""
+    ad936x_init_error_count: int = 0   # collapsed count of the init-failure cascade, not per-line
+    iio_devices_found:      Optional[int] = None   # "Found <N> devices" seen before AD5592 init
+    ad5592_devices_found:   Optional[int] = None   # "Found <N> devices" seen after "Starting AD5592 init"
+    clock_cal_offset:       Optional[int] = None
+    si4460_cal_offset:      Optional[int] = None
+    gpsd_connect_error:     bool = False
+    freq_changes:           list[HtModemFreqChange] = field(default_factory=list)
+    power_changes:          list[HtModemPowerChange] = field(default_factory=list)
+    tx_packets:             list[HtModemTxPacket] = field(default_factory=list)
+    orphaned_drop_count:    int = 0   # CSMA-full drop lines with no preceding TX packet block
+    orphaned_transmitted_count: int = 0   # "Packet Transmitted" lines with no preceding TX packet block
+    temp_samples:           list[HtModemTempSample] = field(default_factory=list)
+    total_lines:            int = 0
+
+    @property
+    def dropped_count(self) -> int:
+        return sum(1 for p in self.tx_packets if p.queued is False) + self.orphaned_drop_count
+
+    @property
+    def queued_count(self) -> int:
+        return sum(1 for p in self.tx_packets if p.queued is True)
+
+
+# ── Next-Gen Radio — ht-router primitives ──────────────────────────────────────
+# See docs/parsing-requirements.md "Next-Gen Radio — Router (ht-router) Log" and
+# docs/log-field-definitions.md Format 6 for the full field-by-field spec this
+# mirrors. Four real captures showed genuinely different snapshot schemas (one
+# session had zero modem-transmit activity, so several output.* fields never
+# appeared at all; two of the four never report the input.* error counters) —
+# every snapshot field below is Optional for that reason, not just defensive
+# style.
+
+@dataclass
+class RouterHistogramBucket:
+    """One bucket from an output.overhead[N] / output.xmit_completion[N] line."""
+    bucket:      int
+    range_min:   int
+    range_max:   int
+    count:       int
+
+
+@dataclass
+class RouterStatSnapshot:
+    """
+    One periodic counter snapshot — the ~20 input.*/output.* lines emitted
+    together roughly every 10s are grouped into ONE of these, never stored as
+    flat per-line records (that was the core parsing requirement for this
+    format). `connected` is the line that terminates and finalizes a group.
+
+    Retention: every snapshot in the file is kept here — no downsampling at
+    parse time. Trimming/aggregation for display is a UI/API-layer decision,
+    deliberately deferred past this parser.
+
+    IMPORTANT: every numeric field here is a cumulative session-lifetime
+    counter, not a per-interval delta — verified strictly non-decreasing
+    across real samples (e.g. output.modem_xmit_failed climbs 1, 1, 2, 2, ...
+    to a final 59, matching the ht-modem's 59 dropped packets exactly). A
+    per-interval rate must be computed as the difference between consecutive
+    snapshots, never summed across all snapshots.
+    """
+    timestamp:                str = ""   # timestamp of the first line in this group
+    # Link-layer validity/error counters — seen in captures with real RF
+    # noise; absent (not zero) in a clean session, same absence convention
+    # as the output.* transmit fields below.
+    input_too_short_link_hdr:     Optional[int] = None
+    input_too_short_link_payload: Optional[int] = None
+    input_too_short_link_crc:     Optional[int] = None
+    input_wrong_link_version:     Optional[int] = None
+    input_crc_present:            Optional[int] = None
+    input_bad_crc:                Optional[int] = None
+    input_subframe_no_protocol:          Optional[int] = None
+    input_subframe_logical_recv_error:   Optional[int] = None
+    input_subframe_family_recv_error:    Optional[int] = None
+    input_subframe_count:     Optional[int] = None
+    input_traffic_ag:         Optional[int] = None
+    input_ctl:                Optional[int] = None
+    input_sts:                Optional[int] = None
+    input_total_frames:       Optional[int] = None
+    input_total_bytes:        Optional[int] = None
+    input_total_m2m:          Optional[int] = None
+    input_m2m_xmit:           Optional[int] = None
+    input_m2m_control:        Optional[int] = None
+    input_m2m_recv:           Optional[int] = None
+    input_m2m_status:         Optional[int] = None
+    input_m2m_xmit_status:    Optional[int] = None
+    output_traffic_ag_ok:     Optional[int] = None
+    output_traffic_ag_fail:   Optional[int] = None
+    output_ctl_ok:            Optional[int] = None
+    output_ctl_fail:          Optional[int] = None
+    output_sts_ok:            Optional[int] = None
+    output_sts_fail:          Optional[int] = None
+    output_aggregation_subframes: Optional[int] = None
+    output_aggregation_frames:    Optional[int] = None
+    output_total_bytes:       Optional[int] = None
+    # Only present in sessions with actual modem-transmit activity — absent
+    # entirely (not zero) in a session that never transmitted.
+    output_time_outs:         Optional[int] = None
+    output_bottom_timed_out:  Optional[int] = None
+    output_modem_xmit_failed: Optional[int] = None
+    output_tap_frames:        Optional[int] = None
+    output_overhead:          Optional[RouterHistogramBucket] = None
+    output_xmit_completion:   Optional[RouterHistogramBucket] = None
+    connected:                Optional[bool] = None
+
+
+@dataclass
+class RouterProtocolMessage:
+    """One client-hdr/mgt-hdr protocol message (from a udp input/output line)."""
+    timestamp:   str
+    io_direction: str   # "input" | "output" — which way through the router
+    udp_idx:     int
+    peer:        Optional[str]   # only present on "udp input" lines
+    dst:         str
+    src:         str
+    version:     int
+    msg_type:    str
+    direction:   str   # "request" | "response" — the protocol message's own direction
+
+
+@dataclass
+class RouterForwardEvent:
+    """One mgt_hub_forward.548 send/skip event."""
+    timestamp:     str
+    request_type:  int
+    dst:           str
+    sent_count:    int
+    skipped_count: int
+
+
+@dataclass
+class RouterTransmission:
+    """One 'transmission <N> finished in <ns> ns' completion event — the
+    router-side counterpart to the modem's TX packet lifecycle."""
+    timestamp:    str
+    transmission_id: int
+    duration_ns:  int
+
+
+@dataclass
+class HtRouterResult:
+    """All structured data extracted from a next-gen radio router (ht-router) log."""
+    session_start:       str = ""
+    router_pid:          Optional[int] = None
+    modem_pid:           Optional[int] = None
+    udp_sockets:         list[str] = field(default_factory=list)
+    socket_warning_count: int = 0
+    aghub_init_addr:     str = ""
+    rotation_markers:    list[str] = field(default_factory=list)
+    protocol_messages:   list[RouterProtocolMessage] = field(default_factory=list)
+    forward_events:      list[RouterForwardEvent] = field(default_factory=list)
+    stat_snapshots:      list[RouterStatSnapshot] = field(default_factory=list)
+    transmissions:       list[RouterTransmission] = field(default_factory=list)
+    # Discrete event types seen but not deep-parsed (clinfo, bcast_hub_forward,
+    # echo_info, etc.) — tallied by type so nothing is silently dropped.
+    unparsed_event_counts: dict[str, int] = field(default_factory=dict)
+    untimestamped_line_count: int = 0
+    total_lines:         int = 0
+
+    @property
+    def connected_count(self) -> int:
+        return sum(1 for s in self.stat_snapshots if s.connected is True)
+
+    @property
+    def disconnected_count(self) -> int:
+        return sum(1 for s in self.stat_snapshots if s.connected is False)
+
+    @property
+    def total_modem_xmit_failed(self) -> Optional[int]:
+        """
+        All input.*/output.* snapshot fields are cumulative session-lifetime
+        counters (verified: strictly non-decreasing across the real samples),
+        NOT per-interval deltas. The correct "total" is therefore the last
+        snapshot's value, not a sum across snapshots — summing would multiply
+        the true count by roughly the number of snapshots taken.
+        """
+        for s in reversed(self.stat_snapshots):
+            if s.output_modem_xmit_failed is not None:
+                return s.output_modem_xmit_failed
+        return None
+
+    @property
+    def total_timeouts(self) -> Optional[int]:
+        """See total_modem_xmit_failed — same cumulative-counter caveat."""
+        for s in reversed(self.stat_snapshots):
+            if s.output_time_outs is not None:
+                return s.output_time_outs
+        return None
+
+    @property
+    def total_bad_crc(self) -> Optional[int]:
+        """
+        See total_modem_xmit_failed — same cumulative-counter caveat.
+
+        Exists so the UI never has to re-derive it: a KPI card originally
+        reimplemented this "last non-null snapshot" walk in JSX, which meant the
+        Overview row and the tab computed one concept two ways and only one of
+        them would pick up a change to the rule.
+        """
+        for s in reversed(self.stat_snapshots):
+            if s.input_bad_crc is not None:
+                return s.input_bad_crc
+        return None
+
+
 # ── Top-level parse result ────────────────────────────────────────────────────
 
 @dataclass
@@ -615,7 +1026,7 @@ class ParseResult:
     this shape.
     """
     # Metadata
-    log_format: str = ""        # "diagnostic" | "rsdk" | "atak" | "relay_manager" | "fw_log"
+    log_format: str = ""        # "diagnostic" | "rsdk" | "atak" | "relay_manager" | "fw_log" | "htmodem" | "htrouter"
     source_filename: str = ""
     parse_errors: list[str] = field(default_factory=list)
 
@@ -668,6 +1079,12 @@ class ParseResult:
     # Firmware log only
     fw_log_result: Optional[FwLogResult] = None
 
+    # Next-Gen Radio — ht-modem only
+    htmodem_result: Optional[HtModemResult] = None
+
+    # Next-Gen Radio — ht-router only
+    htrouter_result: Optional[HtRouterResult] = None
+
     # Relay Manager only
     relay_health_requests: list[RelayHealthRequest] = field(default_factory=list)
     relay_manager_events: list[RelayManagerEvent] = field(default_factory=list)
@@ -676,6 +1093,10 @@ class ParseResult:
     relay_manager_environment: str = ""   # "stage" | "unknown" (prod TBD)
     relay_manager_app_pid: str = ""       # Android process ID of com.gotenna.relaymanager
     relay_manager_ble_address: str = ""   # BLE MAC of the connected relay node
+
+    # TAK server only
+    tak_events: list[TakEvent] = field(default_factory=list)
+    tak_server_info: Optional[TakServerInfo] = None
 
     # ── Convenience properties ────────────────────────────────────────────────
 
@@ -725,6 +1146,29 @@ class ParseResult:
     @property
     def atak_received_messages(self) -> list[AtakMessage]:
         return [m for m in self.atak_messages if not m.is_sender]
+
+    # ── TAK convenience properties ────────────────────────────────────────────
+
+    @property
+    def tak_pli_events(self) -> list[TakEvent]:
+        return [e for e in self.tak_events if e.is_pli]
+
+    @property
+    def tak_chat_events(self) -> list[TakEvent]:
+        return [e for e in self.tak_events if e.is_chat]
+
+    @property
+    def tak_no_fix_events(self) -> list[TakEvent]:
+        """PLI/Marker events reporting a position but with no real GPS fix."""
+        return [e for e in self.tak_events if not e.has_gps_fix and e.category in ("PLI", "Marker")]
+
+    @property
+    def tak_unique_callsigns(self) -> set[str]:
+        return {e.callsign for e in self.tak_events if e.callsign}
+
+    @property
+    def tak_latency_ms_values(self) -> list[int]:
+        return [e.latency_ms for e in self.tak_events if e.latency_ms is not None]
 
     @property
     def atak_sent_messages(self) -> list[AtakMessage]:

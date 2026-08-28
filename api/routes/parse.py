@@ -20,26 +20,59 @@ from parser.rsdk import parse_rsdk_log
 from parser.atak import parse_atak_log
 from parser.relay_manager import parse_relay_manager_log
 from parser.fw_log import parse_fw_log, is_fw_log
+from parser.htmodem import parse_htmodem_log, is_htmodem_log
+from parser.htrouter import parse_htrouter_log, is_htrouter_log
+from parser.tak import parse_tak_log, is_tak_log
 from parser.models import ParseResult
 
 router = APIRouter(prefix="/parse", tags=["parse"])
 
 
+def _is_atak_content(snippet: str) -> bool:
+    """ATAK plugin logs are JSON with these distinctive fields. Used both by the
+    ATAK branch below and as a guard on the TAK filename hints, so the two stay
+    in step — see the comment on the TAK branch for why the guard is needed."""
+    return (
+        '"logId"' in snippet
+        or '"connectionState"' in snippet
+        or '"atakVersion"' in snippet
+        or '"deliveryStatus"' in snippet
+    )
+
+
 def _detect_format(filename: str, content: str) -> str:
     """
     Heuristically detect log format from filename and content.
-    Returns 'fw_log', 'atak', 'relay_manager', 'rsdk', or 'diagnostic'.
+    Returns 'fw_log', 'htmodem', 'htrouter', 'tak', 'atak', 'relay_manager',
+    'rsdk', or 'diagnostic'.
 
     Detection order:
       1. FW Log        — bracket pattern [digits-digits, MODULE, LEVEL] with TRX/RELAY/TPORT
-      2. ATAK          — filename starts with 'diagnostic_ATAK_' (legacy), or
+      2. ht-modem      — ctime-prefixed lines plus a modem-specific marker
+                         (FPGA Version, AD936X, LIBIIO). Checked early — highly
+                         distinctive, low collision risk with the other formats.
+      3. ht-router     — distinctive stat-counter key vocabulary (input.total_m2m,
+                         output.*) or explicit ht-router process markers.
+      4. TAK           — filename contains 'tak-stream'/'tak_server' AND the content
+                         is not positively ATAK, or the content carries the
+                         receivedAt/nodeType/category signature in either of the
+                         two real shapes: a JSON array of CoT event records, or
+                         JSON Lines where each line wraps one event in a
+                         {"message": {...}} logger envelope. Must stay immediately
+                         before ATAK. Both are JSON *and both can be newline-
+                         delimited*, so the root character no longer separates
+                         them — only the disjoint signature keys do (scoped to
+                         the first non-empty line for the NDJSON shape). The
+                         ht-* formats above are plaintext and cannot collide
+                         with either, so sitting ahead of TAK is harmless.
+      5. ATAK          — filename starts with 'diagnostic_ATAK_' (legacy), or
                          content is JSON with ATAK-specific fields (logId,
                          connectionState, atakVersion, deliveryStatus). ATAK
                          plugin v3.0 filenames drop the 'ATAK_' segment, so
                          those are detected by content here, not by filename.
-      3. Relay Manager — filename or content signals the goTenna Relay Manager app
-      4. RSDK          — filename contains 'rsdk' or content has RSDK line markers
-      5. Diagnostic    — fallback (goTenna Pro+ block format)
+      6. Relay Manager — filename or content signals the goTenna Relay Manager app
+      7. RSDK          — filename contains 'rsdk' or content has RSDK line markers
+      8. Diagnostic    — fallback (goTenna Pro+ block format)
     """
     name = filename.lower()
     snippet = content[:2000]   # wider window for relay manager detection
@@ -48,18 +81,34 @@ def _detect_format(filename: str, content: str) -> str:
     if is_fw_log(content):
         return "fw_log"
 
+    # ── ht-modem detection ────────────────────────────────────────────────────
+    if is_htmodem_log(content):
+        return "htmodem"
+
+    # ── ht-router detection ───────────────────────────────────────────────────
+    if is_htrouter_log(content):
+        return "htrouter"
+
+    # ── TAK server detection ──────────────────────────────────────────────────
+    # The filename hints are substring tests, and "tak_server" is a substring of
+    # the legacy ATAK convention whenever the callsign starts with SERVER —
+    # diagnostic_ATAK_SERVER_<GID>_<DATE>.log lowercases to a name containing
+    # "tak_server". Without the content guard that file routes here and the TAK
+    # parser drops every record (valid JSON, no 'time' field), losing the whole
+    # log. The guard is why TAK-before-ATAK is safe: a filename coincidence can
+    # never override content that names another format outright.
+    if "tak-stream" in name or "tak_server" in name or "tak-server" in name:
+        if not _is_atak_content(snippet):
+            return "tak"
+    if is_tak_log(content):
+        return "tak"
+
     # ── ATAK detection ────────────────────────────────────────────────────────
     # Filename convention (legacy): diagnostic_ATAK_<CALLSIGN>_<GID>_<DATE>.log
     # v3.0 drops the ATAK_ segment — those files match the content check below.
     if "diagnostic_atak_" in name:
         return "atak"
-    # Content: ATAK logs are JSON arrays/objects with these distinctive fields
-    if (
-        '"logId"' in snippet
-        or '"connectionState"' in snippet
-        or '"atakVersion"' in snippet
-        or '"deliveryStatus"' in snippet
-    ):
+    if _is_atak_content(snippet):
         return "atak"
 
     # ── Relay Manager detection ───────────────────────────────────────────────
@@ -431,6 +480,36 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             ],
         }
 
+    # ── TAK server-specific fields ─────────────────────────────────────────────
+    if r.log_format == "tak":
+        base["tak_server_info"] = {
+            "server_version": r.tak_server_info.server_version,
+            "api_version":    r.tak_server_info.api_version,
+        } if r.tak_server_info else None
+        base["tak_events"] = [
+            {
+                "timestamp":        e.timestamp,
+                "category":         e.category,
+                "cot_type":         e.cot_type,
+                "uid":              e.uid,
+                "callsign":         e.callsign,
+                "node_type":        e.node_type,
+                "platform":         e.platform,
+                "parent_callsign":  e.parent_callsign,
+                "lat":              e.lat,
+                "lon":              e.lon,
+                "has_gps_fix":      e.has_gps_fix,
+                # Serialized per event for the same reason has_gps_fix is: the
+                # time-window recompute in App.jsx needs to re-bucket categories,
+                # and the parser must stay the only place that decides which
+                # values are unrecognised.
+                "is_unrecognized_category": e.is_unrecognized_category,
+                "received_at":      e.received_at,
+                "latency_ms":       e.latency_ms,
+            }
+            for e in r.tak_events
+        ]
+
     # ── Computed summaries for the UI ─────────────────────────────────────────
     if r.log_format == "atak":
         atak_received = r.atak_received_messages
@@ -568,6 +647,196 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             "rssi_ch1_avg_dbm":    rssi_summary.get("1", {}).get("avg_dbm"),
         }
 
+    elif r.log_format == "htmodem":
+        hm = r.htmodem_result
+        tx_packets = [
+            {
+                "packet_id":     p.packet_id,
+                "timestamp":     p.timestamp,
+                "chdesc":        p.chdesc,
+                "mod_mode":      p.mod_mode,
+                "fec_mode":      p.fec_mode,
+                "priority":      p.priority,
+                "local_flag":    p.local_flag,
+                "data_length":   p.data_length,
+                "symbol_count":  p.symbol_count,
+                "sample_count":  p.sample_count,
+                "encoded_len":   p.encoded_len,
+                "bch_val":       p.bch_val,
+                "payload_extended_from": p.payload_extended_from,
+                "payload_extended_to":   p.payload_extended_to,
+                "queued":        p.queued,
+                "numinqueue":    p.numinqueue,
+                "transmitted":   p.transmitted,
+                "retransmit_count": p.retransmit_count,
+                "transmissions": [
+                    {"rev_val": t.rev_val, "fwd_val": t.fwd_val, "s11_db": t.s11_db, "temp_val": t.temp_val}
+                    for t in p.transmissions
+                ],
+            }
+            for p in hm.tx_packets
+        ]
+        temps_f = [
+            {
+                "timestamp": t.timestamp,
+                "lpd_f": round(t.lpd_c * 9 / 5 + 32, 1),
+                "fpd_f": round(t.fpd_c * 9 / 5 + 32, 1),
+                "pl_f":  round(t.pl_c * 9 / 5 + 32, 1),
+            }
+            for t in hm.temp_samples
+        ]
+        base["htmodem"] = {
+            "fpga_version_ok":         hm.fpga_version_ok,
+            "libiio_version":          hm.libiio_version,
+            "filter_bank":             hm.filter_bank,
+            "filter_range_mhz":        hm.filter_range_mhz,
+            "iio_devices_found":       hm.iio_devices_found,
+            "ad5592_devices_found":    hm.ad5592_devices_found,
+            "ad936x_init_error_count": hm.ad936x_init_error_count,
+            "clock_cal_offset":        hm.clock_cal_offset,
+            "si4460_cal_offset":       hm.si4460_cal_offset,
+            "gpsd_connect_error":      hm.gpsd_connect_error,
+            "freq_changes": [
+                {"timestamp": f.timestamp, "direction": f.direction, "hz": f.hz}
+                for f in hm.freq_changes
+            ],
+            "power_changes": [
+                {"timestamp": p.timestamp, "xmit_level": p.xmit_level}
+                for p in hm.power_changes
+            ],
+            "tx_packets":              tx_packets,
+            "orphaned_drop_count":     hm.orphaned_drop_count,
+            "orphaned_transmitted_count": hm.orphaned_transmitted_count,
+            "temp_samples_f":          temps_f,
+            "total_lines":             hm.total_lines,
+        }
+        pl_vals = [t.pl_c for t in hm.temp_samples]
+        base["summary"] = {
+            "fpga_version_ok":         hm.fpga_version_ok,
+            "libiio_version":          hm.libiio_version,
+            "ad936x_init_error_count": hm.ad936x_init_error_count,
+            "gpsd_connect_error":      hm.gpsd_connect_error,
+            "tx_packet_count":         len(hm.tx_packets),
+            "queued_count":            hm.queued_count,
+            "dropped_count":           hm.dropped_count,
+            "freq_change_count":       len(hm.freq_changes),
+            "power_change_count":      len(hm.power_changes),
+            "temp_sample_count":       len(hm.temp_samples),
+            "peak_pl_temp_f":          round(max(pl_vals) * 9 / 5 + 32, 1) if pl_vals else None,
+            "transmitted_count":       sum(1 for p in hm.tx_packets if p.transmitted),
+            "retransmit_packet_count": sum(1 for p in hm.tx_packets if p.retransmit_count > 0),
+        }
+
+    elif r.log_format == "htrouter":
+        hr = r.htrouter_result
+
+        def _snapshot_dict(s):
+            return {
+                "timestamp":                    s.timestamp,
+                "input_too_short_link_hdr":       s.input_too_short_link_hdr,
+                "input_too_short_link_payload":   s.input_too_short_link_payload,
+                "input_too_short_link_crc":       s.input_too_short_link_crc,
+                "input_wrong_link_version":       s.input_wrong_link_version,
+                "input_crc_present":              s.input_crc_present,
+                "input_bad_crc":                  s.input_bad_crc,
+                "input_subframe_no_protocol":            s.input_subframe_no_protocol,
+                "input_subframe_logical_recv_error":     s.input_subframe_logical_recv_error,
+                "input_subframe_family_recv_error":      s.input_subframe_family_recv_error,
+                "input_subframe_count":          s.input_subframe_count,
+                "input_traffic_ag":               s.input_traffic_ag,
+                "input_ctl":                      s.input_ctl,
+                "input_sts":                      s.input_sts,
+                "input_total_frames":             s.input_total_frames,
+                "input_total_bytes":              s.input_total_bytes,
+                "input_total_m2m":                s.input_total_m2m,
+                "input_m2m_xmit":                 s.input_m2m_xmit,
+                "input_m2m_control":              s.input_m2m_control,
+                "input_m2m_recv":                 s.input_m2m_recv,
+                "input_m2m_status":               s.input_m2m_status,
+                "input_m2m_xmit_status":          s.input_m2m_xmit_status,
+                "output_traffic_ag_ok":           s.output_traffic_ag_ok,
+                "output_traffic_ag_fail":         s.output_traffic_ag_fail,
+                "output_ctl_ok":                  s.output_ctl_ok,
+                "output_ctl_fail":                s.output_ctl_fail,
+                "output_sts_ok":                  s.output_sts_ok,
+                "output_sts_fail":                s.output_sts_fail,
+                "output_aggregation_subframes":   s.output_aggregation_subframes,
+                "output_aggregation_frames":      s.output_aggregation_frames,
+                "output_total_bytes":             s.output_total_bytes,
+                "output_time_outs":               s.output_time_outs,
+                "output_bottom_timed_out":        s.output_bottom_timed_out,
+                "output_modem_xmit_failed":       s.output_modem_xmit_failed,
+                "output_tap_frames":              s.output_tap_frames,
+                "output_overhead": (
+                    {"bucket": s.output_overhead.bucket, "range_min": s.output_overhead.range_min,
+                     "range_max": s.output_overhead.range_max, "count": s.output_overhead.count}
+                    if s.output_overhead else None
+                ),
+                "output_xmit_completion": (
+                    {"bucket": s.output_xmit_completion.bucket, "range_min": s.output_xmit_completion.range_min,
+                     "range_max": s.output_xmit_completion.range_max, "count": s.output_xmit_completion.count}
+                    if s.output_xmit_completion else None
+                ),
+                "connected": s.connected,
+            }
+
+        # Every snapshot is serialized in full here — no downsampling at the
+        # API layer either. This is intentional: the codebase already has an
+        # established mechanism for narrowing large time-series datasets for
+        # display (the client-side time-window slider every other tab uses),
+        # so trimming belongs there, not as a second bespoke mechanism here.
+        base["htrouter"] = {
+            "router_pid":            hr.router_pid,
+            "modem_pid":             hr.modem_pid,
+            "udp_sockets":           hr.udp_sockets,
+            "socket_warning_count":  hr.socket_warning_count,
+            "aghub_init_addr":       hr.aghub_init_addr,
+            "rotation_markers":      hr.rotation_markers,
+            "protocol_messages": [
+                {"timestamp": p.timestamp, "io_direction": p.io_direction, "udp_idx": p.udp_idx,
+                 "peer": p.peer, "dst": p.dst, "src": p.src, "version": p.version,
+                 "msg_type": p.msg_type, "direction": p.direction}
+                for p in hr.protocol_messages
+            ],
+            "forward_events": [
+                {"timestamp": f.timestamp, "request_type": f.request_type, "dst": f.dst,
+                 "sent_count": f.sent_count, "skipped_count": f.skipped_count}
+                for f in hr.forward_events
+            ],
+            "transmissions": [
+                {"timestamp": t.timestamp, "transmission_id": t.transmission_id, "duration_ns": t.duration_ns}
+                for t in hr.transmissions
+            ],
+            "stat_snapshots":          [_snapshot_dict(s) for s in hr.stat_snapshots],
+            "unparsed_event_counts":   hr.unparsed_event_counts,
+            "untimestamped_line_count": hr.untimestamped_line_count,
+            "total_lines":             hr.total_lines,
+        }
+
+        # Protocol message type breakdown for the summary
+        msg_type_counts: dict[str, int] = {}
+        for p in hr.protocol_messages:
+            msg_type_counts[p.msg_type] = msg_type_counts.get(p.msg_type, 0) + 1
+
+        base["summary"] = {
+            "router_pid":              hr.router_pid,
+            "modem_pid":               hr.modem_pid,
+            "snapshot_count":          len(hr.stat_snapshots),
+            "connected_count":         hr.connected_count,
+            "disconnected_count":      hr.disconnected_count,
+            # Cumulative session-lifetime counters — last value, NOT a sum
+            # across snapshots. See RouterStatSnapshot docstring.
+            "total_modem_xmit_failed": hr.total_modem_xmit_failed,
+            "total_timeouts":          hr.total_timeouts,
+            "total_bad_crc":           hr.total_bad_crc,
+            "socket_warning_count":    hr.socket_warning_count,
+            "protocol_message_count":  len(hr.protocol_messages),
+            "msg_type_counts":         msg_type_counts,
+            "forward_event_count":     len(hr.forward_events),
+            "transmission_count":      len(hr.transmissions),
+            "rotation_count":          len(hr.rotation_markers),
+        }
+
     elif r.log_format == "relay_manager":
         # Compute average polling interval for the summary
         avg_interval_sec: float | None = None
@@ -603,6 +872,26 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
             ),
             "dominant_notification_type": max(ncounts, key=ncounts.get) if ncounts else None,
             "total_notifications":       sum(ncounts.values()),
+        }
+
+    elif r.log_format == "tak":
+        latencies = r.tak_latency_ms_values
+        base["summary"] = {
+            "total_events":       len(r.tak_events),
+            "pli_count":          len(r.tak_pli_events),
+            "chat_count":         len(r.tak_chat_events),
+            "marker_count":       sum(1 for e in r.tak_events if e.is_marker),
+            "other_count":        sum(1 for e in r.tak_events if e.is_server_control),
+            # The five category counts must sum to total_events. Without this
+            # bucket an unrecognised category counted in none of them and the
+            # KPI row silently stopped reconciling.
+            "unrecognized_count": sum(1 for e in r.tak_events if e.is_unrecognized_category),
+            "unique_callsigns":   len(r.tak_unique_callsigns),
+            "no_fix_count":       len(r.tak_no_fix_events),
+            "avg_latency_ms":     round(sum(latencies) / len(latencies), 1) if latencies else None,
+            "max_latency_ms":     max(latencies) if latencies else None,
+            "min_latency_ms":     min(latencies) if latencies else None,
+            "negative_latency_count": sum(1 for v in latencies if v < 0),
         }
 
     else:
@@ -698,6 +987,12 @@ async def parse_logs(files: list[UploadFile] = File(...)) -> dict:
         try:
             if fmt == "fw_log":
                 result = parse_fw_log(tmp_path)
+            elif fmt == "htmodem":
+                result = parse_htmodem_log(tmp_path)
+            elif fmt == "htrouter":
+                result = parse_htrouter_log(tmp_path)
+            elif fmt == "tak":
+                result = parse_tak_log(tmp_path)
             elif fmt == "rsdk":
                 result = parse_rsdk_log(tmp_path)
             elif fmt == "atak":

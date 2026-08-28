@@ -4,7 +4,7 @@
 > Each entry defines what the field means in the raw log, how it is parsed, what it becomes
 > in the data model, and any known accuracy limitations or caveats.
 >
-> Last updated: 2026-06-05
+> Last updated: 2026-08-24
 
 ---
 
@@ -16,6 +16,9 @@
   - [GRIP Transfer Lifecycle](#grip-transfer-lifecycle)
 - [Format 3: Android ATAK Plug-in Log](#format-3-android-atak-plug-in-log)
 - [Format 4: Relay Firmware (UART/USB Debug) Log](#format-4-relay-firmware-uartusb-debug-log)
+- [Format 5: Next-Gen Radio — Modem (ht-modem) Log](#format-5-next-gen-radio--modem-ht-modem-log)
+- [Format 6: Next-Gen Radio — Router (ht-router) Log](#format-6-next-gen-radio--router-ht-router-log)
+- [Format 7: TAK Server CoT Event Stream](#format-7-tak-server-cot-event-stream)
 - [Derived / Computed Fields](#derived--computed-fields)
 - [Cross-Format Notes](#cross-format-notes)
 
@@ -718,6 +721,223 @@ dataclasses live in `parser/models.py`.
 
 ---
 
+## Format 5: Next-Gen Radio — Modem (ht-modem) Log
+
+> **File type:** `.log` (stdout capture, ctime-prefixed text)
+> **Platform:** Next-gen radio, SDR/RF layer (AD936X transceiver + Zynq FPGA/PL)
+> **Structure:** `<ctime timestamp> : <message>`, free-text message with several
+> recurring structured shapes.
+>
+> **Status: implemented.** `parser/htmodem.py` → `HtModemResult` in
+> `models.py` → `_result_to_dict()` → `HtModemTab`.
+
+> Timestamps are **wall-clock `ctime()` format**, second precision, no
+> timezone — a distinct style from every other supported format, which is why
+> the client-side time-window scanner needed its own `CTIME_RE` branch (see
+> `ui-requirements.md`). See `parsing-requirements.md` → Next-Gen Radio — Modem
+> for the full field-by-field parsing rules.
+
+Parsed into `HtModemResult`, attached to `ParseResult.htmodem_result`.
+
+### Identity & Session
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `Start of log <ctime>` | timestamp string | `session_start` | First line of the file |
+| `FPGA Version is correct` | bool | `fpga_version_ok` | Absence is itself a signal — not currently modeled as a `parse_errors` entry, should be |
+| min/max message timestamps | timestamps | `session_start` / `session_end` | Wall-clock, unlike `fw_log`'s relative ms |
+
+### Radio Init (`ad936x_init_errors`, `libiio_version`, `gpsd_connect_error`)
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `LIBIIO : version <v> detected` | string | `libiio_version` | |
+| `Setting filter bank to <name> <range>MHZ` | string, string | `filter_bank`, `filter_range_mhz` | |
+| `Could not find the AD936X PHY device` + cascading `ERROR : problem …` run | count | `ad936x_init_error_count` | **Collapsed to one count**, not stored per-line — see parsing rule in `parsing-requirements.md` |
+| `Setting clock calibration offset to <n>` | int | `clock_cal_offset` | |
+| `Read an SI4460 calibration offset of <n>` | int | `si4460_cal_offset` | Confirms an SI4460 is still present on this platform alongside the AD936X |
+| `Error connecting to gpsd` | bool | `gpsd_connect_error` | |
+
+### RF Control (`freq_changes`, `power_changes`)
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `Setting TX power level mode to fixed, Xmit level to <n>.00` | float | `power_changes[].xmit_level` | |
+| `Setting RX freq = <hz>.00` / `Setting TX freq = <hz>.00` | int, direction | `freq_changes[].hz`, `.direction` | |
+| `Received Control packet, control type = <n>` | — | **not parsed** | No `control_packets` collection exists. This table previously documented `control_packets[].control_type`, which was never built. Left unparsed on purpose for now: `control type = 10` appears with both Transmit Level and SETTXRXFREQ commands, so the type alone identifies nothing — the *following* line is what carries the meaning, and `freq_changes`/`power_changes` already capture that. Parsing the control line would add a field whose only honest value is "ambiguous" |
+
+### TX Packets (`TxPacket`)
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `Received packet for encoding : packetID = <n> chdesc = <n> modMode = <n> FECMode = <n> priority = <n> localFlag = <n> dataLength = <n> bytes` | ints | `tx_packets[]` (`packet_id`, `chdesc`, `mod_mode`, `fec_mode`, `priority`, `local_flag`, `data_length`) | |
+| `symbol count (I/Q Pairs) after postamble = <n>, sample count = <n>, encoded Len = <n>, BCH Val = 0x<hex>` | ints, hex | `tx_packets[].symbol_count`, `.sample_count`, `.encoded_len`, `.bch_val` | Attaches to the packet from the immediately preceding line |
+| `Extended the payload length from <a> to <b>` | ints | `tx_packets[].payload_extended_from/to` | |
+| `Added packet to xmit queue numinqueue = <n>` | bool, int | `tx_packets[].queued = True`, `.numinqueue` | |
+| `ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet` | bool, count | `tx_packets[].queued = False`, `dropped_count` | **Packet-loss metric.** No `packetID` on this line — attributed to the most recently seen TX packet block |
+| `Packet Transmitted :  Rev Val = <n> :  Fwd Val = <n> S11 = <n> dB :  Temp Val = <n>` | ints | `tx_packets[].transmissions[]` (`rev_val`, `fwd_val`, `s11_db`, `temp_val`) | **RF-layer confirmation**, separate from `queued`. A **list** — a packet can have more than one. No `packetID` on this line either, so attribution is positional and not always adjacent to the queue line. Unattributable lines → `orphaned_transmitted_count` |
+| — (derived) | bool | `tx_packets[].transmitted` | `len(transmissions) > 0` |
+| — (derived) | int | `tx_packets[].retransmit_count` | `len(transmissions) - 1`. **Extra confirmations, NOT confirmed RF retries** — a confirmation logged after the next packet began encoding is credited to that next packet. See `parsing-requirements.md` → "Confirmation attribution is positional" |
+
+> **`Temp Val` is not a temperature you can chart alongside the thermal
+> samples below.** It is the radio's own raw scale from a different sensor than
+> `LPD`/`FPD`/`PL`, is not converted to °F, and must never be merged with
+> `temp_samples`.
+
+### Thermal (`temp_samples`)
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `LPD Temp = <f>   FPD Temp = <f>   PL Temp = <f>` | floats (°C in raw log) | `temp_samples[]` (`timestamp`, `lpd_c`, `fpd_c`, `pl_c`) | Convert to °F per project-wide temperature rule. Distinct sensor set from the existing platform's `NRF52`/`Si4460`/`PA` — do not reuse that chart's field names |
+
+---
+
+## Format 6: Next-Gen Radio — Router (ht-router) Log
+
+> **File type:** `.log` (stdout capture, ISO8601-prefixed text)
+> **Platform:** Next-gen radio, network/link layer — spawns and monitors `ht-modem`
+> **Structure:** Two interleaved shapes — discrete `<ISO8601>Z: <message>` event
+> lines, and a repeating ~20-line periodic counter snapshot block.
+>
+> **Status: implemented.** `parser/htrouter.py` → `HtRouterResult` /
+> `RouterStatSnapshot` in `models.py` → `_result_to_dict()` → `HtRouterTab`.
+
+> Timestamps are **ISO8601 with microseconds, `Z`-suffixed (UTC)** — the same
+> style as the TAK server format, distinct from `ht-modem`'s `ctime` style
+> above. See `parsing-requirements.md` → Next-Gen Radio — Router for the full
+> field-by-field parsing rules, including how snapshot blocks are grouped.
+
+Parsed into `HtRouterResult`, attached to `ParseResult.htrouter_result`.
+
+### Identity & Session
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `Starting ht-router (<path>)...` / `ht-router started (pid <n>)` | string, int | `session_start`, `router_pid` | |
+| `nb_modem_start: started ht-modem pid <n>` | int | `modem_pid` | Potential cross-format correlation key to a loaded `ht-modem` session — needs confirmation before relying on it |
+| `reopened log file` | marker | `rotation_markers[]` | Counters reset after this line; treat as a new sub-session boundary, not continuous data |
+
+### Sockets & Protocol Messages
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `local UDP socket <ip>:<port>` | string | `udp_sockets[]` | |
+| `us_warn @ udp_write.486: sendto: (22) Invalid argument` | count | `socket_warning_count` | Repeats identically at startup in both samples — semantics not yet confirmed. **Count only** — the first-seen timestamp is not retained |
+| `ag_warn @ aghub_init.401: created aghub_tick event, aghub <addr>` | string | `aghub_init_addr` | |
+| `client-hdr versflags version <n>, options <y/n>, next-proto <proto> \| mgt-hdr dst <addr>, src <addr>, version <n>, type <type>` | struct | `protocol_messages[]` (`dst`, `src`, `version`, `msg_type`, plus `timestamp`, `io_direction`, `udp_idx`, `peer`, `direction`) | The model field is `msg_type`, not `type`. `io_direction` is input/output through the router; `direction` is the protocol message's own request/response — two different axes, easy to conflate. `peer` is only present on `udp input` lines. Whether `dst`/`src` map onto the existing GID/callsign identity model (see Identity model notes below) is **unconfirmed** |
+| `mgt_hub_forward.548: request type <n> for <addr>: sent to <n> client(s), skipped <n> with no session` | struct | `forward_events[]` | |
+
+### Periodic Stat Snapshot (`RouterStatSnapshot`)
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `input.too_short.link_hdr` / `.link_payload` / `.link_crc` | ints | `stat_snapshots[].input_too_short_link_hdr`, `.input_too_short_link_payload`, `.input_too_short_link_crc` | **Link-layer validity counters.** Absent (`None`) in a session with no RF noise — never `0`. Present in `htrouter_sample3.log` / `sample4_rotated.log`, absent throughout `sample.log` / `sample2.log` |
+| `input.wrong_link_version` | int | `stat_snapshots[].input_wrong_link_version` | Same absence convention |
+| `input.crc_present` / `input.bad_crc` | ints | `stat_snapshots[].input_crc_present`, `.input_bad_crc` | **RF-health signal** — `bad_crc` rises 112 → 130 across `sample3`'s session. Same absence convention |
+| `input.subframe.no_protocol` / `.logical_recv_error` / `.family_recv_error` | ints | `stat_snapshots[].input_subframe_no_protocol`, `.input_subframe_logical_recv_error`, `.input_subframe_family_recv_error` | Same absence convention |
+| `input.subframe.count`, `input.traffic[aggr_next_proto_ag]`, `input.ctl`, `input.sts` | ints | `stat_snapshots[].input_subframe_count`, `.input_traffic_ag`, `.input_ctl`, `.input_sts` | |
+| `input.total_frames` / `input.total_bytes` / `input.total_m2m` | ints | `stat_snapshots[].input_total_frames`, `.input_total_bytes`, `.input_total_m2m` | |
+| `input.m2m_by_type[m2m_type_xmit\|control\|recv\|status\|xmit_status]` | ints | `stat_snapshots[].input_m2m_xmit`, `.input_m2m_control`, `.input_m2m_recv`, `.input_m2m_status`, `.input_m2m_xmit_status` | Five flat fields, not a dict |
+| `output.traffic[aggr_next_proto_ag].ok/fail`, `.ctl.ok/fail`, `.sts.ok/fail` | ints | `stat_snapshots[].output_traffic_ag_ok/_fail`, `.output_ctl_ok/_fail`, `.output_sts_ok/_fail` | Absent in a session that never transmitted |
+| `output.aggregation.subframes/frames`, `.total_bytes` | ints | `stat_snapshots[].output_aggregation_subframes`, `.output_aggregation_frames`, `.output_total_bytes` | |
+| `output.time_outs`, `output.bottom.timed_out` | ints | `stat_snapshots[].output_time_outs`, `.output_bottom_timed_out` | |
+| `output.modem_xmit_failed` | int | `stat_snapshots[].output_modem_xmit_failed` | Clearest cross-reference point to `ht-modem`'s `CSMA QUEUE is Full` drops — correlation feature is future scope, not this parser |
+| `output.overhead[N] ([min, max] bytes) <n>` | struct | `stat_snapshots[].output_overhead` — `Optional[RouterHistogramBucket]` | One histogram bucket, not a scalar: `bucket`, `range_min`, `range_max`, `count` (`RouterHistogramBucket` in `models.py`). Serialized as a nested object, so a consumer reading it as a number gets `undefined` |
+| `output.xmit_completion[N] ([min, max] ms) <n>` | struct | `stat_snapshots[].output_xmit_completion` — `Optional[RouterHistogramBucket]` | Same shape as `output_overhead` above |
+| `output.tap_frames` | int | `stat_snapshots[].output_tap_frames` | |
+| `connected <0\|1>` | bool | `stat_snapshots[].connected` | Terminates each snapshot block; also usable standalone as a connection-state timeline |
+
+> **Grouping requirement:** the ~20 lines above are **one measurement**, not
+> 20 independent events — they must be parsed into a single
+> `RouterStatSnapshot` record per block (grouped by timestamp proximity,
+> ending at `connected`), never stored as flat per-line records. See
+> `parsing-requirements.md` Parsing Rule 1 for this format.
+
+> **Retention — resolved as keep everything.** Sample captures run 24k–138k
+> lines at ~20 lines/snapshot every ~10s, giving 447–2,286 snapshot records per
+> session. All are retained; trimming is left to the UI's existing time-window
+> slider rather than being decided at parse time.
+
+> **Cumulative, not per-interval.** Every counter above is a session-lifetime
+> total. A "total" is the **last** snapshot's value, never a sum across
+> snapshots — summing 2,286 snapshots would overcount by orders of magnitude.
+
+---
+
+## Format 7: TAK Server CoT Event Stream
+
+**File type:** `.json` (array shape) or `.log` (NDJSON shape)
+**Platform:** TAK server (server-side — **not** a device or app log)
+**Structure:** Two observed shapes, same record contents:
+1. **JSON array** of pre-parsed Cursor-on-Target event records.
+2. **JSON Lines / NDJSON** — one object per line, each wrapping the same event
+   in a logging envelope: `{"level":…,"message":{…event…},"timestamp":…}`. Only
+   `message` is unwrapped; `level`/`timestamp` are logger metadata. Unparseable
+   lines are counted and skipped, not fatal.
+
+> The server has already extracted the useful fields; the original CoT XML stays
+> in `raw`. This is the server's JSON export, **not** a raw multicast/UDP CoT
+> capture — that would need a separate ingestion path.
+
+Parsed into `TakEvent` records on `ParseResult.tak_events`, plus one optional
+`TakServerInfo` on `ParseResult.tak_server_info`. Both live in `parser/models.py`.
+
+### Event Fields (`TakEvent`)
+
+| Raw Field | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `time` | ISO-8601 → `%Y-%m-%d %H:%M:%S.%f` | `timestamp` | Device-generated event time. **Required** — record skipped and counted if missing/unparseable |
+| `receivedAt` | same normalization | `received_at` | TAK server receipt time. `""` when absent |
+| — | `round((receivedAt − time) × 1000)` | `latency_ms` | `None` when `receivedAt` absent. **Negative is valid data** — device clock ahead of server (P8) |
+| `category` | verbatim | `category` | `PLI` \| `Marker` \| `Chat` \| `Other` — pre-computed server-side. Defaults to `Other` only when the field is absent |
+| `type` | verbatim | `cot_type` | CoT type code: `a-f-G-U-C` (PLI), `a-f-G-U-C-I` (Marker), `b-t-f` (Chat), `t-x-takp-v` (handshake) |
+| `uid` | verbatim | `uid` | `ANDROID-<hex>`, bare UUID (WebTAK), or `GeoChat.ANDROID-<hex>` |
+| `callsign` | verbatim | `callsign` | `None` for server plumbing. **The only operator identity available** |
+| `nodeType` | verbatim | `node_type` | `Android` \| `WebTAK` \| `Other` |
+| `platform` | verbatim | `platform` | `ATAK-CIV` \| `WebTAK` \| `None`. Often absent (18 of 91 in sample) — never guessed |
+| `parentCallsign` | verbatim | `parent_callsign` | Always `null` in observed samples |
+| `lat` / `lon` | float, or `None` | `lat` / `lon` | Read both-or-neither: if either is absent, null or non-numeric, **both** become `None` — the missing half is never defaulted to `0.0`, which would fabricate a position that passes the `(0,0)` sentinel test. Meaningless when `has_gps_fix` is False |
+| `lat == 0 and lon == 0` | inverted | `has_gps_fix` | CoT no-fix sentinel (paired with a `999999.0`-family `hae`/`ce`/`le` in the raw XML). **Single source of truth — the UI must not re-derive it** |
+| `raw` | verbatim | `raw_cot` | Full CoT XML. Holds everything not promoted to a field: `<status battery=…>`, `<takv device=… os=…>`, `<track speed=… course=…>`, GeoChat `<remarks>` |
+
+### Server Info (`TakServerInfo`)
+
+| Raw Source | Parsed As | Model Field | Notes |
+|-----------|-----------|-------------|-------|
+| `serverVersion="…"` in the `raw` XML of the first `Other` record | regex | `tak_server_info.server_version` | e.g. `5.6-RELEASE-57-HEAD` |
+| `apiVersion="…"` in the same record | regex | `tak_server_info.api_version` | e.g. `3` |
+
+> A stream with no `t-x-takp-v` handshake record yields `tak_server_info = None`.
+> Both fields come from **one** record — the handshake is not repeated.
+
+### Derived Collections (`ParseResult` properties)
+
+| Property | Definition | Notes |
+|----------|-----------|-------|
+| `tak_pli_events` | `category == "PLI"` | |
+| `tak_chat_events` | `category == "Chat"` | Envelope only — bodies not extracted |
+| `tak_no_fix_events` | `not has_gps_fix` **and** `category in ("PLI", "Marker")` | **Deliberately scoped** to the categories expected to carry a position. Chat/server-control events have none to miss |
+| `tak_unique_callsigns` | distinct non-empty `callsign` | Operator count; excludes the handshake record |
+| `tak_latency_ms_values` | non-`None` `latency_ms` | Feeds avg/max/min and the negative count |
+
+> **Not extracted from `raw_cot`:** GeoChat `<remarks>` message bodies, `<status
+> battery>`, `<takv>` device/OS strings, and `<track>` speed/course. All present
+> in the XML, none promoted to fields in this version. Both gaps are reported in
+> `parse_errors` as `DATA LIMITATION —` entries; the telemetry entry names only
+> the elements a given stream actually carries, with per-element counts.
+
+### Parsed but not serialized
+
+`raw_cot` is populated by the parser and declared on `TakEvent`, but
+`_result_to_dict()` **deliberately omits it** — the full CoT XML would dominate
+the payload for no consumer, and `tests/test_parse_route.py` pins the exact
+serialized key set so it can't drift back in. The practical consequence is that
+everything listed in the note above is unreachable from the UI *and* from an
+export, not merely un-promoted: surfacing any of it means extracting it in the
+parser first. Both `DATA LIMITATION` entries say so.
+
+---
+
 ## Derived / Computed Fields
 
 These fields are computed by the parser or API layer — they do not appear directly in the raw log.
@@ -743,6 +963,12 @@ These fields are computed by the parser or API layer — they do not appear dire
 | `summary.sdk_error_count` (ATAK) | `atak_sdk_error_summary.total_count` | Total sdkError records | Informational — baseline unknown |
 | `summary.radio_types` (ATAK) | `atak_sdk_error_summary.radio_types` | Sorted distinct radioType values | e.g. `["PRO_X_2"]` |
 | `summary.ble_fail_count` | ATAK: `counts_by_tag` `ERROR\|BLE` entries, else `deviceDisconnected` count only when no SDK 2.0 summary; diagnostic/rsdk: `len(ble_fail_events)`; relay_manager: absent | BLE failures for the Health Score | Feeds BLE dimension; `> 0 = fail` threshold pending validation |
+| `summary.total_events` (TAK) | `len(tak_events)` | Count of parsed CoT records | Skipped malformed records are not included |
+| `summary.pli_count` / `chat_count` / `marker_count` / `other_count` / `unrecognized_count` (TAK) | `category` counts | One per category | Uses the `is_marker` / `is_server_control` / `is_unrecognized_category` properties. **All five must sum to `total_events`** — `unrecognized_count` exists so an open-set category value can't fall through every bucket and break that. `other_count` means *server control* specifically, not "everything else" |
+| `summary.unique_callsigns` (TAK) | `len(tak_unique_callsigns)` | Distinct operators on the server | Not a radio count — one operator may change radios. **Per-file count, so it must not be summed across files** — counts can't be unioned, only the underlying sets can. The tab therefore derives this one from `tak_events`, unlike the latency stats below |
+| `summary.no_fix_count` (TAK) | `len(tak_no_fix_events)` | **PLI/Marker only** | The `parse_errors` sentence is derived from the same property, so its leading number always equals this value; other categories appear in a separate trailing clause. Counts both causes of "no usable position" — the `(0,0)` sentinel and an incomplete lat/lon pair — which `parse_errors` then distinguishes in two entries |
+| `summary.avg_latency_ms` / `max_latency_ms` / `min_latency_ms` (TAK) | `tak_latency_ms_values` | Mean (1 dp) / max / min | `None` when no record has both timestamps. **These three** are read by the TAK tab's KPI row rather than re-derived from `tak_events` — re-deriving is how the displayed average and the exported one came to round differently. Across files: min/max take the outer bound, the average is weighted by each file's latency sample count |
+| `summary.negative_latency_count` (TAK) | `latency_ms < 0` | Clock-skew indicator | Device clock ahead of server — real data, not an error (P8) |
 
 ---
 
@@ -761,6 +987,23 @@ These fields are computed by the parser or API layer — they do not appear dire
 | **Platform** | iOS only | iOS or Android | Android only |
 | **Timestamps include year** | ✅ | ✅ | ✅ (ATAK) / ❌ (Relay Health Manager ADB logs) |
 
+### TAK Server — why it sits outside that table
+
+The three columns above all describe **one radio's view of itself**. A TAK
+stream is the server's view of many clients, so most rows have no counterpart
+rather than a different value:
+
+| Topic | TAK Server |
+|-------|-----------|
+| **Temperature / battery / thermal** | ❌ Not present — no device telemetry at all |
+| **RSSI / hop count** | ❌ Not present — application layer, after mesh delivery |
+| **Radio identity** | ❌ No serial, GID or firmware version. Callsign + CoT `uid` only |
+| **Callsign availability** | ✅ Populated (`None` only on the server handshake record) |
+| **Sent vs received** | N/A — the server receives everything; there is no sender/receiver split |
+| **Position** | ✅ On PLI and Marker; `(0,0)` sentinel means no fix |
+| **Timestamps include year** | ✅ ISO-8601 UTC, wall clock. Two of them: device `time` and server `receivedAt` |
+| **Health Score** | ❌ Excluded (`HEALTH_FORMATS`) — carries none of the five dimension inputs |
+
 ---
 
-_Last updated: 2026-06-05_
+_Last updated: 2026-08-24_

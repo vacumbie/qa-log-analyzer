@@ -13,6 +13,9 @@
 - [Pro+ Application](#pro-application)
 - [Relay Health Manager](#relay-health-manager)
 - [Relay Firmware (UART/USB Debug) Log](#relay-firmware-uartusb-debug-log)
+- [Next-Gen Radio — Modem (ht-modem) Log](#next-gen-radio--modem-ht-modem-log)
+- [Next-Gen Radio — Router (ht-router) Log](#next-gen-radio--router-ht-router-log)
+- [TAK Server (CoT Event Stream)](#tak-server-cot-event-stream)
 - [Shared Output Requirements](#shared-output-requirements)
 - [Known Limitations](#known-limitations)
 
@@ -29,6 +32,14 @@ The log parsing tool accepts logs from the following goTenna applications:
 | 3 | Relay Health Manager | Android *(iOS TBD)* | Android logcat (`com.gotenna.relaymanager`) | `parser/relay_manager.py` ✅ |
 | 4 | goTenna Pro+ diagnostic export | iOS, Android | Block-format diagnostic export | `parser/diagnostic.py` ✅ *(detection fallback)* |
 | 5 | Relay radio firmware | Relay radio | UART/USB serial debug console | `parser/fw_log.py` ✅ *(detection priority 1)* |
+| 6 | Next-Gen Radio — Modem | Next-gen radio (SDR/FPGA) | `ht-modem` process log, ctime-style stdout capture | `parser/htmodem.py` ✅ *(detection priority 2)* |
+| 7 | Next-Gen Radio — Router | Next-gen radio (SDR/FPGA) | `ht-router` process log, ISO8601 stdout capture | `parser/htrouter.py` ✅ *(detection priority 3)* |
+| 8 | TAK server | Server-side (not a device) | CoT event stream, pre-parsed JSON export | `parser/tak.py` ✅ *(detection priority 4, immediately ahead of ATAK)* |
+
+> **Format 8 is the first server-side source.** Every other format is a device or
+> app log describing one radio's own view. A TAK stream is the server's view of
+> many devices at once, so it carries no radio identity (no serial, no GID, no
+> firmware version) and contributes nothing to the Health Score.
 
 ---
 
@@ -321,11 +332,12 @@ misleading 5/5. See the Health Score spec in `ui-requirements.md` (section 10).
 - **Relay Health Manager — iOS:** Not yet confirmed whether an iOS version exists.
 - **Pro+ diagnostic (block format) — firmware 3.1.11 omits originator identity:** Some firmware-3.1.11 diagnostic logs omit the originator callsign and GID from Received Message blocks, so the sender of those messages cannot be identified. `parser/diagnostic.py` now surfaces this in `parse_errors` with a `DATA LIMITATION —` entry, emitted **only when it actually manifests** (a Received Message block carrying neither originator identity field) and reporting the affected count (`{n} of {total}`). Logs that include the fields emit nothing.
 - **Android ATAK Plug-in v3.0 — early integration (brand new FW/radio, expect churn):** Filenames drop the `ATAK_` segment (both conventions now accepted). `senderCallsign` is populated for the first time (was always empty pre-v3.0) and is used as a `device.callsign` fallback. Some early builds emit **zero device-health (`connectionState`) records** for a session — no battery/thermal/firmware/radio-health data at all; `parser/atak.py` surfaces this via a `DATA LIMITATION —` entry when it happens. RSSI has also been observed as always `0` in early v3.0 captures. See `docs/atak_v3_early_integration_notes.md` for the running baseline of what's actually available as the plugin/FW matures.
+- **TAK server — server-side viewpoint, no radio identity:** The first non-device format. No serial, GID, firmware version, battery, thermal, RSSI or hop count — identity is callsign + CoT `uid` only, so it is excluded from the Health Score. Position uses the CoT `(0,0)` no-fix sentinel; `latency_ms` can legitimately be negative (device clock ahead of server, tracked as P8); GeoChat `<remarks>` bodies are not extracted (surfaced as a `DATA LIMITATION —` entry). See [TAK Server (CoT Event Stream)](#tak-server-cot-event-stream).
 - All temperatures stored internally in Celsius and must be converted to Fahrenheit for display.
 
 ---
 
-_Last updated: 2026-07-29_
+_Last updated: 2026-08-24_
 
 ---
 
@@ -1024,6 +1036,664 @@ catch-all `diagnostic` parser never sees these because fw_log is checked first.
 
 ---
 
+## Next-Gen Radio — Modem (ht-modem) Log
+
+> **Status: implemented.** `parser/htmodem.py` → `HtModemResult` in
+> `models.py` → `_result_to_dict()` → `HtModemTab`. 34 tests in
+> `tests/test_htmodem.py` over two real captures (`htmodem_sample.log`,
+> `htmodem_sample2.log`) plus a synthetic edge-case fixture.
+
+### Overview
+
+The next-gen radio platform (SDR/FPGA-based, distinct hardware from the
+existing goTenna Pro+ NRF52/Si4460/PA radio) runs two independent processes,
+each with its own log: `ht-modem` (this section) and `ht-router` (next
+section). `ht-modem` is the SDR/RF layer — it owns the AD936X transceiver
+(via LIBIIO) and the Zynq FPGA/PL fabric, and is responsible for TX/RX
+encoding, frequency and power control, and radio-side channel access
+(CSMA). Parsed by a new `parser/htmodem.py` (not yet created). This is a
+**separate format from `ht-router`**, not a sub-type — the two processes have
+unrelated timestamp styles, message shapes, and failure modes, and a QA
+engineer investigating the modem does not want router noise mixed in (see
+UI requirement below).
+
+### Log Format
+
+```
+<ctime timestamp> : <message>
+```
+
+Example: `Wed Aug 12 05:13:23 2026 : FPGA Version is correct`
+
+- Timestamp is **wall-clock**, second precision, in the platform's local
+  `ctime()` format (`%a %b %d %H:%M:%S %Y`) — no timezone marker, no
+  milliseconds. This is a different style from every existing format's
+  timestamps and needs its own parse routine.
+- `<message>` is free text. Several message shapes recur often enough to
+  parse as structured fields (see below); everything else is retained only
+  as an unparsed line count.
+- The literal first line, `Start of log <ctime>`, marks session start and is
+  not itself a timestamped message line.
+
+### Detection
+
+Proposed: scan the first ~30 non-empty lines for the `<ctime> : ` prefix
+pattern combined with at least one of the modem-specific markers (`FPGA
+Version`, `AD936X`, `LIBIIO`, `ht-modem`). Needed to avoid colliding with
+`diagnostic`'s block format, which is also loosely timestamp-prefixed text.
+Exact priority ordering relative to the other five formats — including
+`ht-router` — to be finalized when the detector is implemented; likely
+early (high specificity, low collision risk), similar to `fw_log`.
+
+### Fields to Parse
+
+| Source line | Parsed into | Notes |
+|-------------|-------------|-------|
+| `Start of log <ctime>` | `session_start` | First line of the file |
+| `FPGA Version is correct` | `fpga_version_ok` (bool) | Absence of this line is itself notable |
+| `Setting filter bank to <name> <range>MHZ` | `filter_bank`, `filter_range_mhz` | |
+| `LIBIIO : version <v> detected` | `libiio_version` | |
+| `Found <N> devices` | `devices_found` | Appears more than once per session (IIO devices, then later AD5592 devices) — **last-seen-wins is wrong here**; needs a way to distinguish which init phase each occurrence belongs to |
+| `Could not find the AD936X PHY device` through the following `ERROR : problem setting/enabling …` run | `ad936x_init_errors[]` | **Hardware fault cascade** — when this fires, essentially every subsequent RF init step also errors (see Known Limitations). Surface as a single `parse_errors` entry with the count, not 20+ individual error rows |
+| `ERROR : problem setting RSSI mode` (repeats 5×) | counted, not itemized | De-duplicate identical repeated error lines rather than storing each occurrence |
+| `Setting clock calibration offset to <n>` | `clock_cal_offset` | |
+| `Read an SI4460 calibration offset of <n>` | `si4460_cal_offset` | Confirms this next-gen platform still carries a Si4460 alongside the AD936X — worth flagging, not assuming it's dead hardware from the old platform |
+| `Error connecting to gpsd` | `gpsd_connect_error` (bool) | |
+| `Setting RX freq = <hz>.00` / `Setting TX freq = <hz>.00` | `freq_changes[]` (`timestamp`, `direction`, `hz`) | Multiple per session as control commands arrive |
+| `Received Control packet, control type = <n>` | **not parsed** | No `control_packets` collection was ever built, and this row previously implied one. Deliberate: `control type = 10` is seen paired with both Transmit Level and SETTXRXFREQ commands, so the type alone does not disambiguate the command — the *following* line does, and `freq_changes`/`power_changes` already capture it. Parsing this line would add a field whose only honest value is "ambiguous" |
+| `Setting TX power level mode to fixed, Xmit level to <n>.00` | `power_changes[]` (`timestamp`, `xmit_level`) | |
+| `Received packet for encoding : packetID = <n> chdesc = <n> modMode = <n> FECMode = <n> priority = <n> localFlag = <n> dataLength = <n> bytes` | `tx_packets[]` (`TxPacket`) | One per TX attempt |
+| `symbol count (I/Q Pairs) after postamble = <n>, sample count = <n>, encoded Len = <n>, BCH Val = 0x<hex>` | fields on the matching `TxPacket` (by adjacency — always the line immediately following `Received packet for encoding`) | |
+| `Added packet to xmit queue numinqueue = <n>` | `tx_packets[].queued` = True, `numinqueue` | |
+| `ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet` | `tx_packets[].queued` = False, `dropped_count` (+1) | **Packet-loss metric.** This line does not repeat the `packetID`, so it must be attributed to the most recent `Received packet for encoding` block, not parsed standalone |
+| `Packet Transmitted :  Rev Val = <n> :  Fwd Val = <n> S11 = <n> dB :  Temp Val = <n>` | `tx_packets[].transmissions[]` (`HtModemTransmitConfirmation`: `rev_val`, `fwd_val`, `s11_db`, `temp_val`) | **RF-layer confirmation** — a separate, later event from `queued`. Like the CSMA drop line it carries **no `packetID`**, so attribution is positional. Stored as a **list**, not a scalar. `temp_val` is the radio's own raw scale from a **different sensor** than `LPD`/`FPD`/`PL` below — never merge or compare the two. Rev/Fwd are almost certainly reflected/forward power in raw ADC counts, unverified against a hardware spec. See "Confirmation attribution is positional" below before using `retransmit_count` |
+| `Extended the payload length from <a> to <b>` | `tx_packets[].payload_extended_from/to` | Precedes its packet's `Received packet for encoding` line |
+| `LPD Temp = <f>   FPD Temp = <f>   PL Temp = <f>` | `temp_samples[]` (`timestamp`, `lpd_c`, `fpd_c`, `pl_c`) | Periodic (~10s), Zynq MPSoC thermal zones — **Celsius in the raw log**, convert to °F per the project-wide temperature rule. `LPD`/`FPD`/`PL` are new sensor names, not the existing platform's `NRF52`/`Si4460`/`PA` — do not conflate in shared temperature-chart code |
+
+### Parsing Rules
+
+1. Timestamp parsing uses `ctime()` format, not ISO8601 — needs its own
+   regex/`strptime` distinct from every other format's timestamp handling.
+2. The AD936X init-failure cascade (a contiguous run of `ERROR : problem
+   ...` lines immediately following `Could not find the AD936X PHY device`)
+   is collapsed into one `parse_errors` entry with a count, not stored
+   line-by-line — mirrors how `fw_log.py` already collapses repeated
+   error/warn lines into `error_counts`/`warn_messages`.
+3. `CSMA QUEUE is Full, dropping packet` has no `packetID` of its own; it
+   must attach to the most recently seen `Received packet for encoding`
+   block. If a drop line appears with no preceding TX packet block in the
+   current session, log it as an orphaned drop rather than silently
+   dropping the drop-count itself.
+4. Temperatures are Celsius in the raw log; convert to Fahrenheit at parse
+   time or display time — follow whichever convention `fw_log.py`/existing
+   temp-chart code already uses so the two formats stay consistent.
+5. `Packet Transmitted` follows the same no-`packetID` rule as the CSMA drop
+   line: attach it to the most recently seen `Received packet for encoding`
+   block, and count it as an orphaned confirmation
+   (`orphaned_transmitted_count`) if no packet block is open. It is **not**
+   always adjacent to its packet's queue line — 2,585 occurrences vs. 2,288
+   immediately adjacent in the real capture, since a temp reading or other
+   line can intervene — so strict adjacency would lose most of them.
+
+#### Confirmation attribution is positional — `retransmit_count` is not a retry count
+
+Because the confirmation line carries no `packetID`, and the modem sometimes
+begins encoding the **next** packet before the previous one's confirmation is
+logged, a confirmation can be credited to the wrong packet. The shift is
+visible directly in `htmodem_sample2.log` around packets 289/290: 289 is
+received and queued, 290 is received and queued, and only then do two
+`Packet Transmitted` lines appear — both attributed to 290, leaving 289 with
+none.
+
+The population-level signature in that capture:
+
+| Observation | Count |
+|---|---|
+| TX packets | 2,585 |
+| Confirmations parsed | 2,585 (2,584 attributed + 1 orphaned) |
+| Packets with **no** confirmation | 43 |
+| Packets with **two** confirmations | 42 |
+| …of those 42, directly following a zero-confirmation packet | 40 |
+
+The near-exact pairing is the tell: most "extra" confirmations are the
+previous packet's, not an RF retry. So `retransmit_count` means *extra
+confirmations attributed to this packet*, nothing more, and
+`parse_errors` reports the ambiguity as a `DATA LIMITATION` rather than
+claiming a retransmission occurred. (An earlier version of that entry did
+claim it — "a real RF-layer retransmission, not a duplicate log line" — which
+the same capture contradicts.)
+
+Both confirmations are still kept rather than overwritten: whichever packet a
+given confirmation truly belongs to, discarding one would lose a real
+observation. Resolving the attribution properly would require matching
+`packetID`s against the transmit queue, which these lines do not carry —
+pending either a firmware change or a documented ordering guarantee.
+
+### Known Limitations — Next-Gen Radio Modem Log
+
+- **Confirmation attribution is positional, not by `packetID`** — so
+  `retransmit_count` counts extra confirmations, not confirmed RF retries.
+  Reported as a `DATA LIMITATION` in `parse_errors`. See "Confirmation
+  attribution is positional" above for the evidence.
+- **`Packet Transmitted` absence is indistinguishable from no transmission.**
+  A log with TX packets and zero confirmations (`htmodem_sample.log` — 63
+  packets, 0 confirmations) emits no `parse_errors` entry, so "this firmware
+  build doesn't log confirmations" reads the same as "nothing transmitted".
+  The sibling `temp_samples` case *does* emit one; the asymmetry is open.
+- **Unset RTC.** `htmodem_sample2.log` carries year-2036 timestamps (`Mon Apr 28
+  … 2036`) because the radio's clock was never set; `htmodem_sample.log` is
+  real-dated (2026). The two ht-router 2036 captures (`sample3`,
+  `sample4_rotated`) are the same radio. Affected sessions cannot be pinned to
+  absolute time, and loading one alongside a real-dated log gives a ten-year
+  time-window range. This is why `HtModemTempOverTime` plots elapsed time
+  rather than absolute dates — see `docs/ui-requirements.md`.
+- **`Found <N> devices` is ambiguous per-occurrence** — appears at least
+  twice (IIO device enumeration, then AD5592 device enumeration) with no
+  distinguishing context beyond surrounding lines. A naive "last value
+  wins" parse would silently misattribute the count.
+- **Hardware-fault cascade produces ~20 near-duplicate error lines** in the
+  sample when the AD936X PHY device isn't found — this looks like two
+  dozen distinct problems but is really one root cause. Parsing rule 2
+  above addresses this, but needs validation against a *successful* init
+  (no AD936X failure) to confirm the parser doesn't assume the cascade
+  always happens.
+- **Single-fixture validation** — everything above is derived from one
+  session capture (`ht-modem.log`, ~40 minutes, Aug 12 2026). A second
+  real log — ideally one without the AD936X init failure — is needed
+  before this is considered proven.
+
+### Sample File Observations (ht-modem.log)
+
+- Session: `Wed Aug 12 05:13:23 2026` → last line `05:49:44 2026` (~36 min).
+- FPGA version check passes; AD936X PHY device **not found**, triggering
+  ~20 cascading `ERROR : problem …` lines through GPIO/AUXDAC/RSSI/channel
+  setup.
+- `gpsd` connection failed (`Error connecting to gpsd`).
+- Multiple TX/RX frequency changes (420 MHz → 421 MHz range) and power
+  level changes (30–34) via `Received Control packet, control type = 10`.
+- Numerous `CSMA QUEUE is Full, dropping packet` events — packet loss is
+  a recurring condition in this capture, not a one-off.
+- Temperature samples every ~10s for the full session; `LPD`/`FPD`/`PL`
+  all in the high-40s °C range, no anomalous readings observed.
+
+---
+
+## Next-Gen Radio — Router (ht-router) Log
+
+> **Status: implemented.** `parser/htrouter.py` → `RouterStatSnapshot` /
+> `HtRouterResult` in `models.py` → `_result_to_dict()` → `HtRouterTab`. 36
+> tests in `tests/test_htrouter.py` over four real captures plus a synthetic
+> edge-case fixture.
+
+### Overview
+
+`ht-router` is the network/link-layer process on the same next-gen radio
+platform as `ht-modem` (see previous section) — it manages UDP-based
+client/management interfaces, forwards protocol messages between clients
+and the radio, and **spawns and monitors the `ht-modem` process itself**
+(`nb_modem_start: started ht-modem pid <n>`). Parsed by a new
+`parser/htrouter.py` (not yet created). Kept as a **separate format from
+`ht-modem`**, not a sub-type, for the same reason: different timestamp
+style, different message shapes, different failure modes, and a QA
+engineer diagnosing link-layer throughput issues does not want RF-layer
+init noise mixed in.
+
+### Log Format
+
+Two distinct line shapes appear interleaved in the same file:
+
+**1. Discrete protocol/event lines:**
+```
+<ISO8601 timestamp>Z: <message>
+```
+Example: `2026-08-12T05:13:23.447396Z: ag_warn @ aghub_init.401: created aghub_tick event, aghub 0x5595d0a700`
+
+**2. Periodic counter snapshot** — not one line, a **repeating block** of
+~20 individually timestamped lines emitted together roughly every 10
+seconds:
+```
+<ts>Z: input.too_short.link_hdr <n>
+<ts>Z: input.too_short.link_payload <n>
+<ts>Z: input.too_short.link_crc <n>
+<ts>Z: input.wrong_link_version <n>
+<ts>Z: input.crc_present <n>
+<ts>Z: input.bad_crc <n>
+<ts>Z: input.subframe.no_protocol <n>
+<ts>Z: input.subframe.logical_recv_error <n>
+<ts>Z: input.subframe.family_recv_error <n>
+<ts>Z: input.subframe.count <n>
+<ts>Z: input.traffic[aggr_next_proto_ag] <n>
+<ts>Z: input.ctl <n>
+<ts>Z: input.sts <n>
+<ts>Z: input.total_frames <n>
+<ts>Z: input.total_bytes <n>
+<ts>Z: input.total_m2m <n>
+<ts>Z: input.m2m_by_type[m2m_type_xmit] <n>
+<ts>Z: input.m2m_by_type[m2m_type_control] <n>
+<ts>Z: input.m2m_by_type[m2m_type_recv] <n>
+<ts>Z: input.m2m_by_type[m2m_type_status] <n>
+<ts>Z: input.m2m_by_type[m2m_type_xmit_status] <n>
+<ts>Z: output.traffic[aggr_next_proto_ag].ok <n>
+<ts>Z: output.traffic[aggr_next_proto_ag].fail <n>
+<ts>Z: output.ctl.ok <n>
+<ts>Z: output.ctl.fail <n>
+<ts>Z: output.sts.ok <n>
+<ts>Z: output.sts.fail <n>
+<ts>Z: output.aggregation.subframes <n>
+<ts>Z: output.aggregation.frames <n>
+<ts>Z: output.total_bytes <n>
+<ts>Z: output.time_outs <n>
+<ts>Z: output.bottom.timed_out <n>
+<ts>Z: output.modem_xmit_failed <n>
+<ts>Z: output.overhead[N] ([min, max] bytes) <n>
+<ts>Z: output.xmit_completion[N] ([min, max] ms) <n>
+<ts>Z: connected <0|1>
+```
+
+- Timestamps are **ISO8601 with microseconds, `Z`-suffixed** (UTC) — the
+  same style as the TAK server format, unlike `ht-modem`'s `ctime` style.
+- `reopened log file` is a session/rotation boundary marker — the counters
+  reset to (or near) zero immediately after it. Treat as a new sub-session,
+  not a continuation, when computing rates.
+- Each snapshot's ~20 lines share the same or nearly the same timestamp
+  (microsecond drift between lines in a block); group by proximity, not
+  exact equality.
+
+### Detection
+
+Proposed: the `input.*`/`output.*` counter-key vocabulary (`input.total_m2m`,
+`output.modem_xmit_failed`, `connected`) is highly distinctive and should
+not collide with any other format's content. Filename convention
+(`ht-router*.log`) can serve as a secondary signal, mirroring how `tak`
+detection uses both content and a filename hint. Ordering relative to
+`ht-modem` detection needs both parsers to exist before it can be finalized
+— they must not falsely match each other's files.
+
+### Fields to Parse
+
+| Source line | Parsed into | Notes |
+|-------------|-------------|-------|
+| `Starting ht-router (<path>)...` / `ht-router started (pid <n>)` | `session_start`, `router_pid` | |
+| `nb_modem_start: started ht-modem pid <n>` | `modem_pid` | Confirms which `ht-modem` session (if also loaded) belongs to this router session — a potential cross-format correlation key, similar to `logId` in the ATAK/RSDK cross-format notes |
+| `local UDP socket <ip>:<port>` | `udp_sockets[]` | One per client-type interface at startup |
+| `us_warn @ udp_write.486: sendto: (22) Invalid argument` | `socket_warnings[]` | Repeats identically at startup in the sample (5×) — likely one per not-yet-connected socket; needs field confirmation |
+| `ag_warn @ aghub_init.401: created aghub_tick event, aghub <addr>` | `aghub_init_addr` | |
+| `client-hdr versflags version <n>, options <y/n>, next-proto <proto> \| mgt-hdr dst <addr>, src <addr>, version <n>, type <type>` | `protocol_messages[]` (`ProtocolMessage`) | `dst`/`src` are hex node addresses (`0x00000006` etc.) — same identity space as callsign/GID in other formats? Needs field confirmation against `log-field-definitions.md`'s identity model before assuming so |
+| `mgt_hub_forward.548: request type <n> for <addr>: sent to <n> client(s), skipped <n> with no session (an unstarted target sees nothing)` | `forward_events[]` | |
+| `reopened log file` | session boundary marker | See Log Format notes above |
+| `input.*` / `output.*` counter block | `stat_snapshots[]` (`RouterStatSnapshot`) | See Parsing Rules — this is the highest-volume, highest-design-risk part of this format |
+| `connected <0\|1>` | `stat_snapshots[].connected` (bool) | Final line of each snapshot block; also useful standalone as a connection-state timeline |
+
+### Parsing Rules
+
+1. **Snapshot blocks must be grouped, not treated as independent lines.**
+   Group consecutive `input.*`/`output.*`/`connected` lines (by timestamp
+   proximity, terminating at the `connected <0|1>` line) into one
+   `RouterStatSnapshot` record per group, not ~20 separate unrelated
+   records — otherwise the resulting series is 20× too many "events" and
+   loses the fact that they're one measurement.
+2. Given the file sizes involved (60k+ lines in the smaller sample), decide
+   **before implementation** whether every snapshot is retained or whether
+   downsampling/aggregation happens at parse time — this is a real
+   performance and payload-size question, not a stylistic one. Flag to
+   Valerie as an open decision, not something to default silently.
+3. `reopened log file` resets the counters; do not compute a delta or
+   rate across a reopen boundary as if it were continuous.
+4. `output.modem_xmit_failed` is the single clearest cross-reference point
+   to `ht-modem`'s `CSMA QUEUE is Full, dropping packet` — when both logs
+   are loaded together, a future correlation feature could compare these,
+   but that is out of scope for the initial parser.
+
+### Known Limitations — Next-Gen Radio Router Log
+
+- **Snapshot schemas differ between sessions.** A session that never
+  transmitted omits the whole `output.*` group, and a session with no RF
+  noise omits the nine `input.*` validity/error counters. Absent fields are
+  `None`, never `0` — "not reported" and "measured, none seen" are different
+  facts. `htrouter_sample.log` / `sample2.log` carry no `input.*` error
+  counters; `sample3.log` / `sample4_rotated.log` do.
+- **Snapshot volume is large.** Sample files run 24k–138k lines; at ~20 lines
+  per snapshot every ~10s a capture holds 447–2,286 snapshot records.
+  Resolved as **keep all snapshots** — trimming is deferred to the UI's
+  existing time-window slider rather than being decided in the parser.
+- **Link-layer counters are cumulative, like every other snapshot field.** A
+  total is the last snapshot's value, never a sum across snapshots.
+- **Socket warning semantics unconfirmed** — `us_warn @ udp_write.486:
+  sendto: (22) Invalid argument` repeats identically 5× at startup with no
+  further context distinguishing which socket/interface each belongs to.
+- **`dst`/`src` address space unconfirmed** — whether protocol-message
+  `dst 0x00000006` / `src 0x00000004` map onto the same GID/callsign
+  identity model used elsewhere is not yet verified against real device
+  correlation data.
+- **Two-file validation, same capture window** — both provided samples
+  (`ht-router.log`, `ht-router__1_.log`) appear to be from related or
+  overlapping sessions (both start ~Aug 12 2026, 05:13). A capture from a
+  clearly distinct session/device would strengthen validation.
+
+### Sample File Observations (ht-router.log, ht-router__1_.log)
+
+- `ht-router__1_.log`: session start `2026-08-12T05:13:22Z`, spawns
+  `ht-modem` pid 580 within ~1 second of its own start. 61,716 lines.
+- `ht-router.log`: starts `2026-08-20T20:01:20Z` with an immediate
+  `reopened log file` as its first line — this sample begins mid-rotation,
+  not at process start. 24,312 lines.
+- `connected` toggles between `0` and `1` across both samples — a
+  connection-state timeline is directly derivable.
+- `output.modem_xmit_failed` is non-zero in observed snapshots, consistent
+  with the packet drops seen in the `ht-modem.log` sample from the same
+  window.
+## TAK Server (CoT Event Stream)
+
+### Overview
+
+A TAK server aggregates Cursor-on-Target (CoT) events from every connected
+client. This is the **first server-side log source** in the tool — every other
+format is one device describing itself. Parsed by `parser/tak.py`.
+
+Consequences of being server-side, all of which the UI must respect:
+
+- No radio identity. No serial number, no GID, no firmware version, no battery
+  or thermal telemetry. Identity is **callsign + CoT `uid`** only.
+- No radio-level RF data. No RSSI, no hop count, no TX/RX outcome — the server
+  sees application-layer events after the mesh has already delivered them.
+- Therefore **excluded from the Health Score** (not in `HEALTH_FORMATS`), for
+  the same reason `relay_manager` is: it carries none of the five dimension
+  inputs, so an unscoped card would default-pass and show a misleading 5/5.
+
+### Log Format
+
+**Two shapes are observed in the wild, both real.** The record contents are
+identical; only the container differs, and `_load_records()` in `parser/tak.py`
+normalizes both to the same list of event dicts.
+
+**Shape 1 — JSON array** (`tak-stream-*.json`, the original sample):
+
+```json
+[
+  {
+    "callsign": "PICKUP", "category": "PLI",
+    "lat": 30.153289, "lon": -85.664925,
+    "nodeType": "Android", "parentCallsign": null, "platform": "ATAK-CIV",
+    "raw": "<event version=\"2.0\" uid=\"ANDROID-9c47…\" type=\"a-f-G-U-C\" …>…</event>",
+    "receivedAt": "2026-07-30T19:27:01.907Z",
+    "time": "2026-07-30T19:24:54Z",
+    "type": "a-f-G-U-C", "uid": "ANDROID-9c47b9ce85beb696"
+  }
+]
+```
+
+**Shape 2 — JSON Lines / NDJSON** (`tak-capture-*.log`, a real production
+capture): one JSON object per line, each wrapping the same event shape inside a
+**logging-framework envelope**:
+
+```json
+{"level":"info","message":{ …same fields as above… },"timestamp":"2026-08-25T14:56:51.402Z"}
+{"level":"info","message":{ … },"timestamp":"2026-08-25T14:56:52.113Z"}
+```
+
+Only `message` is unwrapped — the outer `level` and `timestamp` are logger
+metadata, not TAK data. Lines that don't parse as JSON, or whose `message` isn't
+an object, are **counted and skipped** rather than aborting the file, and the
+count is reported in `parse_errors`. A file whose lines all fail yields a "no
+valid CoT event records" entry, not a silent empty result.
+
+The server has already extracted the useful fields; the original CoT XML is
+retained in `raw` for anything the derived fields don't cover (WebTAK-specific
+`detail` children, `<status battery=…>`, `<takv>` device strings).
+
+> **This is the server's JSON export, not a raw CoT capture.** A raw
+> multicast/UDP XML stream would need a separate ingestion path — `parse_tak_log`
+> would not read it. That holds for both shapes.
+
+### Detection
+
+Priority **4**, immediately ahead of ATAK. `is_tak_log()` strips leading
+whitespace and branches on whether the first character is `[` or `{`:
+
+- **`[`-rooted** — requires all three of `"receivedAt"`, `"nodeType"` and
+  `"category"` within the first 4000 characters.
+- **`{`-rooted (NDJSON)** — requires the **first non-empty line** to contain
+  `"message"` *and* all three signature keys. Scoping to one line matters: it
+  stops another JSON-Lines format that merely mentions those key names somewhere
+  in the file from false-positiving.
+
+Reading the *first non-empty* line rather than line 0 is deliberate. An earlier
+version read `content.split("\n", 1)[0]`, so a capture with a leading blank line
+— what concatenating, re-saving or rotating a file produces — made the envelope
+test see `""`, decline the NDJSON branch, and fall through to the `diagnostic`
+catch-all, where an 804-event capture parsed as empty with no error at all.
+
+Filenames containing `tak-stream`, `tak_server` or `tak-server` also route here.
+
+Both TAK and ATAK are JSON, so ordering matters. **The root character no longer
+separates them** — TAK is now newline-delimited JSON too — so the safety of the
+order rests entirely on the **disjoint signature keys**, checked within a single
+line for the NDJSON shape:
+
+| | TAK stream | ATAK plugin log |
+|---|---|---|
+| Signature keys | `receivedAt`, `nodeType`, `category` | `logId`, `connectionState`, `atakVersion` |
+| Root | JSON array **or** NDJSON | Newline-delimited JSON / array |
+| Viewpoint | Server, many devices | One device, itself |
+
+Because the shapes now overlap, the key disjointness is the *only* thing
+keeping an ATAK log out of the TAK parser.
+`test_ndjson_branch_does_not_capture_atak_logs` in `tests/test_detect_format.py`
+pins that against a bare `{`-rooted ATAK record, and two parametrized sweeps
+cover every real ATAK fixture — one for content ordering, one for the
+filename-hint guard described below.
+
+**Which direction of edit breaks what is counter-intuitive**, so measure rather
+than assume. The check is `all(key in …)`:
+
+| Edit to `_SIGNATURE_KEYS` | ATAK fixtures misrouted | TAK fixtures misrouted |
+|---|---|---|
+| baseline | 0 | 0 |
+| add `"logId"` (a *narrowing* edit, despite reading as widening) | 0 | **9 of 10** |
+| loosen to `('"category"',)` | 0 | 0 |
+| empty tuple | **10 of 10** | 0 |
+
+So adding a key breaks TAK detection, not the ATAK guard, and even loosening to
+one generic key misroutes nothing — because real ATAK logs contain none of
+these keys at all. Only emptying the tuple trips the ATAK-side tests. Both
+directions fail loudly; just don't expect the ATAK sweeps to be what catches a
+narrowing edit.
+
+**The disjointness argument covers `is_tak_log()`, not the filename hints.** The
+hints are substring tests, and `tak_server` is a substring of the legacy ATAK
+convention whenever the callsign starts with `SERVER` —
+`diagnostic_ATAK_SERVER_<GID>_<DATE>.log` lowercases to a name containing
+`tak_server`. Because the filename branch runs *before* the content check, such
+a file was routed to the TAK parser, which then found valid JSON with no `time`
+field, skipped every record, and reported an empty stream — the whole log lost,
+and lost quietly, since an empty stream is a legitimate result.
+
+The TAK filename hints are therefore guarded: they only apply when the content
+is **not** positively ATAK (`_is_atak_content()` in `api/routes/parse.py`, shared
+with the ATAK branch so the two cannot drift). The guard is deliberately a
+*negative* test rather than requiring `is_tak_log()` to pass, because a genuine
+but empty TAK export (`[]`) carries no signature keys and must still route here
+rather than falling through to the `diagnostic` catch-all.
+
+### Record Categories
+
+`category` arrives pre-computed from the server and is derived from the CoT
+`type` code. Four values observed:
+
+| `category` | CoT `type` | Meaning | Carries position? |
+|-----------|-----------|---------|-------------------|
+| `PLI` | `a-f-G-U-C` | Friendly ground unit position report | ✅ Yes |
+| `Marker` | `a-f-G-U-C-I` | The "I" (icon) variant, seen from WebTAK clients | ✅ Yes |
+| `Chat` | `b-t-f` | GeoChat text message | ❌ No |
+| `Other` | `t-x-takp-v` | Server plumbing — TAK protocol/version handshake | ❌ No |
+
+**`Other` is where server version comes from.** `TakServerInfo`
+(`server_version`, `api_version`) is regex-extracted from the `raw` XML of the
+first `Other` record. A stream with no handshake record yields
+`tak_server_info = None`.
+
+> Treat this as an **open set**, like the ATAK command-status vocabulary. An
+> unrecognised `category` is stored verbatim and defaults to `Other` only when
+> the field is absent **or explicitly null** — never mapped through a hardcoded
+> allow-list.
+>
+> The summary honours that too. An unrecognised value is counted in its own
+> `unrecognized_count`, not folded into `other_count` (which means *server
+> control* and would mislabel it) and not dropped. The five category counts —
+> `pli`, `marker`, `chat`, `other`, `unrecognized` — **must sum to
+> `total_events`**, and a route-level test asserts that across every fixture.
+> Before the bucket existed an unknown category counted in none of them and the
+> KPI row silently stopped reconciling, with no error to say so. The distinct
+> values are also named in `parse_errors` when present: which new category
+> appeared is what tells a maintainer whether the parser needs updating.
+
+### Fields to Parse
+
+| Source field | Parsed into | Notes |
+|--------------|-------------|-------|
+| `time` | `timestamp` | Device-generated event time. **Required** — a record without a parseable `time` is skipped and reported |
+| `receivedAt` | `received_at` | TAK server receipt time. Optional |
+| `receivedAt − time` | `latency_ms` | Rounded ms. `None` when `receivedAt` is absent. **Can be negative** — see limitations |
+| `category` | `category` | Pre-computed by the server |
+| `type` | `cot_type` | Raw CoT type code |
+| `uid` | `uid` | `ANDROID-<hex>`, a bare UUID (WebTAK), or `GeoChat.ANDROID-<hex>` |
+| `callsign` | `callsign` | `None` for server plumbing |
+| `nodeType` | `node_type` | `Android`, `WebTAK`, `Other` |
+| `platform` | `platform` | `ATAK-CIV`, `WebTAK`, or `None` |
+| `parentCallsign` | `parent_callsign` | Always `null` in observed samples |
+| `lat` / `lon` | `lat` / `lon` | Read both-or-neither — `None` when either is absent, null or non-numeric; never defaulted to `0.0` (see rule 3a) |
+| `lat == 0 and lon == 0` | `has_gps_fix` (inverted) | CoT no-fix sentinel — see limitations |
+| `raw` | `raw_cot` | Original CoT XML, retained whole |
+| min/max `time` | `session_start` / `session_end` | Wall-clock UTC, unlike `fw_log` |
+
+Timestamps are normalized from ISO-8601 with a `Z` suffix to the project's
+`%Y-%m-%d %H:%M:%S.%f` output format.
+
+### Parsing Rules
+
+1. The whole file must parse as JSON. A decode failure, or a root that isn't a
+   list, is a hard stop with a `parse_errors` entry and an empty result — this
+   format has no partial-line recovery path (unlike the line-oriented formats).
+2. Records that aren't dicts, or that lack a parseable `time`, are skipped and
+   counted; the count is reported as `{skipped} of {total}`.
+3. `has_gps_fix` is `not (lat == 0 and lon == 0)` when both coordinates are
+   present, and `False` when either is missing. **This single definition is the
+   contract** — the UI must not re-derive it, and specifically must not add its
+   own `lat != 0 && lon != 0` test, which would wrongly reject a real position
+   on the equator or prime meridian.
+3a. **Coordinates are read both-or-neither.** A record carrying only one of
+   `lat`/`lon`, or a non-numeric value, yields `lat = lon = None` — the missing
+   half is never defaulted to `0.0`. Defaulting fabricated a position in the
+   Gulf of Guinea that *passed* rule 3, because the sentinel test fires only on
+   the `(0,0)` pair; and once a single zero coordinate became a legitimate
+   position, nothing distinguished the fabrication from a real equator fix. The
+   event itself is still parsed — callsign, category and timing are usable even
+   when the position isn't. Reported in `parse_errors` **separately** from the
+   no-fix count: a sentinel means the device had no fix, a `None` means the
+   record was incomplete, and folding them together would misattribute a
+   malformed export to GPS trouble in the field.
+4. `latency_ms` is preserved when negative, never clamped.
+5. `tak_no_fix_events` is scoped to **PLI and Marker** — the categories expected
+   to carry a position. Chat and server-control events have no position to
+   report and are not "missing" one.
+
+### Known Limitations — TAK Server
+
+- **No radio identity or RF data.** Callsign + `uid` only; no serial, GID,
+  firmware, battery, thermal, RSSI or hop count. Excluded from the Health Score.
+- **`lat`/`lon` of exactly (0,0) is the CoT no-fix convention,** paired with a
+  `999999.0`-family `hae`/`ce`/`le` sentinel in the raw XML. Flagged
+  `has_gps_fix=False`; never plot these and never read them as a real position
+  in the Gulf of Guinea.
+- **Negative `latency_ms` is real data, not an error.** `receivedAt` before
+  `time` means the source device's clock runs fast relative to the server. The
+  sample log reproduces it on 10 of 91 events (min `−93 ms`), mostly repeated
+  WebTAK PLI updates. Same class of question as [P6](#p6--knot-clock-skew-investigation-low--data-quality)
+  but measured server-side — tracked as [P8](#p8--tak-server-receipt-latency-and-clock-skew-low--data-quality).
+- **Chat bodies not extracted.** Only the envelope (sender callsign,
+  timestamps) is captured from `b-t-f` records; the `<remarks>` text is left in
+  `raw_cot`. Surfaced as a `DATA LIMITATION —` entry in `parse_errors`, fired
+  only when the stream actually contains Chat records.
+- **Device telemetry in the raw XML is not extracted.** `<status battery>`,
+  `<takv>` (device model / OS / TAK version) and `<track>` (speed, course) are
+  present in most records — 57, 73 and 57 of the 91-event sample respectively —
+  and none is promoted to a field. This is a second `DATA LIMITATION —` entry,
+  data-driven per element: it names only the elements a given stream carries and
+  reports a count for each, so a stream with no `<takv>` is never told its
+  `<takv>` data was dropped. Both entries note that `raw_cot` is not serialized
+  by the API, so this data is unreachable from the UI and from exports — not
+  merely un-promoted.
+- **`parentCallsign` always null** in observed samples, like ATAK's
+  `originatorCallsign`. Parsed and stored, but do not build on it yet.
+- **`platform` is often absent** (18 of 91 in the sample, including all Chat
+  records) even when `nodeType` is known. Stored as `None`, never guessed.
+- **The no-position count is scoped, and scoped once.** The `parse_errors`
+  sentence is derived from `tak_no_fix_events` — the same property
+  `summary.no_fix_count` serializes — so the number in the text and the number
+  on the KPI are the same value, not two derivations that can drift. It reads
+  `1 PLI/Marker event(s) have no usable position … A further 4
+  Chat/server-control event(s) also carry no position, but those categories
+  never carry one, so that is not a lost GPS fix.` Both causes of "no usable
+  position" (the `(0,0)` sentinel and an incomplete pair, rule 3a) are named,
+  and the trailing clause is omitted entirely when no other category is
+  affected rather than reading "A further 0". Previously the sentence counted
+  all categories ("5 event(s) reported no GPS fix") against a KPI showing 1 —
+  both correct for what they measured, but the text read as five devices
+  losing GPS when one did. A test asserts the sentence's leading number equals
+  `len(tak_no_fix_events)`, so the conflation cannot return silently.
+- **Two-stream validation, one per shape.** Behavior is proven against two real
+  captures — `tak_stream_sample.json` (91 events, array shape) and
+  `tak_ndjson_real_sample.log` (804 events, NDJSON shape) — plus six hand-built
+  fixtures (`tak_stream_edge_cases.json`, `tak_stream_clean_pli_only.json`,
+  `tak_stream_zero_coordinate_positions.json`,
+  `tak_stream_partial_coordinates.json`, `tak_stream_unknown_categories.json`,
+  `tak_stream_envelope_only.json`) and `tak_ndjson_sample.log` for the NDJSON
+  malformed-line branches. Multi-server and multi-day streams are still
+  unobserved.
+- **Rule 3 is covered by test, but not by field data.**
+  `tak_stream_zero_coordinate_positions.json` exercises all three cases — a real
+  position on the prime meridian (`lon == 0`), a real position on the equator
+  (`lat == 0`), and the `(0,0)` sentinel — and asserts that only the sentinel
+  sets `has_gps_fix=False` and only it reaches `tak_no_fix_events` and the
+  `parse_errors` count. The fixture is hand-built: no *observed* TAK stream has
+  yet contained a genuine zero coordinate, so the rule is verified against the
+  CoT spec's intent rather than against a captured sample.
+
+### Sample File Observations (tak_stream_sample.json)
+
+- 91 events over 18 minutes (19:24:15 → 19:42:26 UTC, 2026-07-30), Panama City.
+- Categories: 71 PLI · 16 Marker · 3 Chat · 1 Other. CoT types map 1:1 to those.
+- 10 unique callsigns across 74 Android + 16 WebTAK + 1 server record. One
+  record (the handshake) has no callsign.
+- Server: `5.6-RELEASE-57-HEAD`, API version `3`.
+- Latency: avg 10,096 ms · max 166,909 ms · min −93 ms · 10 negative.
+- 5 events with no GPS fix — of which **1** is a PLI/Marker (a real gap) and 4
+  are Chat/server-control (never carry a position).
+- `parentCallsign` null on all 91 records.
+
+### Sample File Observations (tak_ndjson_real_sample.log)
+
+The NDJSON shape, and a very different stream from the array sample — worth
+reading before assuming the array capture is representative.
+
+- 804 events over ~2h01m (14:56:51 → 16:58:02 UTC, 2026-08-25), 804 lines, none
+  malformed. 23 unique callsigns.
+- Categories: 492 Marker · 273 PLI · 37 Other · 2 Chat. **Marker-dominant**,
+  unlike the array sample's PLI-dominant 71/16 split.
+- Latency: min **−2,097 ms** · max 42,080 ms — and **793 of 804 events are
+  negative**. Near-universal clock skew rather than the array sample's 10 of 91.
+  This is the P8 signal, preserved and never clamped.
+- 67 events carry no position: **30** PLI/Marker (real gaps) and 37
+  Chat/server-control. Of the positionless records, 32 are the `(0,0)` sentinel
+  and 35 are **incomplete lat/lon pairs** — the both-or-neither rule fires on
+  real data here, not only in the hand-built fixture.
+- Server: `5.6-RELEASE-57-HEAD`, API version `3` — same server as the array
+  sample.
+- Unextracted telemetry present: battery on 12 events, `<takv>` device/OS on
+  497, `<track>` speed/course on 12.
+
+---
+
 ## Message Protocol Architecture — Cross-Format Requirements
 
 ### Overview
@@ -1287,6 +1957,41 @@ callsign fronthauling throughout the 2026-06-04 field session.
 
 **Status:** ⏳ Deferred — analysis report available at
 `docs/poseidon_analysis_2026-06-02.md`
+
+### P8 — TAK Server Receipt Latency and Clock Skew (LOW — data quality)
+
+**Finding:** `latency_ms` (`receivedAt − time`) on TAK server CoT events is
+negative on 10 of 91 events in the first sample stream (min `−93 ms`), meaning
+those devices' clocks were running **ahead** of the TAK server. The same sample
+also shows a very wide positive spread — avg 10,096 ms against a max of
+166,909 ms — so two distinct effects are mixed into one number and cannot yet be
+told apart:
+
+1. **Clock skew** — device and server disagree on wall time. Negative values are
+   unambiguous evidence of this, and a positive skew is indistinguishable from
+   genuine delay.
+2. **Real fronthaul delay** — mesh transit plus server ingest. Expected to be
+   the bulk of the large positive outliers.
+
+This is the server-side counterpart to [P6](#p6--knot-clock-skew-investigation-low--data-quality),
+which found a constant ≈ −2 h host-clock skew in ATAK data. P6's two open QA
+questions apply here too: which clock was authoritative, and whether the cause
+is timezone/NTP configuration or a manually-set clock.
+
+**Why it is not treated as an error:** the skew is the signal of interest. The
+parser preserves negative values rather than clamping them, emits a
+`parse_errors` note when any occur, and the TAK tab colours those points red
+with an explicit "a fast device clock, not a data error" caption.
+
+**To close, needs:**
+- A stream captured alongside a known-good NTP reference, to separate skew from
+  transit delay.
+- Confirmation of whether the TAK server timestamps ingest or receipt.
+- A view that separates the two effects (e.g. per-callsign median latency as a
+  skew proxy, with deviation from it as delay) rather than one blended number.
+
+**Status:** ⏳ Open — referenced by `parser/tak.py` and `TakEvent` in
+`parser/models.py`. Documented here 2026-08-24 so those references resolve.
 
 ---
 

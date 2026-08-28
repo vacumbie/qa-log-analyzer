@@ -1,0 +1,58 @@
+[
+  {
+    "callsign": "ALERTER",
+    "category": "Alert",
+    "lat": 30.153289,
+    "lon": -85.664925,
+    "nodeType": "Android",
+    "parentCallsign": null,
+    "platform": "ATAK-CIV",
+    "raw": "<event version=\"2.0\" uid=\"ANDROID-alert01\" type=\"b-a-o-tbl\" how=\"h-e\" time=\"2026-07-30T19:27:10Z\"><point lat=\"30.153289\" lon=\"-85.664925\" hae=\"6.1\" ce=\"18.0\" le=\"9999999.0\"/><detail><contact callsign=\"ALERTER\"/><emergency type=\"911 Alert\">ALERTER</emergency></detail></event>",
+    "receivedAt": "2026-07-30T19:27:10.882Z",
+    "time": "2026-07-30T19:27:10Z",
+    "type": "b-a-o-tbl",
+    "uid": "ANDROID-alert01"
+  },
+  {
+    "callsign": "ROUTEMAKER",
+    "category": "Route",
+    "lat": 30.153401,
+    "lon": -85.664712,
+    "nodeType": "WebTAK",
+    "parentCallsign": null,
+    "platform": "WebTAK",
+    "raw": "<event version=\"2.0\" uid=\"WEB-route01\" type=\"b-m-r\" how=\"h-e\" time=\"2026-07-30T19:28:02Z\"><point lat=\"30.153401\" lon=\"-85.664712\" hae=\"4.5\" ce=\"14.0\" le=\"9999999.0\"/><detail><contact callsign=\"ROUTEMAKER\"/><link_attr planningmethod=\"Infil\"/></detail></event>",
+    "receivedAt": "2026-07-30T19:28:03.114Z",
+    "time": "2026-07-30T19:28:02Z",
+    "type": "b-m-r",
+    "uid": "WEB-route01"
+  },
+  {
+    "callsign": "NULLCAT",
+    "category": null,
+    "lat": 30.153118,
+    "lon": -85.664903,
+    "nodeType": "Android",
+    "parentCallsign": null,
+    "platform": "ATAK-CIV",
+    "raw": "<event version=\"2.0\" uid=\"ANDROID-nullcat\" type=\"a-f-G-U-C\" how=\"m-g\" time=\"2026-07-30T19:28:44Z\"><point lat=\"30.153118\" lon=\"-85.664903\" hae=\"7.1\" ce=\"20.2\" le=\"9999999.0\"/><detail><contact callsign=\"NULLCAT\"/></detail></event>",
+    "receivedAt": "2026-07-30T19:28:45.006Z",
+    "time": "2026-07-30T19:28:44Z",
+    "type": "a-f-G-U-C",
+    "uid": "ANDROID-nullcat"
+  },
+  {
+    "callsign": "PICKUP",
+    "category": "PLI",
+    "lat": 30.153044,
+    "lon": -85.664881,
+    "nodeType": "Android",
+    "parentCallsign": null,
+    "platform": "ATAK-CIV",
+    "raw": "<event version=\"2.0\" uid=\"ANDROID-pickup\" type=\"a-f-G-U-C\" how=\"m-g\" time=\"2026-07-30T19:29:20Z\"><point lat=\"30.153044\" lon=\"-85.664881\" hae=\"6.9\" ce=\"22.6\" le=\"9999999.0\"/><detail><contact callsign=\"PICKUP\"/></detail></event>",
+    "receivedAt": "2026-07-30T19:29:21.010Z",
+    "time": "2026-07-30T19:29:20Z",
+    "type": "a-f-G-U-C",
+    "uid": "ANDROID-pickup"
+  }
+]
