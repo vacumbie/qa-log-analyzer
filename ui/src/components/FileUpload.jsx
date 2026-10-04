@@ -78,9 +78,47 @@ const TS_RE = /\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/g
 // on the exact key name plus exactly 13 digits keeps durations and sentinels out.
 const EPOCH_MS_RE = /"(?:timestampInMillis|launchTimeInMillis|messageTimestampInMillis)"\s*:\s*(\d{13})\b/g
 
+// ht-modem timestamps every line with ctime() — "Wed Aug 12 05:13:23 2026" —
+// which matches neither TS_RE nor EPOCH_MS_RE. So the format lost the slider
+// and, worse, the modal told the user "no parseable timestamps were found" for
+// a file whose timestamps the parser reads perfectly well and prints on the
+// Overview timeline. Same failure the ATAK epoch-ms fix closed, recurring for a
+// different timestamp dialect.
+//
+// Anchored on the leading weekday so a bare "Aug 12 05:13:23 2026" elsewhere
+// can't match. Day accepts one or two spaces and an optional leading zero: real
+// ctime() space-pads single digits ("Apr  8"), but the observed captures
+// zero-pad ("Jan 05"). Verified to match nothing in any non-ht-modem fixture.
+const CTIME_RE = /[A-Z][a-z]{2} ([A-Z][a-z]{2}) +(\d{1,2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})/g
+
+const CTIME_MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 }
+
+// A TAK stream embeds a whole CoT XML document in each record's `raw` field,
+// and that XML carries its own time/start/stale attributes. `stale` is an
+// expiry, not an observation — markers routinely set it a full day out — so
+// scanning it stretched the real 18-minute sample session into a 24-hour slider
+// range the user could never narrow back down to the data.
+//
+// The session timestamps are the JSON members ("time", "receivedAt"); the XML
+// attributes are not. The `=` is what separates them: XML writes attr="…"
+// (attr=\"…\" once escaped inside the JSON string), JSON writes "key": "…".
+// Stripping the attribute form before scanning leaves the JSON members intact,
+// and matches nothing in the other five formats, whose timestamps are bare.
+const XML_TS_ATTR_RE = /\w+=\\?"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[^"\\]*/g
+
 // Returns the min/max timestamp in the text as epoch ms, or null if none found.
-// Unions wall-clock matches (diagnostic/rsdk/relay_manager, and ATAK sdkError
-// ISO timestamps) with ATAK epoch-ms matches, so a mixed enhanced log uses both.
+// Unions THREE timestamp dialects, so a file carrying more than one — an ATAK
+// enhanced log mixes two — contributes all of them to one range:
+//   1. wall-clock `YYYY-MM-DD HH:MM:SS`  (diagnostic / rsdk / relay_manager /
+//      TAK, and ATAK sdkError ISO stamps)      — TS_RE, after the XML strip
+//   2. ATAK epoch-ms, key-anchored              — EPOCH_MS_RE
+//   3. ctime `Ddd Mmm D HH:MM:SS YYYY` (ht-modem) — CTIME_RE
+// All three are read as UTC. Returning null routes the upload to the disabled
+// `range-unavailable` step, which fw_log is now the only format to hit (its
+// timestamps are relative ms from boot, so it genuinely has no wall-clock).
+// Behaviour is guarded two ways: tests/test_time_range_scan.py re-runs the
+// regex literals in Python, and tests/test_time_range_exec.py executes this
+// function itself under node.
 function extractTimeRange(text) {
   let minMs = Infinity
   let maxMs = -Infinity
@@ -90,7 +128,7 @@ function extractTimeRange(text) {
     if (ms > maxMs) maxMs = ms
   }
 
-  const wallclock = text.match(TS_RE)
+  const wallclock = text.replace(XML_TS_ATTR_RE, '').match(TS_RE)
   if (wallclock) {
     for (const ts of wallclock) consider(normaliseTs(ts).getTime())
   }
@@ -98,9 +136,19 @@ function extractTimeRange(text) {
   // EPOCH_MS_RE is safe to reuse across calls. Do NOT switch to a .exec() loop
   // here without resetting lastIndex — that would skip matches on later files.
   for (const m of text.matchAll(EPOCH_MS_RE)) consider(Number(m[1]))
+  for (const m of text.matchAll(CTIME_RE)) consider(ctimeToMs(m))
 
   if (minMs === Infinity) return null
   return { minMs, maxMs }
+}
+
+// Read as UTC, matching normaliseTs()'s treatment of bare wall-clock stamps —
+// these logs carry no zone, and mixing UTC and local across formats would
+// silently offset one session against another in the combined range.
+function ctimeToMs(m) {
+  const month = CTIME_MONTHS[m[1]]
+  if (month === undefined) return NaN
+  return Date.UTC(Number(m[6]), month, Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5]))
 }
 
 function normaliseTs(ts) {
@@ -334,6 +382,7 @@ function UploadModal({ onFiles, loading, onClose }) {
       'text/plain': ['.txt'],
       'application/octet-stream': ['.log'],
       'text/x-log': ['.log'],
+      'application/json': ['.json'],
     },
     multiple: true,
     disabled: loading || step === 'range',
@@ -368,7 +417,7 @@ function UploadModal({ onFiles, loading, onClose }) {
             </div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--muted)', marginTop: 2 }}>
               {step === 'drop'
-                ? 'Accepts .txt · .log · diagnostic, RSDK, ATAK, and Relay Manager formats'
+                ? 'Accepts .txt · .log · .json · diagnostic, RSDK, ATAK, Relay Manager, and TAK Server formats'
                 : step === 'range-unavailable'
                 ? `${pending.length} file${pending.length > 1 ? 's' : ''} · time filtering unavailable · full log will be analysed`
                 : `${pending.length} file${pending.length > 1 ? 's' : ''} · drag handles to narrow the analysis window · all times UTC`}
@@ -418,7 +467,7 @@ function UploadModal({ onFiles, loading, onClose }) {
                     Browse Files
                   </div>
                   <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--muted)', marginTop: 14 }}>
-                    Multiple files supported · .txt and .log formats
+                    Multiple files supported · .txt · .log · .json formats
                   </div>
                   <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--accent)', marginTop: 6, opacity: 0.7 }}>
                     Tip: hold Ctrl (Windows) or ⌘ Cmd (Mac) to select multiple files at once
@@ -557,7 +606,7 @@ export default function FileUpload({ onFiles, loading, error, variant = 'header'
             Upload Log Files
           </button>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--muted)', marginTop: 12 }}>
-            .txt · .log · multiple files supported
+            .txt · .log · .json · multiple files supported
           </div>
           {error && (
             <div style={{ marginTop: 16, padding: '10px 14px', background: 'var(--red)15', border: '1px solid var(--red)40', borderRadius: 6, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--red)' }}>

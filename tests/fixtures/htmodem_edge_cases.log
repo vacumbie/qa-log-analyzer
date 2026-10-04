@@ -1,0 +1,16 @@
+Start of log Mon Jan 05 08:00:00 2026
+
+
+Mon Jan 05 08:00:00 2026 : LIBIIO : version 0.26  detected
+Mon Jan 05 08:00:00 2026 : Setting filter bank to BFTC-415+  330-500MHZ
+Mon Jan 05 08:00:00 2026 : Found 2 devices
+Mon Jan 05 08:00:00 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Mon Jan 05 08:00:01 2026 : Received packet for encoding : packetID = 1 chdesc = 5 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 40 bytes
+Mon Jan 05 08:00:01 2026 : symbol count (I/Q Pairs) after postamble = 200, sample count = 400, encoded Len = 30, BCH Val = 0x0001
+Mon Jan 05 08:00:01 2026 : Added packet to xmit queue numinqueue = 1
+Mon Jan 05 08:00:05 2026 : Received packet for encoding : packetID = 2 chdesc = 5 modMode = 6  FECMode = 2 priority = 0 localFlag = 1 dataLength = 42 bytes
+Mon Jan 05 08:00:05 2026 : symbol count (I/Q Pairs) after postamble = 200, sample count = 400, encoded Len = 30, BCH Val = 0x0002
+Mon Jan 05 08:00:05 2026 : ZZZZZZZZZZZZZZZ   CSMA QUEUE is Full, dropping packet
+Mon Jan 05 08:00:10 2026 : Setting RX freq = 420000000.00
+Mon Jan 05 08:00:10 2026 : Setting TX freq = 420000000.00
+Mon Jan 05 08:00:10 2026 : Setting TX power level mode to fixed, Xmit level to 30.00

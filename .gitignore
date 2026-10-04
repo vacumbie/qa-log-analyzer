@@ -36,3 +36,6 @@ logs/
 # Test fixtures are intentionally committed regardless of extension
 !tests/fixtures/
 !tests/fixtures/*
+
+# Claude Code personal settings
+.claude/settings.local.json

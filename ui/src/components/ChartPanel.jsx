@@ -17,8 +17,25 @@ const TT_CFG  = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// Log timestamps arrive in two serialized shapes — "2026-08-12 05:13:23.000000"
+// and "2026-08-25T14:56:51.402Z" — and none of the formats carry a timezone, so
+// a bare stamp is read as UTC. Falls back to the raw string for anything the
+// normalized form can't parse. Module-level: four charts parsed timestamps with
+// byte-identical private copies, so a fix to one silently missed the others.
+function toMs(ts) {
+  if (!ts) return NaN
+  const s = ts.includes('T') ? ts : ts.replace(' ', 'T')
+  const ms = new Date(s.endsWith('Z') ? s : s + 'Z').getTime()
+  return isNaN(ms) ? new Date(ts).getTime() : ms
+}
+
 function shortLabel(r) {
-  if (r.device?.callsign) return r.device.callsign
+  // Parsers with no identity field to read write the literal string 'unknown'
+  // (next-gen radio logs carry no callsign at all). That means "absent", not a
+  // device named "unknown" — fall through to the filename so two logs charted
+  // together don't get identical series labels.
+  const callsign = r.device?.callsign
+  if (callsign && callsign !== 'unknown') return callsign
   const name = r.source_filename || ''
   // ATAK: diagnostic_ATAK_CALLSIGN_GID_...
   const atakMatch = name.match(/diagnostic_ATAK_([^_]+)_/)
@@ -28,7 +45,7 @@ function shortLabel(r) {
   if (namedMatch) return namedMatch[1]
   // Fallback to radio serial if available — more useful than truncated filename
   if (r.device?.radio_serial) return r.device.radio_serial.slice(-6)
-  return name.replace(/\.[^.]+$/, '').slice(0, 12)
+  return name.replace(/\.[^.]+$/, '').slice(0, 20)
 }
 
 function downsample(arr, max = 50) {
@@ -49,13 +66,6 @@ function downsample(arr, max = 50) {
  * X labels show % of each device's own session (0%, 10%, … 100%).
  */
 function buildRelativeTimeSeries(results, key = 'system_samples', maxPoints = 15) {
-  const toMs = ts => {
-    if (!ts) return NaN
-    const s = ts.includes('T') ? ts : ts.replace(' ', 'T')
-    const ms = new Date(s.endsWith('Z') ? s : s + 'Z').getTime()
-    return isNaN(ms) ? new Date(ts).getTime() : ms
-  }
-
   const hasAny = results.some(r => (r[key] || []).some(s => s.timestamp))
   if (!hasAny) return { labels: [], getDataset: () => [] }
 
@@ -176,13 +186,6 @@ function BatteryOverTime({ results }) {
   // normalizing to 0-100% session, so the chart shows real time of day.
   // Multi-device sessions with different start times are shown on a shared
   // absolute time axis — gaps appear where a device has no data.
-
-  const toMs = ts => {
-    if (!ts) return NaN
-    const s = ts.includes('T') ? ts : ts.replace(' ', 'T')
-    const ms = new Date(s.endsWith('Z') ? s : s + 'Z').getTime()
-    return isNaN(ms) ? new Date(ts).getTime() : ms
-  }
 
   const fmtTime = ms => {
     if (!ms || isNaN(ms)) return ''
@@ -757,13 +760,6 @@ function AtakEventsTimeline({ results }) {
  * smooth averaged line rather than noisy per-message scatter.
  */
 function buildGripRssiSeries(results, maxPoints = 40) {
-  const toMs = ts => {
-    if (!ts) return NaN
-    const s = ts.includes('T') ? ts : ts.replace(' ', 'T')
-    const ms = new Date(s.endsWith('Z') ? s : s + 'Z').getTime()
-    return isNaN(ms) ? new Date(ts).getTime() : ms
-  }
-
   const labels = Array.from({ length: maxPoints }, (_, i) =>
     `${Math.round((i / (maxPoints - 1)) * 100)}%`
   )
@@ -915,6 +911,291 @@ function GripRssiOverTime({ results }) {
   )
 }
 
+// ── TAK server ────────────────────────────────────────────────────────────────
+
+/**
+ * Server receipt latency per event — receivedAt minus the device-generated
+ * time, in chronological order.
+ *
+ * Points-only via showLine:false, the same technique BatteryOverTime uses to
+ * avoid registering a separate scatter controller. Negative values are real
+ * data (a source device whose clock runs fast relative to the server) and are
+ * drawn red rather than clamped — see the tak row in CLAUDE.md's known data
+ * limitations, and P8 in docs/parsing-requirements.md.
+ */
+function TakLatency({ results }) {
+  const events = results
+    .filter(r => r.log_format === 'tak')
+    .flatMap(r => r.tak_events || [])
+  const withLatency = events
+    .filter(e => e.latency_ms != null)
+    .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+
+  if (!withLatency.length) {
+    return (
+      <ChartCard title="Server Receipt Latency" subtitle="receivedAt − time per event">
+        <div style={{ fontFamily:'var(--mono)', fontSize:9, color:'#4a6080', padding:'20px 0', textAlign:'center' }}>
+          No events with both a device timestamp and a server receipt timestamp.
+        </div>
+      </ChartCard>
+    )
+  }
+
+  const negativeCount = withLatency.filter(e => e.latency_ms < 0).length
+
+  const data = {
+    labels: withLatency.map(e => e.timestamp.slice(11, 19)),
+    datasets: [{
+      label: 'Latency (ms)',
+      data: withLatency.map(e => e.latency_ms),
+      showLine: false,
+      pointRadius: 3,
+      pointBackgroundColor: withLatency.map(e => e.latency_ms < 0 ? '#ff4757' : '#00d4ff'),
+      borderColor: 'transparent',
+    }],
+  }
+
+  const options = {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      tooltip: {
+        ...TT_CFG,
+        callbacks: {
+          label: ctx => {
+            const e = withLatency[ctx.dataIndex]
+            return `${e.callsign || 'unknown'} · ${e.latency_ms} ms`
+          },
+        },
+      },
+      legend: { labels: { color:'#4a6080', boxWidth: 10 } },
+    },
+    scales: {
+      x: { grid: { color: GRID }, ticks: { ...TICK, maxTicksLimit: 10, maxRotation: 45 } },
+      y: {
+        grid: { color: GRID }, ticks: TICK,
+        title: { display: true, text: 'ms', color: '#2a3a52', font: { size: 9 } },
+      },
+    },
+  }
+
+  return (
+    <ChartCard
+      title="Server Receipt Latency"
+      subtitle={`receivedAt − time per event · ${negativeCount} event(s) show negative latency (red) — a fast device clock, not a data error`}
+      height={320}
+    >
+      <Line data={data} options={options} />
+    </ChartCard>
+  )
+}
+
+// ── ht-modem only ─────────────────────────────────────────────────────────────
+
+function HtModemTempOverTime({ results }) {
+  const hm = results.filter(r => r.log_format === 'htmodem')
+  if (!hm.length) return <NoData message="No ht-modem logs loaded" />
+
+  // Downsample the SAMPLE rows together (not each metric separately) so
+  // LPD/FPD/PL stay aligned at the same points rather than drifting apart.
+  // Elapsed-time-since-start (not absolute time): each session's own first
+  // sample becomes x=0, regardless of its real calendar date. This is what
+  // lets multiple sessions from wildly different dates (or even different
+  // years) overlay meaningfully on one shared axis instead of a shared
+  // absolute-date axis stretching to fit the full gap between them.
+  const perDevice = hm.map(r => {
+    const samples = (r.htmodem?.temp_samples_f || [])
+      .filter(s => s.timestamp)
+      .map(s => ({ ...s, ms: toMs(s.timestamp) }))
+      .filter(s => !isNaN(s.ms))
+      .sort((a, b) => a.ms - b.ms)
+    const startMs = samples.length ? samples[0].ms : 0
+    const withElapsed = samples.map(s => ({ ...s, elapsedMs: s.ms - startMs }))
+    return { r, samples: downsample(withElapsed, 150) }
+  })
+
+  const anySamples = perDevice.some(d => d.samples.length > 0)
+  if (!anySamples) return <NoData message="No temperature samples in this log" />
+
+  const allElapsed = perDevice.flatMap(d => d.samples.map(s => s.elapsedMs))
+  const maxElapsedHours = Math.max(...allElapsed) / 3_600_000
+
+  // "1:23:45" for sessions over an hour, "12:34" otherwise — a stopwatch/
+  // duration format, not a clock-time format, since this is elapsed time.
+  const fmtDuration = ms => {
+    const totalSec = Math.round(ms / 1000)
+    const h = Math.floor(totalSec / 3600)
+    const m = Math.floor((totalSec % 3600) / 60)
+    const s = totalSec % 60
+    const pad = n => String(n).padStart(2, '0')
+    return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`
+  }
+
+  // One colour per sensor for a single session. With two or more sessions the
+  // sensor colours alone would repeat — two "LPD" legend entries in identical
+  // cyan, indistinguishable where the sessions overlap — so the sensor is
+  // carried by line style instead and the colour identifies the session, using
+  // the same PALETTE index as that session's KPI block header.
+  const metrics = [['lpd_f', '#00d4ff', 'LPD'], ['fpd_f', '#ff6b35', 'FPD'], ['pl_f', '#ffd166', 'PL']]
+  const DASHES = [[], [6, 3], [2, 2]]   // LPD solid, FPD dashed, PL dotted
+  const multi = hm.length > 1
+  const datasets = perDevice.flatMap(({ r, samples }, deviceIdx) =>
+    metrics.map(([key, sensorColor, name], metricIdx) => {
+      const color = multi ? PALETTE[deviceIdx % PALETTE.length] : sensorColor
+      return {
+        label: multi ? `${shortLabel(r)} — ${name}` : `${name} Temp (°F)`,
+        data: samples.map(s => ({ x: s.elapsedMs, y: s[key], _abs: s.ms })),
+        borderColor: color, backgroundColor: color + '22',
+        borderDash: multi ? DASHES[metricIdx] : [],
+        tension: 0.3, pointRadius: 0, borderWidth: 2,
+      }
+    }))
+
+  return (
+    <ChartCard
+      title="Next-Gen Modem Thermal (LPD / FPD / PL)"
+      subtitle={multi
+        ? "Zynq MPSoC thermal zones · °F · elapsed time since each session's start · colour = session, line style = sensor (LPD solid, FPD dashed, PL dotted)"
+        : "Zynq MPSoC thermal zones · °F · elapsed time since each session's start"}
+    >
+      <Line data={{ datasets }} options={LINE_OPTS({
+        parsing: false,
+        scales: {
+          x: {
+            type: 'linear', grid: { color: GRID }, min: 0,
+            ticks: { ...TICK, maxTicksLimit: 10, maxRotation: 0, callback: fmtDuration },
+            title: { display: true, text: maxElapsedHours >= 1 ? 'elapsed (h:mm:ss)' : 'elapsed (m:ss)', color: '#2a3a52', font: { size: 9 } },
+          },
+          y: { grid: { color: GRID }, ticks: TICK, title: { display: true, text: '°F', color: '#2a3a52', font: { size: 9 } } },
+        },
+        plugins: {
+          tooltip: {
+            ...TT_CFG,
+            callbacks: {
+              title: items => items.length ? `+${fmtDuration(items[0].parsed.x)}` : '',
+              // Absolute timestamp shown too — still useful for cross-
+              // referencing a spike back to a specific line in the raw log.
+              afterTitle: items => items.length && items[0].raw?._abs
+                ? new Date(items[0].raw._abs).toLocaleString(undefined, {
+                    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+                  })
+                : '',
+            },
+          },
+          legend: { labels: { color: '#4a6080', boxWidth: 10 } },
+        },
+      })} />
+    </ChartCard>
+  )
+}
+
+function HtModemTxOutcomes({ results }) {
+  const hm = results.filter(r => r.log_format === 'htmodem')
+  if (!hm.length) return <NoData message="No ht-modem logs loaded" />
+  const labels = hm.map(r => shortLabel(r))
+  return (
+    <ChartCard title="TX Packet Outcomes" subtitle="Queued for transmission vs. dropped (CSMA queue full)" height={200}>
+      <Bar
+        data={{ labels, datasets: [
+          { label: 'Queued',  data: hm.map(r => r.summary?.queued_count || 0),  backgroundColor: '#00e5a0cc', borderRadius: 4 },
+          { label: 'Dropped', data: hm.map(r => r.summary?.dropped_count || 0), backgroundColor: '#ff4757cc', borderRadius: 4 },
+        ]}}
+        options={{ ...BAR_OPTS(), scales: makeScales(0, undefined) }}
+      />
+    </ChartCard>
+  )
+}
+
+// ── ht-router only ────────────────────────────────────────────────────────────
+
+function HtRouterConnectedTimeline({ results }) {
+  const hr = results.filter(r => r.log_format === 'htrouter')
+  if (!hr.length) return <NoData message="No ht-router logs loaded" />
+  const adapted = hr.map(r => ({
+    ...r,
+    _snaps: (r.htrouter?.stat_snapshots || []).map(s => ({
+      timestamp: s.timestamp,
+      connected_num: s.connected === true ? 1 : s.connected === false ? 0 : null,
+    })),
+  }))
+  const { labels, getDataset } = buildRelativeTimeSeries(adapted, '_snaps', 20)
+  if (!labels.length) return <NoData message="No stat snapshots in this log" />
+
+  const datasets = hr.map((r, i) => ({
+    label: shortLabel(r), data: getDataset(adapted[i], 'connected_num'),
+    borderColor: '#22d3ee', backgroundColor: '#22d3ee22',
+    stepped: true, pointRadius: 0, borderWidth: 2,
+  }))
+  return (
+    <ChartCard title="Connection State Over Time" subtitle="Derived from periodic stat snapshots">
+      <Line data={{ labels, datasets }} options={LINE_OPTS({
+        scales: {
+          x: { grid: { color: GRID }, ticks: { ...TICK, maxTicksLimit: 10, maxRotation: 45 } },
+          y: { min: 0, max: 1, grid: { color: GRID }, ticks: { ...TICK, stepSize: 1, callback: v => v === 1 ? 'Connected' : 'Disconnected' } },
+        },
+      })} />
+    </ChartCard>
+  )
+}
+
+function HtRouterCumulativeFailures({ results }) {
+  const hr = results.filter(r => r.log_format === 'htrouter')
+  if (!hr.length) return <NoData message="No ht-router logs loaded" />
+  const adapted = hr.map(r => ({ ...r, _snaps: r.htrouter?.stat_snapshots || [] }))
+  const { labels, getDataset } = buildRelativeTimeSeries(adapted, '_snaps', 20)
+  if (!labels.length) return <NoData message="No stat snapshots in this log" />
+
+  const metrics = [['output_modem_xmit_failed', '#ff4757', 'Modem TX Failures'], ['output_time_outs', '#ffd166', 'Timeouts']]
+  const datasets = hr.flatMap((r, i) => metrics.map(([key, color, name]) => ({
+    label: hr.length > 1 ? `${shortLabel(r)} — ${name}` : name,
+    data: getDataset(adapted[i], key),
+    borderColor: color, backgroundColor: color + '22',
+    tension: 0.2, pointRadius: 0, borderWidth: 2,
+  })))
+
+  // Having snapshots is not the same as having these counters in them. A session
+  // that never transmitted omits the whole output.* group, so every dataset comes
+  // back all-null and Chart.js paints an empty 0–1 grid with no explanation —
+  // the "an empty map must say it's empty" case, for a chart. Says which fields
+  // are missing rather than just "no data", since absent here means "never
+  // reported by this session", not "zero failures".
+  const hasAnyPoint = datasets.some(d => d.data.some(v => v != null))
+  if (!hasAnyPoint) {
+    return (
+      <NoData message="No output.modem_xmit_failed or output.time_outs counters in this log — this session never transmitted, so those counters were never reported (not reported ≠ zero failures)" />
+    )
+  }
+
+  return (
+    <ChartCard
+      title="Cumulative Modem TX Failures & Timeouts"
+      subtitle="Session-lifetime running totals (not per-interval counts) — a flat stretch means no new failures in that period, not zero total"
+    >
+      <Line data={{ labels, datasets }} options={LINE_OPTS({ scales: makeScales(0, undefined) })} />
+    </ChartCard>
+  )
+}
+
+function HtRouterMsgTypes({ results }) {
+  const hr = results.filter(r => r.log_format === 'htrouter')
+  if (!hr.length) return <NoData message="No ht-router logs loaded" />
+  // Message type vocabulary is an open set — build categories from what's
+  // actually present rather than a hardcoded list (same pattern as the ATAK
+  // Modes tab's dynamically-built status lists).
+  const allTypes = [...new Set(hr.flatMap(r => Object.keys(r.summary?.msg_type_counts || {})))]
+  if (!allTypes.length) return <NoData message="No protocol messages in this log" />
+  const labels = hr.map(r => shortLabel(r))
+  const datasets = allTypes.map((type, i) => ({
+    label: type,
+    data: hr.map(r => r.summary?.msg_type_counts?.[type] || 0),
+    backgroundColor: PALETTE[i % PALETTE.length] + 'cc', borderRadius: 4,
+  }))
+  return (
+    <ChartCard title="Protocol Message Types" subtitle="client-hdr / mgt-hdr message type breakdown">
+      <Bar data={{ labels, datasets }} options={{ ...BAR_OPTS(), scales: makeScales(0, undefined) }} />
+    </ChartCard>
+  )
+}
+
 // ── Registry ──────────────────────────────────────────────────────────────────
 
 const CHART_MAP = {
@@ -938,6 +1219,12 @@ const CHART_MAP = {
   atak_partial_received: AtakPartialReceived,
   atak_connection_state: AtakConnectionState,
   atak_events_timeline:  AtakEventsTimeline,
+  tak_latency:           TakLatency,
+  htmodem_temp:          HtModemTempOverTime,
+  htmodem_outcomes:      HtModemTxOutcomes,
+  htrouter_connected:    HtRouterConnectedTimeline,
+  htrouter_cumulative_failures: HtRouterCumulativeFailures,
+  htrouter_msg_types:    HtRouterMsgTypes,
 }
 
 export default function ChartPanel({ results, selectedPoints }) {

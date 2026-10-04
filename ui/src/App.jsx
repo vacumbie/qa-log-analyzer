@@ -1,7 +1,9 @@
 import React, { useState, useMemo, useCallback } from 'react'
 import FileUpload, { ParsingOverlay } from './components/FileUpload.jsx'
 import ChartPanel from './components/ChartPanel.jsx'
+import TakTab from './components/TakTab.jsx'
 import useLogData from './hooks/useLogData.js'
+import { useLeaflet } from './hooks/useLeaflet.js'
 
 // ── Palette & constants ───────────────────────────────────────────────────────
 const PALETTE = ['#00d4ff','#ff6b35','#ffd166','#c77dff','#00e5a0','#ff4757','#4a90e2','#ff6b9d']
@@ -22,6 +24,17 @@ const TABS = [
   { id:'relay-health', label:'Relay Health', relayOnly: true },
   { id:'atak',      label:'ATAK', atakOnly: true },
   { id:'fw-log',    label:'FW Log', fwOnly: true },
+  { id:'tak',       label:'TAK Server', takOnly: true },
+]
+
+// Next-Gen Radio tabs are a visually separate group in the tab bar (own row,
+// own accent color, own section label) rather than another dimmed/badged
+// entry mixed into TABS above — a deliberate UI requirement, not an oversight.
+// Hidden entirely (not just dimmed) until a matching log is loaded, same as
+// atakOnly tabs.
+const NEXTGEN_TABS = [
+  { id:'htmodem',  label:'HT-Modem',  htmodemOnly: true },
+  { id:'htrouter', label:'HT-Router', htrouterOnly: true },
 ]
 
 // ── Shared sub-components ─────────────────────────────────────────────────────
@@ -96,6 +109,24 @@ function KpiRow({ results }) {
   // apply (no RF messages, PLI, chat, etc.). Show a compact relay summary instead.
   const allRelay = results.length > 0 && results.every(r => r.log_format === 'relay_manager')
   if (allRelay) return <RelayKpiRow results={results} />
+
+  // Same reasoning for TAK: a server-side stream carries no radio identity, no
+  // RF data and no thermal data, so the device cards below would render dashes
+  // and a literal "0 versions" — a zero standing in for "this format has no such
+  // concept", which is exactly what the honesty rule forbids.
+  const allTak = results.length > 0 && results.every(r => r.log_format === 'tak')
+  if (allTak) return <TakKpiRow results={results} />
+
+  // Third format group to need this, so the rule now lives in ui-requirements.md
+  // under "KPI Header Row" rather than being restated per format: a format whose
+  // logs carry none of the device row's inputs needs its own scoped row. The
+  // next-gen radio logs have no callsign, GID, serial, firmware version, battery
+  // or hop count at all, so the device cards render five dashes plus a literal
+  // "APP VERSION: 0 versions" — a zero standing in for "no such concept".
+  const allNextGen = results.length > 0
+    && results.every(r => r.log_format === 'htmodem' || r.log_format === 'htrouter')
+  if (allNextGen) return <NextGenKpiRow results={results} />
+
 
   // Hop counts — diagnostic, ATAK, and RSDK via GRIP_Receiver incoming messages
   const allHops = results.flatMap(r => {
@@ -905,24 +936,9 @@ function HopCountMap({ results }) {
   const [selectedDevice, setSelectedDevice] = React.useState(deviceOptions[0]?.filename || '')
   const [selectedSender, setSelectedSender]  = React.useState('ALL')
   const [showLinks, setShowLinks]             = React.useState(true)
-  const [leafletReady, setLeafletReady]       = React.useState(!!window.L)
-
-  // Load Leaflet from CDN if not already present
-  React.useEffect(() => {
-    if (window.L) { setLeafletReady(true); return }
-
-    // CSS
-    const link = document.createElement('link')
-    link.rel  = 'stylesheet'
-    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
-    document.head.appendChild(link)
-
-    // JS
-    const script = document.createElement('script')
-    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
-    script.onload = () => setLeafletReady(true)
-    document.head.appendChild(script)
-  }, [])
+  // Leaflet loads from the unpkg CDN, shared with the TAK position map so the
+  // library is fetched once per page rather than once per map.
+  const leafletReady = useLeaflet()
 
   // Build map data for selected device
   const { points, senderOptions, excludedNonPliCount } = React.useMemo(() => {
@@ -2380,6 +2396,117 @@ function SdkLogSummaryCard({ summary }) {
 }
 
 
+// ── Next-Gen Radio: ht-modem ──────────────────────────────────────────────────
+
+function HtModemTab({ results }) {
+  const hm = results.filter(r => r.log_format === 'htmodem')
+
+  return (
+    <div>
+      {hm.map((r, i) => {
+        const sum   = r.summary || {}
+        const color = PALETTE[i % PALETTE.length]
+        const dropped = sum.dropped_count || 0
+        const total   = sum.tx_packet_count || 0
+        const peak    = sum.peak_pl_temp_f
+
+        return (
+          <div key={i} style={{ marginBottom: 24 }}>
+            {/* Session header — one per unit, matching RelayHealthTab's convention */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, paddingBottom: 10, borderBottom: `1px solid ${color}30` }}>
+              <div style={{ width: 3, height: 32, background: color, borderRadius: 2, flexShrink: 0 }} />
+              <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 16, fontWeight: 700, color }}>{r.source_filename}</div>
+            </div>
+
+            <RelayLimitationBanner parseErrors={r.parse_errors} />
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+              <KpiCard label="FPGA Check" value={sum.fpga_version_ok ? 'OK' : 'UNKNOWN/FAIL'}
+                color={sum.fpga_version_ok ? '#00e5a0' : '#ffd166'} />
+              <KpiCard label="AD936X Init" value={(sum.ad936x_init_error_count || 0) > 0 ? 'FAILED' : 'OK'}
+                color={(sum.ad936x_init_error_count || 0) > 0 ? '#ff4757' : '#00e5a0'}
+                sub={(sum.ad936x_init_error_count || 0) > 0 ? 'RF front end likely never initialized' : undefined} />
+              <KpiCard label="GPS (gpsd)" value={sum.gpsd_connect_error ? 'DISCONNECTED' : 'OK'}
+                color={sum.gpsd_connect_error ? '#ffd166' : '#00e5a0'} />
+              <KpiCard label="TX Packets" value={total} color={C.accent} />
+              <KpiCard label="Queued" value={sum.queued_count || 0} color="#00e5a0" />
+              <KpiCard label="Dropped" value={dropped} color={dropped ? '#ff4757' : C.muted}
+                sub={total ? `${Math.round((dropped / total) * 100)}% of TX packets` : undefined} />
+              <KpiCard label="Peak PL Temp" value={peak != null ? `${peak}°F` : '—'}
+                color={peak != null && peak >= 131 ? '#ff4757' : peak != null && peak >= 113 ? '#ffd166' : '#00e5a0'} />
+            </div>
+          </div>
+        )
+      })}
+
+      <SectionHeader icon="🌡️" title="Thermal" sub="LPD / FPD / PL, elapsed time since each session's start" />
+      <ChartPanel results={hm} selectedPoints={['htmodem_temp']} />
+
+      <SectionHeader icon="📡" title="TX Packet Outcomes" sub="Queued vs. dropped (CSMA queue full)" />
+      <ChartPanel results={hm} selectedPoints={['htmodem_outcomes']} />
+    </div>
+  )
+}
+
+// ── Next-Gen Radio: ht-router ─────────────────────────────────────────────────
+
+function HtRouterTab({ results }) {
+  const hr = results.filter(r => r.log_format === 'htrouter')
+
+  return (
+    <div>
+      {hr.map((r, i) => {
+        const sum   = r.summary || {}
+        const color = PALETTE[i % PALETTE.length]
+        const xmitFail = sum.total_modem_xmit_failed
+        const timeouts = sum.total_timeouts
+        const warnings = sum.socket_warning_count
+
+        return (
+          <div key={i} style={{ marginBottom: 24 }}>
+            {/* Session header — one per unit, matching RelayHealthTab's convention */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, paddingBottom: 10, borderBottom: `1px solid ${color}30` }}>
+              <div style={{ width: 3, height: 32, background: color, borderRadius: 2, flexShrink: 0 }} />
+              <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 16, fontWeight: 700, color }}>{r.source_filename}</div>
+            </div>
+
+            <RelayLimitationBanner parseErrors={r.parse_errors} />
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+              <KpiCard label="Stat Snapshots" value={(sum.snapshot_count || 0).toLocaleString()} color={C.accent} />
+              {/* Sub-label deliberately does NOT promise a cross-link to a
+                  loaded ht-modem session: ht-modem parses no PID of its own, so
+                  there is nothing on the other side to match against. This is
+                  the router's record of the process it spawned, nothing more. */}
+              <KpiCard label="Modem PID" value={sum.modem_pid ?? '—'} color="#6366f1"
+                sub={sum.modem_pid != null ? 'ht-modem process spawned by this router' : 'no nb_modem_start line'} />
+              <KpiCard label="Modem TX Failures" value={xmitFail ?? '—'}
+                color={xmitFail == null ? C.muted : xmitFail ? '#ff4757' : '#00e5a0'}
+                sub={xmitFail == null ? 'not reported in this log' : 'session-lifetime total'} />
+              <KpiCard label="Timeouts" value={timeouts ?? '—'}
+                color={timeouts == null ? C.muted : timeouts ? '#ffd166' : '#00e5a0'}
+                sub={timeouts == null ? 'not reported in this log' : 'session-lifetime total'} />
+              <KpiCard label="Socket Warnings" value={warnings ?? '—'}
+                color={warnings == null ? C.muted : warnings ? '#ffd166' : '#00e5a0'}
+                sub={warnings == null ? 'not reported in this log' : undefined} />
+              <KpiCard label="Protocol Messages" value={(sum.protocol_message_count || 0).toLocaleString()} color={C.accent} />
+            </div>
+          </div>
+        )
+      })}
+
+      <SectionHeader icon="🔌" title="Connection State" sub="Derived from periodic stat snapshots" />
+      <ChartPanel results={hr} selectedPoints={['htrouter_connected']} />
+
+      <SectionHeader icon="⚠️" title="Cumulative Failures" sub="Session-lifetime running totals" />
+      <ChartPanel results={hr} selectedPoints={['htrouter_cumulative_failures']} />
+
+      <SectionHeader icon="📨" title="Protocol Message Types" sub="client-hdr / mgt-hdr breakdown" />
+      <ChartPanel results={hr} selectedPoints={['htrouter_msg_types']} />
+    </div>
+  )
+}
+
 function AtakTab({ results }) {
   const atakResults = results.filter(r => r.log_format === 'atak')
   if (atakResults.length === 0) return <Note>No ATAK logs loaded. Upload an ATAK plug-in .log file to see this tab.</Note>
@@ -2518,6 +2645,96 @@ function RelayKpiRow({ results }) {
       <KpiCard label="Device Alerts"     value={totalAlerts || '—'} sub="unsolicited pull-required alerts" color='#f59e0b' />
       <KpiCard label="Sub-Type"          value={subtypes.join(' + ') || '—'} sub="auto-detected"      color='#6366f1' />
       <KpiCard label="Environment"       value={envs.join(' / ').toUpperCase() || '—'} sub="stage confirmed · prod TBD" color={envs.includes('stage') ? '#22d3ee' : '#f59e0b'} />
+    </div>
+  )
+}
+
+function TakKpiRow({ results }) {
+  // Compact KPI strip shown in the Overview when every loaded log is a TAK
+  // server stream. The device cards don't apply: TAK is the server's view of
+  // many clients, so there is no serial, GID, firmware version, battery or
+  // temperature to report — see the tak rows in CLAUDE.md's known data
+  // limitations. Everything here is server-side or per-event.
+  const sum = key => results.reduce((n, r) => n + (r.summary?.[key] || 0), 0)
+  const totalEvents = sum('total_events')
+  const callsigns = new Set(
+    results.flatMap(r => (r.tak_events || []).map(e => e.callsign).filter(Boolean))
+  ).size
+  const serverVersions = [...new Set(results.map(r => r.tak_server_info?.server_version).filter(Boolean))]
+  const skew = sum('negative_latency_count')
+
+  return (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '12px 36px', borderBottom: '1px solid var(--border2)', background: 'rgba(5,8,15,0.75)', flexShrink: 0, backdropFilter: 'blur(4px)' }}>
+      <KpiCard label="Logs Loaded"    value={results.length} sub="TAK server stream"          color='#22d3ee' />
+      <KpiCard label="CoT Events"     value={totalEvents}    sub="all categories"             color='#22d3ee' />
+      <KpiCard label="Callsigns"      value={callsigns}      sub="observed by the server"     color='#6366f1' />
+      <KpiCard label="PLI"            value={sum('pli_count')} sub="position reports"         color='#10b981' />
+      <KpiCard label="No GPS Fix"     value={sum('no_fix_count')} sub="PLI/Marker only"       color={sum('no_fix_count') ? '#f59e0b' : '#64748b'} />
+      {/* Renders 0, not a dash: no clock skew is the healthy case, and a dash
+          would read as "not measured". Server Version below keeps its dash
+          because a stream genuinely can arrive with no handshake record. */}
+      <KpiCard label="Clock Skew"     value={skew}           sub="events received before sent" color={skew ? '#ef4444' : '#64748b'} />
+      <KpiCard label="Server Version" value={serverVersions.join(', ') || '—'} sub="from the CoT handshake" color='#22d3ee' />
+    </div>
+  )
+}
+
+function NextGenKpiRow({ results }) {
+  // Compact KPI strip shown in the Overview when every loaded log is a next-gen
+  // radio log (ht-modem and/or ht-router). These carry no radio identity of any
+  // kind — no callsign, GID, serial or firmware version — and no hop count or
+  // RSSI, so the device row cannot be filled in. Same reasoning as RelayKpiRow
+  // and TakKpiRow; see the KPI Header Row section in docs/ui-requirements.md.
+  const modem  = results.filter(r => r.log_format === 'htmodem')
+  const router = results.filter(r => r.log_format === 'htrouter')
+
+  // Absent counters stay null so a card can say "not reported" rather than "0".
+  // A session that never transmitted omits the whole output.* group, and only
+  // some captures report the input.* error counters — see the ht-router rows in
+  // CLAUDE.md's known data limitations.
+  const sumReported = (rows, pick) => {
+    const vals = rows.map(pick).filter(v => v != null)
+    return vals.length ? vals.reduce((a, b) => a + b, 0) : null
+  }
+  const sumCount = (rows, key) => rows.reduce((n, r) => n + (r.summary?.[key] || 0), 0)
+
+  const txPackets = sumCount(modem, 'tx_packet_count')
+  const dropped   = sumCount(modem, 'dropped_count')
+  const peaks     = modem.map(r => r.summary?.peak_pl_temp_f).filter(v => v != null)
+  const peakTemp  = peaks.length ? Math.max(...peaks) : null
+  // Both read the parser's own cumulative-counter properties through the
+  // summary. The "last non-null snapshot, never a sum" rule is defined once, in
+  // HtRouterResult — re-deriving it here would give the Overview row and the
+  // HT-Router tab two independent definitions of the same number.
+  const xmitFail  = sumReported(router, r => r.summary?.total_modem_xmit_failed)
+  const badCrc    = sumReported(router, r => r.summary?.total_bad_crc)
+
+  return (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '12px 36px', borderBottom: '1px solid var(--border2)', background: 'rgba(5,8,15,0.75)', flexShrink: 0, backdropFilter: 'blur(4px)' }}>
+      <KpiCard label="Logs Loaded" value={results.length}
+        sub={`${modem.length} modem · ${router.length} router`} color="var(--accent2)" />
+      {/* Modem-only and router-only cards each render only when that half is
+          loaded — an all-router session showing "TX PACKETS 0" would be the
+          same zero-for-absent problem this whole row exists to avoid. */}
+      {modem.length > 0 && <>
+        <KpiCard label="TX Packets" value={txPackets.toLocaleString()} sub="encoded for transmit" color={C.accent} />
+        <KpiCard label="Dropped" value={dropped.toLocaleString()}
+          sub={txPackets ? `${Math.round((dropped / txPackets) * 100)}% of TX packets` : undefined}
+          color={dropped ? '#ff4757' : '#00e5a0'} />
+        <KpiCard label="Peak PL Temp" value={peakTemp != null ? `${peakTemp}°F` : '—'}
+          sub={peakTemp == null ? 'no thermal samples' : 'hottest zone observed'}
+          color={peakTemp != null && peakTemp >= 131 ? '#ff4757' : peakTemp != null && peakTemp >= 113 ? '#ffd166' : '#00e5a0'} />
+      </>}
+      {router.length > 0 && <>
+        <KpiCard label="Stat Snapshots" value={sumCount(router, 'snapshot_count').toLocaleString()}
+          sub="periodic counter blocks" color={C.accent} />
+        <KpiCard label="Modem TX Failures" value={xmitFail ?? '—'}
+          sub={xmitFail == null ? 'not reported in this log' : 'session-lifetime total'}
+          color={xmitFail == null ? C.muted : xmitFail ? '#ff4757' : '#00e5a0'} />
+        <KpiCard label="Bad CRC" value={badCrc ?? '—'}
+          sub={badCrc == null ? 'not reported in this log' : 'link-layer, session total'}
+          color={badCrc == null ? C.muted : badCrc ? '#ffd166' : '#00e5a0'} />
+      </>}
     </div>
   )
 }
@@ -2718,6 +2935,18 @@ function TabContent({ tab, results }) {
       if (!results.some(r => r.log_format === 'fw_log'))
         return <EmptyTabState message="No Firmware Logs Uploaded" detail="Upload a UART/USB debug log from the goTenna relay radio to analyze firmware data." />
       return <FwLogTab results={results} />
+    case 'tak':
+      if (!results.some(r => r.log_format === 'tak'))
+        return <EmptyTabState message="No TAK Server Logs Uploaded" detail="Upload a TAK server CoT event stream (.json) to analyze position and latency data." />
+      return <TakTab results={results} />
+    case 'htmodem':
+      if (!results.some(r => r.log_format === 'htmodem'))
+        return <EmptyTabState message="No Next-Gen Modem Logs Uploaded" detail="Upload an ht-modem process log to analyze SDR/RF layer data." />
+      return <HtModemTab results={results} />
+    case 'htrouter':
+      if (!results.some(r => r.log_format === 'htrouter'))
+        return <EmptyTabState message="No Next-Gen Router Logs Uploaded" detail="Upload an ht-router process log to analyze network/link layer data." />
+      return <HtRouterTab results={results} />
     default:          return null
   }
 }
@@ -2871,6 +3100,17 @@ export default function App() {
       // time series. `ble_fail_count` is unaffected — it comes from the
       // SDK-error aggregate and is carried over whole below.
       const atakEvts  = (r.atak_events                 || []).filter(e => inWindow(e.timestamp))
+      const takEvts   = (r.tak_events                  || []).filter(e => inWindow(e.timestamp))
+
+      // Next-Gen Radio — own arrays, own inWindow filtering
+      const htmodemTx    = (r.htmodem?.tx_packets    || []).filter(p => inWindow(p.timestamp))
+      const htmodemFreq  = (r.htmodem?.freq_changes  || []).filter(f => inWindow(f.timestamp))
+      const htmodemPower = (r.htmodem?.power_changes || []).filter(p => inWindow(p.timestamp))
+      const htmodemTemps = (r.htmodem?.temp_samples_f || []).filter(t => inWindow(t.timestamp))
+      const htrouterSnaps = (r.htrouter?.stat_snapshots    || []).filter(s => inWindow(s.timestamp))
+      const htrouterMsgs  = (r.htrouter?.protocol_messages || []).filter(m => inWindow(m.timestamp))
+      const htrouterFwd   = (r.htrouter?.forward_events    || []).filter(f => inWindow(f.timestamp))
+      const htrouterTx    = (r.htrouter?.transmissions     || []).filter(t => inWindow(t.timestamp))
 
       // Recompute summary fields that derive from the filtered arrays
       const hops     = msgs.map(m => m.hop_count).filter(Boolean)
@@ -2902,6 +3142,70 @@ export default function App() {
         session_count:    r.summary?.session_count,
         // BLE failures derive from the SDK-error aggregate — not time-windowable, carried over whole
         ble_fail_count:   r.summary?.ble_fail_count,
+      } : r.log_format === 'tak' ? {
+        total_events:             takEvts.length,
+        pli_count:                takEvts.filter(e => e.category === 'PLI').length,
+        chat_count:               takEvts.filter(e => e.category === 'Chat').length,
+        marker_count:             takEvts.filter(e => e.category === 'Marker').length,
+        other_count:              takEvts.filter(e => e.category === 'Other').length,
+        // Filters on the serialized flag, not on a category list repeated here —
+        // the parser owns which values count as unrecognised, same reason the
+        // map filters on has_gps_fix rather than re-testing lat/lon.
+        unrecognized_count:       takEvts.filter(e => e.is_unrecognized_category).length,
+        unique_callsigns:         new Set(takEvts.map(e => e.callsign).filter(Boolean)).size,
+        no_fix_count:             takEvts.filter(e => !e.has_gps_fix && (e.category === 'PLI' || e.category === 'Marker')).length,
+        avg_latency_ms:           rnd(avg(takEvts.map(e => e.latency_ms).filter(v => v != null)), 1),
+        max_latency_ms:           (vals => vals.length ? Math.max(...vals) : null)(takEvts.map(e => e.latency_ms).filter(v => v != null)),
+        min_latency_ms:           (vals => vals.length ? Math.min(...vals) : null)(takEvts.map(e => e.latency_ms).filter(v => v != null)),
+        negative_latency_count:   takEvts.filter(e => e.latency_ms != null && e.latency_ms < 0).length,
+      } : r.log_format === 'htmodem' ? {
+        fpga_version_ok:         r.summary?.fpga_version_ok,
+        libiio_version:          r.summary?.libiio_version,
+        ad936x_init_error_count: r.summary?.ad936x_init_error_count,
+        gpsd_connect_error:      r.summary?.gpsd_connect_error,
+        tx_packet_count:         htmodemTx.length,
+        queued_count:            htmodemTx.filter(p => p.queued === true).length,
+        // Must include orphaned drops to match the parser's definition
+        // (HtModemResult.dropped_count = queued-false + orphaned_drop_count).
+        // Omitting them made the KPI fall by the orphan count the moment any
+        // window was applied, with no window that restored it. Orphans carry no
+        // timestamp of their own — they're drop lines with no open packet record
+        // — so they can't be windowed and are counted in every window.
+        dropped_count:           htmodemTx.filter(p => p.queued === false).length
+                                   + (r.htmodem?.orphaned_drop_count || 0),
+        // Whole-session values, deliberately not recomputed: a confirmation is
+        // attributed positionally to whichever packet was open, so slicing by
+        // window would split pairs and shift the ambiguity these count. Add the
+        // recompute here if either ever gets a KPI card — see ui-requirements.md.
+        transmitted_count:       r.summary?.transmitted_count,
+        retransmit_packet_count: r.summary?.retransmit_packet_count,
+        freq_change_count:       htmodemFreq.length,
+        power_change_count:      htmodemPower.length,
+        temp_sample_count:       htmodemTemps.length,
+        peak_pl_temp_f:          (vals => vals.length ? Math.max(...vals) : null)(htmodemTemps.map(t => t.pl_f)),
+      } : r.log_format === 'htrouter' ? {
+        router_pid:              r.summary?.router_pid,
+        modem_pid:               r.summary?.modem_pid,
+        snapshot_count:          htrouterSnaps.length,
+        connected_count:         htrouterSnaps.filter(s => s.connected === true).length,
+        disconnected_count:      htrouterSnaps.filter(s => s.connected === false).length,
+        // Cumulative session-lifetime counters — last value within the window,
+        // not a sum. See RouterStatSnapshot docstring (parser/models.py).
+        total_modem_xmit_failed: (vals => vals.length ? vals[vals.length - 1] : null)(
+          htrouterSnaps.map(s => s.output_modem_xmit_failed).filter(v => v != null)),
+        total_timeouts: (vals => vals.length ? vals[vals.length - 1] : null)(
+          htrouterSnaps.map(s => s.output_time_outs).filter(v => v != null)),
+        total_bad_crc: (vals => vals.length ? vals[vals.length - 1] : null)(
+          htrouterSnaps.map(s => s.input_bad_crc).filter(v => v != null)),
+        socket_warning_count:    r.summary?.socket_warning_count,
+        protocol_message_count:  htrouterMsgs.length,
+        msg_type_counts: htrouterMsgs.reduce((acc, m) => {
+          acc[m.msg_type] = (acc[m.msg_type] || 0) + 1
+          return acc
+        }, {}),
+        forward_event_count:     htrouterFwd.length,
+        transmission_count:      htrouterTx.length,
+        rotation_count:          r.summary?.rotation_count,
       } : {
         total_messages:     msgs.length,
         pli_count:          msgs.filter(m => m.message_type === 'location').length,
@@ -2943,6 +3247,24 @@ export default function App() {
         atak_events:                 atakEvts,
         atak_frequency_set_attempts: atakFreq,
         atak_radio_mode_queries:     atakModeQ,
+        tak_events:                  takEvts,
+        // Next-Gen Radio nested objects — spread the original so static
+        // session-level fields (fpga_version_ok, router_pid, etc.) survive,
+        // then override just the windowable arrays.
+        htmodem: r.htmodem ? {
+          ...r.htmodem,
+          tx_packets:      htmodemTx,
+          freq_changes:    htmodemFreq,
+          power_changes:   htmodemPower,
+          temp_samples_f:  htmodemTemps,
+        } : r.htmodem,
+        htrouter: r.htrouter ? {
+          ...r.htrouter,
+          stat_snapshots:    htrouterSnaps,
+          protocol_messages: htrouterMsgs,
+          forward_events:    htrouterFwd,
+          transmissions:     htrouterTx,
+        } : r.htrouter,
         summary: { ...r.summary, ...recomputed },
       }
     })
@@ -2978,6 +3300,11 @@ export default function App() {
     // relay-health and fw-log are always visible — dimmed when no relevant log loaded
     return true
   })
+  const hasHtModem  = results.some(r => r.log_format === 'htmodem')
+  const hasHtRouter = results.some(r => r.log_format === 'htrouter')
+  const visibleNextGenTabs = NEXTGEN_TABS.filter(t =>
+    (t.htmodemOnly && hasHtModem) || (t.htrouterOnly && hasHtRouter)
+  )
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
@@ -3048,7 +3375,8 @@ export default function App() {
             {visibleTabs.map(t => {
               const hasRelay = results.some(r => r.log_format === 'relay_manager')
               const hasFw    = results.some(r => r.log_format === 'fw_log')
-              const inactive = (t.relayOnly && !hasRelay) || (t.fwOnly && !hasFw)
+              const hasTak   = results.some(r => r.log_format === 'tak')
+              const inactive = (t.relayOnly && !hasRelay) || (t.fwOnly && !hasFw) || (t.takOnly && !hasTak)
               return (
                 <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
                   background: 'none', border: 'none', cursor: inactive ? 'default' : 'pointer',
@@ -3063,10 +3391,45 @@ export default function App() {
                   {t.label}
                   {t.atakOnly  && <span style={{ marginLeft: 4, fontSize: 8, color: C.yellow,   fontFamily: 'var(--mono)' }}>α</span>}
                   {t.relayOnly && <span style={{ marginLeft: 4, fontSize: 8, color: inactive ? '#2a3a52' : '#22d3ee', fontFamily: 'var(--mono)' }}>📡</span>}
+                  {t.takOnly   && <span style={{ marginLeft: 4, fontSize: 8, color: inactive ? '#2a3a52' : '#22d3ee', fontFamily: 'var(--mono)' }}>🛰️</span>}
                 </button>
               )
             })}
           </div>
+
+          {/* Next-Gen Radio tab group — deliberately visually separated: its
+              own row, its own accent color (--accent2 orange, already the
+              design system's "supplementary" color), and an explicit section
+              label. Not rendered at all until a matching log is loaded. */}
+          {visibleNextGenTabs.length > 0 && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 0, padding: '0 36px',
+              borderBottom: '1px solid var(--border2)',
+              background: 'rgba(255,107,53,0.06)',
+              flexShrink: 0, flexWrap: 'wrap', backdropFilter: 'blur(4px)',
+            }}>
+              <span style={{
+                fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.12em', textTransform: 'uppercase',
+                color: 'var(--accent2)', padding: '10px 14px 12px 0', flexShrink: 0,
+                borderRight: '1px solid var(--border2)', marginRight: 10, whiteSpace: 'nowrap',
+              }}>
+                ⚡ Next-Gen Radio
+              </span>
+              {visibleNextGenTabs.map(t => (
+                <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  padding: '10px 16px 12px',
+                  fontFamily: "'Barlow Condensed',sans-serif", fontSize: 13, fontWeight: 600,
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                  color: activeTab === t.id ? 'var(--accent2)' : C.muted,
+                  borderBottom: `2px solid ${activeTab === t.id ? 'var(--accent2)' : 'transparent'}`,
+                  marginBottom: -1, transition: 'color 0.15s, border-color 0.15s',
+                }}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Tab content */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '4px 36px 32px' }}>

@@ -19,6 +19,17 @@ jobs:
         with:
           python-version: "3.12"
 
+      # tests/test_time_range_exec.py executes the real extractTimeRange() from
+      # FileUpload.jsx under node — the only test that runs that function rather
+      # than re-running its regex literals in Python. It skips when node is
+      # absent, so without this step it would skip here and the guard would
+      # exist only on developer machines. No npm install: the driver is a plain
+      # .mjs file with no dependencies.
+      - name: Set up Node (for the JS-execution tests)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip

@@ -1,0 +1,16 @@
+2026-01-05 08:00:00 Starting ht-router (/usr/bin/ht-router)...
+2026-01-05 08:00:00 ht-router started (pid 999)
+2026-01-05T08:00:00.200000Z: nb_modem_start: started ht-modem pid 111
+2026-01-05T08:00:00.300000Z: input.subframe.count 0
+2026-01-05T08:00:00.301000Z: input.total_m2m 5
+2026-01-05T08:00:00.302000Z: output.total_bytes 100
+2026-01-05T08:00:00.303000Z: connected 1
+2026-01-05T08:00:05.100000Z: input.subframe.count 77
+2026-01-05T08:00:05.150000Z: reopened log file
+2026-01-05T08:00:10.100000Z: us_warn @ udp_write.486: sendto: (22) Invalid argument
+2026-01-05T08:00:15.100000Z: input.subframe.count 1
+2026-01-05T08:00:15.101000Z: input.total_m2m 3
+2026-01-05T08:00:15.102000Z: output.total_bytes 300
+2026-01-05T08:00:15.103000Z: connected 0
+2026-01-05T08:00:20.100000Z: input.subframe.count 2
+2026-01-05T08:00:20.101000Z: output.total_bytes 500
