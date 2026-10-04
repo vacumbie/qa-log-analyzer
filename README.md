@@ -2,11 +2,23 @@
 
 A local log parsing and visualization tool for goTenna mesh network diagnostic data.
 
-Supports four log formats:
+Supports eight log formats:
+
+**goTenna radios and apps**
 - **Diagnostic** — goTenna Pro+ app export (`diagnostic_*.txt`, named device files)
 - **RSDK** — Android/iOS SDK logs from field sessions (Pro+ app)
-- **ATAK** — Android ATAK plug-in logs (regular and enhanced)
+- **ATAK** — Android ATAK plug-in logs (regular and enhanced, including plug-in v3.0)
 - **Relay Manager** — Android logcat dumps from the goTenna Relay Manager app (network polling and scheduled health check sub-types)
+- **FW Log** — relay radio firmware UART/USB serial debug console
+
+**⚡ Next-Gen Radio (SDR/FPGA platform)**
+- **HT-Modem** — `ht-modem` process log (SDR/RF layer)
+- **HT-Router** — `ht-router` process log (network/link layer)
+
+**Server-side**
+- **TAK Server** — Cursor-on-Target (CoT) event stream export (JSON array or NDJSON)
+
+The format is detected automatically from the file name and content — see [Format Detection](#format-detection).
 
 ## Stack
 
@@ -15,8 +27,9 @@ Supports four log formats:
 | Parser | Python 3.10+ |
 | API | FastAPI + Uvicorn |
 | UI | React 18 + Vite + Chart.js 4.4.1 |
+| Maps | Leaflet 1.9.4 (loaded from CDN, not npm) |
 | Tests | Pytest |
-| Fonts | Barlow Condensed · Share Tech Mono |
+| Fonts | Barlow Condensed · Rajdhani · Share Tech Mono |
 
 ## Quick Start
 
@@ -59,34 +72,31 @@ cd C:\Users\Valerie.Cumbie\Documents\qa-log-analyzer
 
 ## Claude Code Agents
 
-The project includes nine Claude Code sub-agents in `.claude/agents/`. They
+The project includes ten Claude Code sub-agents in `.claude/agents/`. They
 are invoked from a Claude Code terminal session (`claude` from the repo root)
-and share the context defined in `CLAUDE.md`.
+and share the context defined in `CLAUDE.md`. `CLAUDE.md` is the source of
+truth for the gate sequence below.
 
 ### Quality gate — run before merging
 
-These six agents form a pre-merge review pipeline. Run them in order for
-significant changes; run just `peer-reviewer` + `task-completion-validator`
-for routine fixes.
+Every feature or fix passes these six agents in order. Each one assumes the
+previous one has already passed.
 
-| Agent | Role | Invoke when |
-|-------|------|-------------|
-| `peer-reviewer` | Reviews code for correctness, cited findings only | Any branch before merge |
-| `claude-md-compliance-checker` | Verifies changes follow `CLAUDE.md` rules | After any significant change |
-| `jenny` | Audits implementation against `docs/` specs | Claiming a feature is complete |
-| `code-quality-pragmatist` | Flags unnecessary complexity | After implementing a feature |
-| `karen` | Reality-checks claimed completions end-to-end | Something feels off despite green tests |
-| `task-completion-validator` | Binary APPROVED / REJECTED gate | Final check before merge |
+| Step | Agent | Role |
+|------|-------|------|
+| 1 | `vera` | Unit test specialist — coverage depth, fixture realism, sentinel values, `DATA LIMITATION` entries in `parse_errors` |
+| 2 | `task-completion-validator` | End-to-end completion checklist — ParseResult chain, pytest clean, docs updated |
+| 3 | `jenny` | Spec compliance — implementation vs `docs/` and `CLAUDE.md` |
+| 4 | `karen` | Live browser verification — real log, real data, no dashes or NoData |
+| 5 | `peer-reviewer` | Pre-merge code review — cited findings only |
+| 6 | `claude-md-compliance-checker` | `CLAUDE.md` rules — ParseResult chain, detection order, temperature conversion, commit format |
 
-**Full gate** (new format, new tab, significant refactor):
 ```
-peer-reviewer → claude-md-compliance-checker → jenny → code-quality-pragmatist → karen → task-completion-validator
+vera → task-completion-validator → jenny → karen → peer-reviewer → claude-md-compliance-checker
 ```
 
-**Lightweight gate** (routine fixes):
-```
-peer-reviewer → task-completion-validator
-```
+**Optional:** `code-quality-pragmatist` — simplicity and readability check. Run
+it when a solution feels over-engineered, not as a routine checkbox.
 
 ### Workflow agents — day-to-day development
 
@@ -103,6 +113,7 @@ peer-reviewer → task-completion-validator
 run peer-reviewer on the current branch
 use log-analyst to analyze networkPolling.txt
 use parser-agent to add firmware version to the relay_manager parser
+run vera to audit coverage for the htrouter parser
 run docs-agent and verify the four docs reflect the current codebase
 run task-completion-validator on the relay_manager parser
 ```
@@ -113,15 +124,19 @@ run task-completion-validator on the relay_manager parser
 ```
 qa-log-analyzer/
 ├── parser/                   # Log parsing engine (Python)
-│   ├── diagnostic.py         # Parses goTenna Pro+ diagnostic format
-│   ├── rsdk.py               # Parses RSDK iOS/Android SDK log format
-│   ├── atak.py               # Parses Android ATAK plug-in log format
-│   ├── relay_manager.py      # Parses Relay Manager Android logcat format
+│   ├── diagnostic.py         # goTenna Pro+ diagnostic export (detection fallback)
+│   ├── rsdk.py               # RSDK iOS/Android SDK log
+│   ├── atak.py               # Android ATAK plug-in log (regular, enhanced, v3.0)
+│   ├── relay_manager.py      # Relay Manager Android logcat
+│   ├── fw_log.py             # Relay radio firmware UART/USB debug log
+│   ├── htmodem.py            # Next-Gen Radio ht-modem log (SDR/RF layer)
+│   ├── htrouter.py           # Next-Gen Radio ht-router log (network/link layer)
+│   ├── tak.py                # TAK server CoT event stream (JSON array / NDJSON)
 │   └── models.py             # Shared dataclasses (ParseResult, SystemSample, etc.)
 ├── api/                      # FastAPI REST bridge
 │   ├── main.py               # App entry point — uvicorn main:app
 │   └── routes/
-│       ├── parse.py          # POST /parse  — upload & parse log files
+│       ├── parse.py          # POST /parse  — upload, detect format, parse
 │       └── export.py         # GET  /export — download parsed data as CSV/JSON
 ├── ui/                       # React + Vite frontend
 │   └── src/
@@ -129,26 +144,38 @@ qa-log-analyzer/
 │       │   ├── ChartPanel.jsx        # All chart definitions and rendering
 │       │   ├── DataPointSelector.jsx # Data point toggle UI
 │       │   ├── DeviceSummary.jsx     # Per-device summary card
-│       │   └── FileUpload.jsx        # Upload modal with time window slider
+│       │   ├── FileUpload.jsx        # Upload modal with time window slider
+│       │   └── TakTab.jsx            # TAK Server tab — position map + latency chart
 │       ├── hooks/
+│       │   ├── useLeaflet.js         # Loads Leaflet from CDN (shared by both maps)
 │       │   └── useLogData.js         # Fetch + cache parsed results from API
-│       └── App.jsx                   # Main app — tabs, KPI row, filtering
+│       └── App.jsx                   # Main app — tabs (incl. ⚡ Next-Gen Radio group), KPI row, filtering
 ├── tests/                    # Pytest test suite
-│   ├── test_diagnostic.py
-│   ├── test_rsdk.py
+│   ├── test_<format>.py      # One per parser: atak, diagnostic, fw_log, htmodem,
+│   │                         #   htrouter, relay_manager, rsdk, tak
+│   ├── test_detect_format.py # Format detection order
+│   ├── test_parse_route.py   # API-path regression tests
+│   ├── test_time_range_*.py  # Time window scan + execution tests
+│   ├── test_timewindow_trigger.py
+│   ├── js/                   # Node helper for JS-execution tests
 │   └── fixtures/             # Sample log snippets for testing
 ├── docs/                     # Reference documentation
-│   ├── ui-requirements.md
 │   ├── parsing-requirements.md
-│   └── log-field-definitions.md
+│   ├── log-field-definitions.md
+│   ├── ui-requirements.md
+│   ├── atak_enhanced_log_analysis.md
+│   ├── atak_v3_early_integration_notes.md
+│   └── session_summary.md    # Running session history — read at the start of a session
+├── CLAUDE.md                 # Project rules shared by all Claude Code agents
 ├── .claude/
 │   └── agents/               # Claude Code sub-agents (quality gate + workflow)
+│       ├── vera.md
+│       ├── task-completion-validator.md
+│       ├── jenny.md
+│       ├── karen.md
 │       ├── peer-reviewer.md
 │       ├── claude-md-compliance-checker.md
-│       ├── jenny.md
 │       ├── code-quality-pragmatist.md
-│       ├── karen.md
-│       ├── task-completion-validator.md
 │       ├── parser-agent.md
 │       ├── docs-agent.md
 │       └── log-analyst.md
@@ -157,6 +184,26 @@ qa-log-analyzer/
 ```
 
 ---
+
+## Format Detection
+
+`_detect_format()` in `api/routes/parse.py` checks formats in this order, and
+**the order matters**:
+
+| Priority | Format | Detected by |
+|----------|--------|-------------|
+| 1 | `fw_log` | `[digits-digits, MODULE, LEVEL]` bracket lines |
+| 2 | `htmodem` | ctime-prefixed lines + modem markers (FPGA Version, AD936X, LIBIIO) |
+| 3 | `htrouter` | Stat-counter keys (`input.total_m2m`, `output.*`) or ht-router process markers |
+| 4 | `tak` | JSON with `receivedAt` + `nodeType` + `category` |
+| 5 | `atak` | JSON with `logId` / `connectionState` / `atakVersion` |
+| 6 | `relay_manager` | `com.gotenna.relaymanager` markers |
+| 7 | `rsdk` | `IosBleRadio`, `AndroidBleRadio`, or `GRIP_SENDER` |
+| 8 | `diagnostic` | Fallback when nothing else matches |
+
+Two rules are load-bearing: `tak` must sit immediately before `atak` (both are
+JSON with different fields), and `relay_manager` must come before `rsdk` (both
+contain `AndroidBleRadio` lines). Breaking either causes silent misdetection.
 
 ## Supported Data Points
 
@@ -184,6 +231,7 @@ qa-log-analyzer/
 > ⚠️ `hopCount` in `SendMessageResponse` is an SDK sequence counter — not RF mesh hop count. Excluded from all hop count analysis.
 
 ### ATAK format (Android ATAK plug-in)
+- Filenames: legacy `diagnostic_ATAK_<CALLSIGN>_<GID>_...` and v3.0 `diagnostic_<CALLSIGN>_<GID>_...` (no `ATAK_` segment) are both recognized
 - App version, ATAK version, device model, Android API level
 - Device health over time: battery, PA temp, connection state
 - Messages: PLI, text chat, map objects, file transfers
@@ -203,6 +251,60 @@ qa-log-analyzer/
 > ⚠️ Relay health attribute values (SNR, battery %, temperature °F, uptime, firmware version) are present in BLE payload bytes but not yet decoded — requires BLE protocol implementation.
 >
 > ⚠️ Stage logs confirmed. Prod logs not yet analyzed — environment detection will be updated when prod samples are available.
+
+### FW Log format (relay radio firmware, UART/USB debug console)
+- Device identity: origin hash (short address) from RHC response lines
+- RF configuration: device type, TX power, bit rate, region, frequencies, control and data channels
+- Channel energy samples (`last_rssi` per preamble detection) — the RSSI stand-in shown in the UI
+- Routing decisions: transmit / flood / echo / vine counts, plus duplicate suppression (already Rx / already TX)
+- Neighbor table: unique node hashes seen
+- Message-history buckets: rx'd / relayed / tx'd counts per 6-hour window
+- Health poll count, and ERROR / WARN counts per module (up to 20 unique messages each)
+
+> ⚠️ Timestamps are milliseconds since boot, not wall-clock time, so the time window step is skipped for this format.
+>
+> ⚠️ Serial number and firmware version are inside the binary RHC payload and are not extracted. `RSSI[]` lines are DEBUG-level and skipped; channel energy stands in for RSSI.
+>
+> ⚠️ "Battery stabilization" errors are a known firmware quirk and are counted separately from real errors.
+
+### HT-Modem format (⚡ Next-Gen Radio — SDR/RF layer)
+- Init checks: FPGA version, AD936X transceiver init, LIBIIO version, filter bank, gpsd connection
+- Calibration offsets: clock and Si4460
+- RX/TX frequency changes and TX power level changes over time
+- TX packet lifecycle: encoding details, queued vs dropped (CSMA queue full), and RF "Packet Transmitted" confirmations
+- Thermal: LPD / FPD / PL Zynq zones about every 10 seconds (logged in °C, displayed in °F), plotted against elapsed time
+
+> ⚠️ An AD936X init failure produces ~20 near-identical error lines from one root cause; they are collapsed into a single `parse_errors` entry.
+>
+> ⚠️ Transmit confirmations carry no `packetID`, so they are matched to packets by position. `retransmit_count` counts extra confirmations, not proven RF retries (reported as a `DATA LIMITATION`).
+>
+> ⚠️ Some captures carry year-2036 timestamps because the radio's clock was never set.
+
+### HT-Router format (⚡ Next-Gen Radio — network/link layer)
+- Session identity: router PID and the `ht-modem` PID it started (a correlation key when both logs are loaded)
+- UDP client/management sockets and startup socket warnings
+- Protocol messages: client-hdr / mgt-hdr type breakdown with source and destination node addresses
+- Management hub forward events
+- Periodic stat snapshots (`input.*` / `output.*` counters, about every 10 seconds) and a connection-state timeline
+
+> ⚠️ Snapshot counters are cumulative session-lifetime totals, not per-interval values. A session total is the last snapshot's value, never a sum.
+>
+> ⚠️ Snapshot schemas differ between sessions — a session that never transmitted omits the `output.*` group entirely. Absent fields stay absent (shown as —), never as zero.
+>
+> ⚠️ Rotated files (e.g. `ht-router_log.1`) are detected correctly by content but are currently rejected by the upload dropzone because of the extension (backlog).
+
+### TAK Server format (server-side CoT event stream)
+- Two container shapes: JSON array, or NDJSON with one logger-wrapped event per line
+- Per event: device time, server receipt time, latency (receipt − event time), category, CoT type, uid, callsign, node type, platform
+- Positions: lat/lon with no-fix detection (the CoT `0,0` convention)
+- Raw CoT XML retained per event
+- UI: Leaflet position map (one color per callsign) and latency scatter chart
+
+> ⚠️ Server-side source — no serial, GID, firmware, battery, thermal, RSSI, or hop count. Excluded from the Health Score.
+>
+> ⚠️ Negative latency is real data (the device's clock runs ahead of the server), not a parsing error.
+>
+> ⚠️ Chat message bodies and device telemetry inside the raw CoT XML are not extracted.
 
 ---
 

@@ -417,7 +417,7 @@ function UploadModal({ onFiles, loading, onClose }) {
             </div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--muted)', marginTop: 2 }}>
               {step === 'drop'
-                ? 'Accepts .txt · .log · .json · diagnostic, RSDK, ATAK, Relay Manager, and TAK Server formats'
+                ? 'Accepts .txt · .log · .json · diagnostic, RSDK, ATAK, Relay Manager, FW log, HT-Modem, HT-Router, and TAK Server formats'
                 : step === 'range-unavailable'
                 ? `${pending.length} file${pending.length > 1 ? 's' : ''} · time filtering unavailable · full log will be analysed`
                 : `${pending.length} file${pending.length > 1 ? 's' : ''} · drag handles to narrow the analysis window · all times UTC`}
@@ -589,7 +589,7 @@ export default function FileUpload({ onFiles, loading, error, variant = 'header'
             go<span style={{ color: '#e8f4ff' }}>Tenna</span> Log Parser
           </div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', marginBottom: 28 }}>
-            Upload diagnostic, RSDK, or ATAK log files to begin analysis
+            Upload any of 8 supported log formats — diagnostic, RSDK, ATAK, Relay Manager, FW log, HT-Modem, HT-Router, or TAK Server — to begin analysis
           </div>
           <button
             onClick={() => setOpen(true)}
