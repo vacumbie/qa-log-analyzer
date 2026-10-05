@@ -2507,6 +2507,84 @@ function HtRouterTab({ results }) {
   )
 }
 
+// ── CoT Dispatched to ATAK (ATAK plugin v3.0 builds e6227295 and ebb7b8c5) ─────
+// Counts of cotDispatchedToAtak events by cotType × destination, per device.
+// These are kept out of the Device Events Timeline (one row each would bury the
+// real lifecycle events). Destinations are read from the data, never from a
+// fixed list — the set is unconfirmed. cot_xml is deliberately never rendered.
+function CotDispatchSummary({ results }) {
+  const devices = results
+    .map(r => {
+      const dispatches = (r.atak_events || []).filter(e => e.event_type === 'cotDispatchedToAtak')
+      const counts = {}   // { cotType: { destination: n } }
+      const destinations = new Set()
+      for (const e of dispatches) {
+        const type = e.cot_type || '(none)'
+        const dest = e.destination || '(none)'
+        destinations.add(dest)
+        if (!counts[type]) counts[type] = {}
+        counts[type][dest] = (counts[type][dest] || 0) + 1
+      }
+      return {
+        label: r.device?.callsign || r.source_filename,
+        total: dispatches.length,
+        destinations: [...destinations].sort(),
+        rows: Object.entries(counts).sort((a, b) => {
+          const sumA = Object.values(a[1]).reduce((n, v) => n + v, 0)
+          const sumB = Object.values(b[1]).reduce((n, v) => n + v, 0)
+          return sumB - sumA || a[0].localeCompare(b[0])
+        }),
+      }
+    })
+    .filter(d => d.total > 0)
+
+  if (!devices.length) return null
+
+  const cell = { padding: '3px 8px', fontFamily: 'var(--mono)', fontSize: 9 }
+
+  return (
+    <>
+      <SectionHeader
+        icon="📤"
+        title="CoT Dispatched to ATAK"
+        sub="cotDispatchedToAtak counts by CoT type × destination · not listed in the Events Timeline · destination meanings unconfirmed"
+      />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 10, marginBottom: 16 }}>
+        {devices.map((d, i) => (
+          <div key={i} style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderLeft: `3px solid ${PALETTE[i % PALETTE.length]}`, borderRadius: 6, padding: '12px 14px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+              <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 13, color: PALETTE[i % PALETTE.length] }}>{d.label}</div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: C.muted }}>{d.total} dispatched</div>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border2)' }}>
+                  <th style={{ ...cell, textAlign: 'left', color: C.muted, fontWeight: 400 }}>CoT type</th>
+                  {d.destinations.map(dest => (
+                    <th key={dest} style={{ ...cell, textAlign: 'right', color: C.muted, fontWeight: 400 }}>{dest}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {d.rows.map(([type, byDest]) => (
+                  <tr key={type} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={{ ...cell, color: 'var(--text)' }}>{type}</td>
+                    {d.destinations.map(dest => (
+                      <td key={dest} style={{ ...cell, textAlign: 'right', color: byDest[dest] ? C.accent : C.dim }}>
+                        {byDest[dest] || '·'}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+      </div>
+    </>
+  )
+}
+
 function AtakTab({ results }) {
   const atakResults = results.filter(r => r.log_format === 'atak')
   if (atakResults.length === 0) return <Note>No ATAK logs loaded. Upload an ATAK plug-in .log file to see this tab.</Note>
@@ -2525,6 +2603,8 @@ function AtakTab({ results }) {
 
       <SectionHeader icon="🗓️" title="Device Events Timeline" sub="Connect · Disconnect · Power · PLI · Frequency · Relay changes" />
       <ChartPanel results={atakResults} selectedPoints={['atak_events_timeline']} />
+
+      <CotDispatchSummary results={atakResults} />
 
       {atakResults.some(r => (r.summary?.partially_received || 0) > 0) && (
         <>
