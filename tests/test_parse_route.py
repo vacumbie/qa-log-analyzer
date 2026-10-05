@@ -447,3 +447,50 @@ def test_htrouter_absent_link_layer_fields_serialize_as_null_not_zero():
     assert snapshot["input_bad_crc"] is None
     assert snapshot["input_crc_present"] is None
     assert snapshot["input_wrong_link_version"] is None
+
+
+# ── ATAK plugin v3.0 build ebb7b8c5 ───────────────────────────────────────────
+# The route parses a temp copy of the upload, so the ATAK parser never sees the
+# uploaded filename: device identity through the API comes from content alone.
+# These pin that the ebb7b8c5 identity, CoT and message fields survive the real
+# upload path, and that the CSV export keeps cot_xml intact.
+
+ATAK_EBB7B8C5 = "diagnostic_ALPHA_90000000000001_2026-10-02 13_26_58.66.log"
+
+
+def test_atak_ebb7b8c5_upload_routes_to_the_atak_parser():
+    assert _upload_fixture(ATAK_EBB7B8C5)["log_format"] == "atak"
+
+
+def test_atak_ebb7b8c5_upload_resolves_device_identity_from_content():
+    device = _upload_fixture(ATAK_EBB7B8C5)["device"]
+    assert (device["callsign"], device["gid"]) == ("ALPHA", "90000000000001")
+
+
+def test_atak_ebb7b8c5_upload_reports_real_radio_serial_not_unknown():
+    assert _upload_fixture(ATAK_EBB7B8C5)["device"]["radio_serial"] == "PNE000000001"
+
+
+def test_atak_cot_xml_survives_csv_export_verbatim():
+    """export.py keeps cot_xml so the CSV export 'loses nothing'. Each cell is a
+    long, quote-heavy XML document -- reading the CSV back must give every one
+    exactly as serialized."""
+    import csv
+
+    client = _export_client()
+    result = _upload_fixture(ATAK_EBB7B8C5)
+    expected = []
+    for e in result["atak_events"]:
+        if e["event_type"] == "cotDispatchedToAtak":
+            expected.append(e["cot_xml"])
+
+    session_id = client.post("/export/session", json=result).json()["session_id"]
+    response = client.get(f"/export/{session_id}/csv", params={"data_type": "atak_events"})
+    assert response.status_code == 200
+
+    exported = []
+    for row in csv.DictReader(io.StringIO(response.text)):
+        if row["event_type"] == "cotDispatchedToAtak":
+            exported.append(row["cot_xml"])
+    assert len(expected) == 8
+    assert exported == expected
