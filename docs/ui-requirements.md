@@ -1058,4 +1058,54 @@ are all unchanged). This is a label/wording pass, not a refactor.
 
 ---
 
-_Last updated: 2026-06-09_
+### Pro+ JSON Log — parser & tab — ⏳ Pending (2026-10-04)
+
+New format from the Pro+ app 3.2.0: NDJSON using the SDK Logging 2.0 record
+envelope, identical on iOS and Android. Four field captures were reviewed on
+2026-10-04; all observations are in `docs/proplus_early_integration_notes.md`.
+
+**Live defect until this ships:** today's detection classifies all four Pro+
+files as `atak`, because the ATAK content check matches `connectionState` /
+`deliveryStatus`. The ATAK parser then shows zero messages, an empty device
+identity, and a false DATA LIMITATION claiming battery and firmware are
+unavailable.
+
+**Scope agreed so far:**
+- Internal key `proplus`, display label **Pro+**. The existing Diagnostic format
+  is unchanged.
+- Detection must come before ATAK. The exact slot is decided after reviewing the
+  improved ATAK 3.0 logs, in case they now share this envelope.
+- Requirements first: `parsing-requirements.md`, `log-field-definitions.md`,
+  `ui-requirements.md`, and `CLAUDE.md` (detection order, data limitations).
+- Forward-compatible fields: read `hopCount` and `rssi` on every message type.
+  Absent shows as "not reported", never zero. Hop count, RSSI and battery
+  temperature are confirmed coming in future app builds.
+- Conditional DATA LIMITATIONs: emitted only when the field is absent in that log.
+- Unknown-field flag: report unrecognized fields rather than dropping them, so
+  new fields (e.g. battery temperature) get noticed. No guessing of names or
+  units. Temperatures display in °F.
+- Identity is the GID; the callsign is a label (it changed mid-session).
+  `senderGid 0` is never a device.
+- Platform comes from the phone model string: `applicationInfo.deviceInfo.deviceModel`,
+  falling back to `deviceConnected.modelNumber` (one iOS log has no
+  `applicationInfo` record).
+- iOS duplicate received entries are deduplicated on `logID` +
+  `messageTimestamp` + `senderUUID`, with the duplicate count reported.
+- Track the record `version` field.
+
+**Status:** ⏳ Pending — findings recorded, requirements not started.
+Branch: `feat/proplus-log-format`.
+
+---
+
+### parsing-requirements.md — stale "not yet created" wording for Next-Gen parsers — ⏳ Pending (2026-10-04)
+
+`docs/parsing-requirements.md` still describes `parser/htmodem.py` (line ~1054)
+and `parser/htrouter.py` (line ~1235) as "not yet created," although both
+shipped in PR #36. Docs-only wording fix; a good docs-agent task.
+
+**Status:** ⏳ Pending.
+
+---
+
+_Last updated: 2026-10-04_
