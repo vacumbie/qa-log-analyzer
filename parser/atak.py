@@ -30,6 +30,13 @@ from .models import (
 
 _TS_FMT_OUT = "%Y-%m-%d %H:%M:%S.%f"
 
+# Build ebb7b8c5 logs its first health record (connectionState CONNECTING) with
+# serialNumber "Unknown" before the radio has reported in. That is a placeholder,
+# not an identity, so it must never become device.radio_serial. None covers a
+# JSON null serialNumber (record.get() returns None, not the "" default), so the
+# device serial stays "" rather than becoming null.
+_SERIAL_PLACEHOLDERS = {"", "Unknown", None}
+
 # Filename pattern: diagnostic_ATAK_<CALLSIGN>_<GID>_<YYYY-MM-DD>_<HH_MM_SS_mmm>.log
 # The ATAK_ segment is optional: plugin v3.0 dropped it from the naming
 # convention (e.g. diagnostic_BARK_65043_2026-07-28_15_09_17_944.log), while
@@ -143,8 +150,9 @@ def _handle_device_health(record: dict, result: ParseResult) -> None:
             firmware=health.firmware_version,
         ))
 
-    # Capture radio identity from first health record
-    if not result.device.radio_serial and health.serial_number:
+    # Capture radio identity from the first health record that has a real serial.
+    # health.serial_number itself stays as logged, placeholder included.
+    if not result.device.radio_serial and health.serial_number not in _SERIAL_PLACEHOLDERS:
         result.device.radio_serial = health.serial_number
     if not result.device.radio_firmware and health.firmware_version:
         result.device.radio_firmware = health.firmware_version
@@ -197,6 +205,10 @@ def _handle_message(record: dict, result: ParseResult) -> None:
         transmitted_location=record.get("transmittedLocation"),
         originator_uuid=record.get("originatorUUID", ""),
         originator_callsign=record.get("originatorCallsign", ""),
+        receiver_callsign=record.get("receiverCallsign", ""),
+        receiver_uuid=record.get("receiverUUID", ""),
+        sender_uuid=record.get("senderUUID", ""),
+        version=record.get("version"),
     )
     result.atak_messages.append(atak_msg)
 
@@ -251,6 +263,11 @@ def _handle_event(record: dict, result: ParseResult) -> None:
 
     elif event_type == "relayModeUpdated":
         atak_event.relay_mode_enabled = event.get("isRelayModeEnabled")
+
+    elif event_type == "cotDispatchedToAtak":
+        atak_event.cot_type = event.get("cotType", "")
+        atak_event.destination = event.get("destination", "")
+        atak_event.cot_xml = event.get("cotXml", "")
 
     result.atak_events.append(atak_event)
 
@@ -394,6 +411,37 @@ def _handle_sdk_log(record: dict, result: ParseResult) -> None:
             state["first_ts"] = ts_str
         if state["last_ts"] is None or ts_str > state["last_ts"]:
             state["last_ts"] = ts_str
+
+
+# ── Radio serial fallback ─────────────────────────────────────────────────────
+
+def _fill_radio_serial_fallback(result: ParseResult) -> None:
+    """
+    Health records are the primary radio-serial source (_handle_device_health).
+    When none of them carries a real serial, fall back to deviceConnected, then
+    to the SDK Logging 2.0 deviceState serials. Runs after the record loop so the
+    priority holds regardless of record order — in build ebb7b8c5 the
+    deviceConnected event is logged before the first health record with a real
+    serial (after the "Unknown" CONNECTING one).
+    """
+    if result.device.radio_serial:
+        return
+
+    for event in result.atak_events:
+        if event.event_type == "deviceConnected" and event.serial_number not in _SERIAL_PLACEHOLDERS:
+            result.device.radio_serial = event.serial_number
+            return
+
+    summary = result.atak_sdk_error_summary
+    if summary:
+        candidates = []
+        if summary.sample:
+            candidates.append(summary.sample.serial_number)
+        candidates.extend(summary.serial_numbers)
+        for serial in candidates:
+            if serial not in _SERIAL_PLACEHOLDERS:
+                result.device.radio_serial = serial
+                return
 
 
 # ── Filename parsing ──────────────────────────────────────────────────────────
@@ -557,6 +605,8 @@ def parse_atak_log(path: Path) -> ParseResult:
             "DATA LIMITATION — sdkError (SDK Logging 2.0) volume baseline unknown: "
             "counts are aggregated and informational, not a pass/fail signal."
         )
+
+    _fill_radio_serial_fallback(result)
 
     # Data-driven — fires only when it actually manifests. Observed in early
     # ATAK plugin v3.0 builds (no connectionState records at all in some

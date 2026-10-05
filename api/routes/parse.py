@@ -368,6 +368,12 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
                 "transmitted_location":  m.transmitted_location,
                 "originator_uuid":     m.originator_uuid,
                 "originator_callsign": m.originator_callsign,
+                # Present in plugin v3.0 builds e6227295 and ebb7b8c5; "" / None when
+                # a log lacks them (absent, not empty)
+                "receiver_callsign":   m.receiver_callsign,
+                "receiver_uuid":       m.receiver_uuid,
+                "sender_uuid":         m.sender_uuid,
+                "version":             m.version,
             }
             for m in r.atak_messages
         ]
@@ -387,6 +393,13 @@ def _result_to_dict(r: ParseResult) -> dict[str, Any]:
                 "update_status":    e.update_status,
                 "update_time_ms":   e.update_time_ms,
                 "relay_mode_enabled": e.relay_mode_enabled,
+                # cotDispatchedToAtak. cot_xml roughly doubles the response for a
+                # build ebb7b8c5 log (~165-170 KB of XML; 219 KB -> 422 KB on a
+                # real ebb7b8c5 sample). Kept so the JSON and CSV exports lose nothing;
+                # the UI never renders it.
+                "cot_type":         e.cot_type,
+                "destination":      e.destination,
+                "cot_xml":          e.cot_xml,
             }
             for e in r.atak_events
         ]

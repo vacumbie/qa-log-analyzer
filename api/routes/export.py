@@ -30,6 +30,9 @@ _store: dict[str, Any] = {}
 _CSV_TYPES = {
     "diagnostic": {"received_messages", "system_samples", "tx_events", "ble_fail_events"},
     "rsdk":       {"system_samples", "tx_events", "ble_fail_events"},
+    # atak_events carries a cot_xml column (raw CoT XML from cotDispatchedToAtak,
+    # ~200 rows per build ebb7b8c5 log). csv quotes it correctly, but the cells
+    # are long multi-attribute XML and include GPS positions — expect a wide file.
     "atak":       {"atak_messages", "atak_health_samples", "atak_events", "atak_app_launches", "system_samples"},
     # tak_events is a flat per-row table (one CoT event per row), so unlike
     # relay_manager and fw_log it is a natural CSV export. raw_cot is not

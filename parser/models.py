@@ -159,8 +159,9 @@ class AtakMessage:
     A single RF message record from an ATAK plug-in log.
 
     RSSI here is real dBm (already signed, not an unsigned byte like
-    the diagnostic format). originator_callsign/originator_uuid are always
-    empty strings in observed samples — identity for those is GID-only.
+    the diagnostic format). Whether originator/receiver callsigns and UUIDs
+    are populated varies by plugin build — empty in the older samples
+    analysed (identity GID-only), populated in e6227295 and ebb7b8c5.
     sender_callsign, however, IS populated starting with ATAK plugin v3.0
     (was always "" in earlier plugin versions/samples).
     """
@@ -183,7 +184,7 @@ class AtakMessage:
                                            # VEHICLE | CASEVAC | etc.
     pli_interval: str = ""                 # PLI messages only
     file_name: str = ""                    # fileTransfer messages only
-    receiver_gid: Optional[int] = None
+    receiver_gid: Optional[int] = None     # 0 on sent broadcasts = placeholder, not a GID
     hop_count: Optional[int] = None        # 0 when is_sender=True
     rssi: Optional[int] = None             # Real dBm (signed); 0 when is_sender=True
 
@@ -192,7 +193,25 @@ class AtakMessage:
     transmitted_location: Optional[dict] = None    # {lat, long, alt} in payload;
                                                    # None on textChat
     originator_uuid: str = ""              # ANDROID-* UUID; "" when missing
-    originator_callsign: str = ""          # always empty in observed samples
+    originator_callsign: str = ""          # varies by build: empty in the older samples
+                                           # analysed; in builds e6227295 and ebb7b8c5
+                                           # populated on received messages and on sent
+                                           # chat/mapObject/fileTransfer; "" only on
+                                           # sent PLI broadcasts
+
+    # Present in plugin v3.0 builds e6227295 (2026-08-24 logs) and ebb7b8c5
+    # (2026-10-02 logs); absent from the older ATAK test fixtures. Population
+    # varies by build, so the defaults mean "not in this log" — never
+    # invented. On received messages the receiver is the local device. Sent
+    # broadcasts carry receiverCallsign/receiverUUID as "" and receiver_gid 0
+    # (stored as logged -- "broadcast, no single receiver", never a real GID).
+    # Only sent PLI broadcasts also blank senderUUID/originatorCallsign; sent
+    # chat, mapObject and fileTransfer carry them. Sent PRIVATE chats carry the
+    # receiver identity and a non-zero receiver_gid.
+    receiver_callsign: str = ""
+    receiver_uuid: str = ""                # ANDROID-* UUID
+    sender_uuid: str = ""                  # ANDROID-* UUID
+    version: Optional[int] = None          # record schema version; 1 in all observed samples
 
     @property
     def is_pli(self) -> bool:
@@ -251,7 +270,8 @@ class AtakEvent:
     A lifecycle or configuration event from an ATAK plug-in log.
 
     event_type covers: deviceConnected | deviceDisconnected |
-    powerLevelUpdated | pliSettingUpdated | frequencyUpdated | relayModeUpdated
+    powerLevelUpdated | pliSettingUpdated | frequencyUpdated | relayModeUpdated |
+    firmwareUpdate | cotDispatchedToAtak
     """
     timestamp: str
     event_type: str = ""
@@ -283,6 +303,17 @@ class AtakEvent:
     # relayModeUpdated — observed 2026-06-04 (DARE log); not yet documented
     # elsewhere prior to this
     relay_mode_enabled: Optional[bool] = None
+
+    # cotDispatchedToAtak — present in plugin v3.0 builds e6227295 and ebb7b8c5;
+    # in the ebb7b8c5 logs it is the largest record type (~45% of records). It
+    # records the plugin handing a CoT event to ATAK, not a radio lifecycle
+    # change, so the UI summarises it
+    # instead of listing it in the Device Events Timeline. Destination meanings
+    # (EXTERNAL / INTERNAL / BROADCAST observed) are unconfirmed. cot_xml is kept
+    # verbatim so nothing is lost; the UI never renders it.
+    cot_type: str = ""                     # e.g. a-f-G-U-C, b-t-f
+    destination: str = ""
+    cot_xml: str = ""
 
 
 @dataclass
