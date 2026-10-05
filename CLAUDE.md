@@ -582,8 +582,9 @@ The canonical backlog lives in `docs/ui-requirements.md`. Summary:
 | `log-field-definitions.md` documented a `control_packets` collection that was never built | ✅ Done (2026-08-27) — recorded as **not parsed** in both specs, with the reason: `control type = 10` appears with both Transmit Level and SETTXRXFREQ, so the type alone identifies nothing and `freq_changes`/`power_changes` already carry the meaning |
 | Duplicate `### 16.` tab sections in `ui-requirements.md` | ✅ Done (2026-08-27) — next-gen renumbered to 17/18; cross-references updated. (Section 14, Network Topology, remains out of order at the end of the file — unimplemented, pre-existing) |
 | `extractTimeRange` was guarded only by re-running its regex literals in Python — nothing executed the function | ✅ Done (2026-08-27) — `tests/test_time_range_exec.py` runs the real function under node via `tests/js/run_extract_time_range.mjs`, covering the union order, `ctimeToMs`, UTC-vs-local and `range-unavailable` routing. **No npm packages** — node is already required for Vite, and the driver lifts the pure functions out by name rather than importing the JSX. Skips if node is absent |
-| Pro+ JSON log (app 3.2.0) — parser & tab | ⏳ Pending (2026-10-04) — currently misdetected as `atak`; detection must precede ATAK. Findings: `docs/proplus_early_integration_notes.md`; scope in `docs/ui-requirements.md` |
+| Pro+ JSON log (app 3.2.0) — parser & tab | ⏳ Pending (2026-10-04) — currently misdetected as `atak`; detection slot settled: after `htrouter`, before `tak`. Findings: `docs/proplus_early_integration_notes.md`; scope in `docs/ui-requirements.md` |
 | `parsing-requirements.md` describes `htmodem.py` / `htrouter.py` as "not yet created" | ⏳ Pending (2026-10-04) — docs-only wording fix |
+| ATAK plugin v3.0 build `ebb7b8c5` — radio serial `Unknown`, `cotDispatchedToAtak` events, new message fields, sent `rssi`/`hopCount` 0 | ⏳ Pending (2026-10-04) — scope in `docs/ui-requirements.md`; findings in `docs/atak_v3_early_integration_notes.md` |
 
 ---
 

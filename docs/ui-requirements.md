@@ -1073,8 +1073,10 @@ unavailable.
 **Scope agreed so far:**
 - Internal key `proplus`, display label **Pro+**. The existing Diagnostic format
   is unchanged.
-- Detection must come before ATAK. The exact slot is decided after reviewing the
-  improved ATAK 3.0 logs, in case they now share this envelope.
+- Detection slot (settled 2026-10-04): after `htrouter`, before `tak`, so `tak`
+  stays immediately before `atak`. Signal: a Pro+ record key (`"radioStatus"` or
+  `"applicationInfo"`) in the first 2,000 characters. Every Pro+ file has one;
+  the ATAK 3.0 logs (build `ebb7b8c5`) and all 38 test fixtures have neither.
 - Requirements first: `parsing-requirements.md`, `log-field-definitions.md`,
   `ui-requirements.md`, and `CLAUDE.md` (detection order, data limitations).
 - Forward-compatible fields: read `hopCount` and `rssi` on every message type.
@@ -1105,6 +1107,32 @@ and `parser/htrouter.py` (line ~1235) as "not yet created," although both
 shipped in PR #36. Docs-only wording fix; a good docs-agent task.
 
 **Status:** ⏳ Pending.
+
+---
+
+### ATAK plugin v3.0 (build ebb7b8c5) — parser & UI gaps — ⏳ Pending (2026-10-04)
+
+The 2026-10-02 BAMA and TESTLINE logs (plugin `3.0.0 (ebb7b8c5)`) detect and
+parse as `atak`, but four gaps surfaced. Observations are in
+`docs/atak_v3_early_integration_notes.md`.
+
+1. **Radio serial shows `Unknown`.** The first health record (`CONNECTING`)
+   carries the placeholder `serialNumber: "Unknown"`, and
+   `_handle_device_health` keeps the first serial it sees. Treat `"Unknown"` as
+   absent so the real serial is used (later health records, `deviceConnected`,
+   sdkError `deviceState`).
+2. **`cotDispatchedToAtak` events.** About 45% of records (206 / 200 per log).
+   Capture `cotType` and `destination` (decide whether `cotXml` is kept). Keep
+   them out of the Device Events Timeline, which lists every event at 30 px per
+   row, or summarise them separately. Confirm the timeline behaviour in the
+   browser first.
+3. **New message fields.** Add `receiverCallsign`, `receiverUUID`, `senderUUID`
+   and `version` to `AtakMessage`.
+4. **Sent-message `rssi: 0` / `hopCount: 0`.** Placeholders, not measurements.
+   Store as not-applicable on sent messages so no average or chart treats them
+   as real values. Low priority — the RF map already excludes sent messages.
+
+**Status:** ⏳ Pending — not started. Branch: `feat/atak-v3-update`.
 
 ---
 
