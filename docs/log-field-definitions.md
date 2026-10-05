@@ -408,7 +408,7 @@ Written approximately every 30 seconds. Provides radio health data.
 | Raw Field | Parsed As | Model Field | Notes |
 |-----------|-----------|-------------|-------|
 | `timestampInMillis` | Unix epoch ms → datetime | `health.timestamp` | Convert: `ms / 1000` |
-| `serialNumber` | string | `health.serial_number` | Radio serial, e.g. `PNE234100406` |
+| `serialNumber` | string | `health.serial_number` / `device.radio_serial` | Radio serial, e.g. `PNE234100406`. Stored on each sample **as logged**. `"Unknown"` (first `CONNECTING` record in build `ebb7b8c5`; `_SERIAL_PLACEHOLDERS` also includes `null`) and `""` are placeholders and never become `device.radio_serial`; fallbacks are `deviceConnected` then sdkError `deviceState.serialNumber` (see parsing-requirements ATAK rule 19) |
 | `connectionState` | string | `health.connection_state` | `CONNECTED` or `CONNECTING` |
 | `batteryLevel` | integer | `health.battery_pct` | Percent (0–100). Negative values skipped. |
 | `isCharging` | bool | `health.is_charging` | |
@@ -456,16 +456,18 @@ One record per RF message sent or received. The majority of records in a typical
 | `message.objectType` | string | `message.message_object_type` | `PIN`, `SHAPE`, `CIRCLE`, `ROUTE`, `VEHICLE`, `CASEVAC`, etc. Only present on `mapObject` type. |
 | `message.interval` | string | `message.pli_interval` | PLI interval in seconds. Only present on `pli` type. |
 | `message.fileName` | string | `message.file_name` | Only present on `fileTransfer` type. Real filename on completed transfers (e.g. `goTenna_ATAK_<ts>.jpg`); `"UNKNOWN"` when the transfer was incomplete. |
-| `receiverGid` | integer | `message.receiver_gid` | `0` when `isSender = true` |
+| `receiverGid` | integer | `message.receiver_gid` | `0` on sent **broadcasts** — placeholder meaning "broadcast, no single receiver", not a GID. Stored as logged (`receiver_gid == 0`, not `None`), the same way `rssi` `0` on sent messages is kept alongside `rssi_is_valid`. **Consumers must not treat `0` as a real GID** (e.g. the cross-device delivery matrix, backlog P3, must skip it). Sent PRIVATE chats carry the real receiver GID, non-zero. |
 | `hopCount` | integer | `message.hop_count` | RF hops. `0` when `isSender = true`. **Genuine RF routing data.** |
 | `rssi` | integer | `message.rssi` | Real dBm (already signed). `0` when `isSender = true` — placeholder, not a real reading. |
-| `originatorCallsign` | string | `message.originator_callsign` | **Always empty string** in observed samples. Identity is GID-only. |
+| `originatorCallsign` | string | `message.originator_callsign` | Empty string in the older samples analysed (pre-v3 and earlier v3 repo fixtures), where identity is GID-only. Populated on received messages in builds `e6227295` (2026-08-24 logs, 71–82% of messages) and `ebb7b8c5` (2026-10-02 logs), and on sent chat/mapObject/fileTransfer in `ebb7b8c5`; population varies by build. `""` only on sent PLI broadcasts. |
 | `originatorUUID` | string | `message.originator_uuid` | `ANDROID-*` UUID of the originator. `""` when missing. |
 | `loggingUserLocation` | object | `message.logging_user_location` | `{lat, long, alt}` — the logging device's own GPS at log time. Present on every message record. Used as the **receiver dot position** in the Hop Count Map. |
 | `transmittedLocation` | object | `message.transmitted_location` | `{lat, long, alt}` — location embedded in the message payload. Present on `pli`/`fileTransfer`/`mapObject`; **absent on `textChat`** (stored as `null`). Used as the **sender endpoint of RF link lines** in the Hop Count Map. |
-| `senderCallsign` | string | `message.sender_callsign` | **Populated starting with ATAK plugin v3.0** (was always empty string in earlier plugin versions/samples). Used as a fallback for `device.callsign` when the filename doesn't yield one — see `docs/atak_v3_early_integration_notes.md`. |
-| `senderUUID` | string | *(not used)* | **Always empty string** in this log format. |
-| `receiverCallsign` | string | *(not used)* | **Always empty string** in this log format. |
+| `senderCallsign` | string | `message.sender_callsign` | **Populated starting with ATAK plugin v3.0** (was always empty string in earlier plugin versions/samples). Used as a fallback for `device.callsign` when the filename doesn't yield one (via `POST /parse` that is always — see Filename Convention (ATAK)) — see `docs/atak_v3_early_integration_notes.md`. |
+| `senderUUID` | string | `message.sender_uuid` | Present in builds `e6227295` and `ebb7b8c5`; absent from the older ATAK test fixtures. `ANDROID-*` UUID of the sender on received messages and on sent chat/mapObject/fileTransfer; `""` only on sent PLI broadcasts. Absent in the older fixtures: stored `""`. |
+| `receiverCallsign` | string | `message.receiver_callsign` | Present in builds `e6227295` and `ebb7b8c5`; absent from the older ATAK test fixtures. The local device on received messages; `""` on every sent broadcast; the receiver's callsign on sent PRIVATE chats. Absent in the older fixtures: stored `""`. |
+| `receiverUUID` | string | `message.receiver_uuid` | Present in builds `e6227295` and `ebb7b8c5`; absent from the older ATAK test fixtures. `ANDROID-*` UUID of the local device on received messages; `""` on every sent broadcast; the receiver's UUID on sent PRIVATE chats. Absent in the older fixtures: stored `""`. |
+| `version` | integer | `message.version` | Present in builds `e6227295` and `ebb7b8c5`; absent from the older ATAK test fixtures. Record schema version; `1` on every message observed. Absent in the older fixtures: stored `null`, never a guessed value. |
 
 **Delivery statuses:**
 
@@ -483,7 +485,7 @@ One record per RF message sent or received. The majority of records in a typical
 >
 > ⚠️ **RSSI on sent messages is always 0.** When `isSender = true`, `rssi = 0` is a placeholder. The `rssi_is_valid` property returns `false` for these. Never include sent-message RSSI in signal quality analysis.
 >
-> ⚠️ **Callsign and UUID fields are always empty.** Node identity in ATAK logs is GID-only. Callsigns cannot be resolved from this format.
+> ⚠️ **Callsign and UUID fields are empty in the older samples analysed, and populated in some builds.** In the empty ones node identity is GID-only (apart from `senderCallsign`, populated from plugin v3.0). Population varies by build — never assume empty from the version alone. Builds `e6227295` and `ebb7b8c5` populate `originatorCallsign`, `receiverCallsign`, `receiverUUID` and `senderUUID` on received messages; on sent messages only PLI broadcasts leave `originatorCallsign`/`senderUUID` blank (chat, mapObject and fileTransfer carry them), and every sent broadcast leaves `receiverCallsign`/`receiverUUID` blank with `receiverGid` `0`.
 >
 > ⚠️ **`mapObject` subtypes are conditional.** A subtype only appears if a user actually sent that object type during the session. The parser must not fail on unknown `objectType` values.
 
@@ -509,6 +511,9 @@ Lifecycle and configuration events.
 | `event.updateStatus` | string | `event.update_status` | e.g. `"STARTED"`. Present on `firmwareUpdate` only. |
 | `event.updateTimeInMillis` | int | `event.update_time_ms` | Present on `firmwareUpdate` only. |
 | `event.isRelayModeEnabled` | bool | `event.relay_mode_enabled` | Present on `relayModeUpdated` only. Observed 2026-06-04 (DARE log). |
+| `event.cotType` | string | `event.cot_type` | Present on `cotDispatchedToAtak` only. CoT type, e.g. `a-f-G-U-C`, `b-t-f`, `token-request`. |
+| `event.destination` | string | `event.destination` | Present on `cotDispatchedToAtak` only. `EXTERNAL`, `INTERNAL`, `BROADCAST` observed; meanings unconfirmed, open set. |
+| `event.cotXml` | string | `event.cot_xml` | Present on `cotDispatchedToAtak` only. Raw CoT XML, kept verbatim (includes positions). Serialized to the API and CSV export; **never rendered in the UI**. |
 
 **Event types:**
 
@@ -521,6 +526,7 @@ Lifecycle and configuration events.
 | `frequencyUpdated` | Frequency set changed (regular log only — not observed in enhanced log) |
 | `firmwareUpdate` | Radio firmware update lifecycle (e.g. `updateStatus="STARTED"`). A significant QA event — an update mid-session can explain degraded behavior. |
 | `relayModeUpdated` | Relay mode toggled (`isRelayModeEnabled`). Relay mode extends a goTenna network via a relay node. Observed 2026-06-04. |
+| `cotDispatchedToAtak` | The plugin handing a CoT event to ATAK. Absent from the older ATAK test fixtures; present in plugin v3.0 builds `e6227295` (1994 / 2442 / 778 across three 2026-08-24 logs) and `ebb7b8c5` (206 in BAMA, 200 in TESTLINE, 2026-10-02), where it is the largest record type. Excluded from the Device Events Timeline; counted by `cot_type` and `destination` per device in the ATAK tab card **CoT Dispatched to ATAK**. |
 
 > ⚠️ **Other known radio modes not yet observed as app-level events:** goTenna
 > radios also support **Limited Mode** (device physically off, connected to
@@ -642,7 +648,9 @@ observed there directly, distinct from these polls.
 diagnostic_ATAK_<CALLSIGN>_<GID>_<YYYY-MM-DD>_<HH_MM_SS_mmm>.log
 ```
 
-The parser extracts `CALLSIGN` and `GID` from the filename. These are the **only source of callsign** for ATAK logs since all callsign fields in the JSON are empty.
+The parser extracts `CALLSIGN` and `GID` from the filename **only when called directly**. Through `POST /parse` the upload is parsed from a temp file (`tmpXXXX.log`), so the filename never matches and the UI always shows the content fallbacks below (correction 2026-10-05). Plugin v3.0 dropped the `ATAK_` segment, which `_FILENAME_RE` treats as optional. When the filename does not match, callsign falls back to the device's own sent `senderCallsign` and GID to the first Device Health `gid` or the own sent message's `senderGid`, whichever is logged first (`parser/atak.py:159`, `parser/atak.py:216`). Plugin v3.0's real filename form does not match the regex (below), so the fallbacks are the normal path.
+
+> ⚠️ **Real build `ebb7b8c5` filenames are not matched** (2026-10-05). They use a space before the time and a dot before the milliseconds, e.g. `diagnostic_<CALLSIGN>_<GID>_2026-10-02 13_26_58.66.log`, where the regex expects `_<HH_MM_SS_mmm>`. Both real logs still resolve callsign and GID via the content fallbacks above. The three `e6227295` logs (2026-08-24) use the same form. Regex change deferred (backlog: "Upload filename not passed to parsers" in `ui-requirements.md`).
 
 ---
 
@@ -981,7 +989,7 @@ These fields are computed by the parser or API layer — they do not appear dire
 | **RSSI storage** | Unsigned byte (137–237) | Real dBm (signed) | Real dBm (signed) |
 | **RSSI conversion needed** | Yes: `value − 256` | No | No |
 | **Hop count reliability** | ✅ Genuine RF routing data | ✅ Genuine when from `GRIP_Receiver` incoming fields (`grip_messages.hops`); ❌ legacy `SendMessageResponse` counter still excluded | ✅ Genuine RF routing data |
-| **Callsign availability** | ✅ Present in received messages | ✅ Via ContactManager lines (not yet parsed) | ❌ Always empty — filename only |
+| **Callsign availability** | ✅ Present in received messages | ✅ Via ContactManager lines (not yet parsed) | ⚠️ Empty in the older samples analysed; populated in some builds (`e6227295`, `ebb7b8c5`) — otherwise filename (direct calls only) or own sent `senderCallsign` |
 | **Sent message records** | ❌ Not recorded | Partial (TX outcomes only) | ✅ `isSender = true` records |
 | **PLI sent counter** | ❌ Always 0 | N/A | ✅ `SENT` delivery status |
 | **Platform** | iOS only | iOS or Android | Android only |

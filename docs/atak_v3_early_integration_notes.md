@@ -1,5 +1,5 @@
 # ATAK Plugin v3.0 — Early Integration Notes
-_Created: 2026-07-29 · Updated: 2026-10-04 (build `ebb7b8c5` logs)_
+_Created: 2026-07-29 · Updated: 2026-10-05 (build `ebb7b8c5` logs)_
 
 ## Purpose
 
@@ -55,6 +55,22 @@ worth doing given the naming may change again.
 segment as optional, and the own sent `senderCallsign` is a fallback. Both
 October logs return their callsign (BAMA, TESTLINE) and GID from the filename.
 
+**Correction 2026-10-05:** the original 2026-10-04 statement (callsign and GID
+come "from the filename") did not hold in either path. The real October filenames
+do not match `_FILENAME_RE` even on a direct `parse_atak_log()` call — they use a
+space before the time and a dot before the milliseconds
+(`diagnostic_<CALLSIGN>_<GID>_2026-10-02 13_26_58.66.log`). And through
+`POST /parse`, the parser never sees the real name anyway: `api/routes/parse.py` writes the upload to a
+`NamedTemporaryFile` and calls `parse_atak_log(tmp_path)`, so `_FILENAME_RE` sees
+a temp name (`tmpXXXX.log`) for **every** ATAK upload; only
+`result.source_filename` is restored afterwards. What the UI shows for the
+October logs is therefore always the content fallbacks: callsign from the device's
+own sent `senderCallsign`, GID from the first Device Health `gid` or the own sent `senderGid`, whichever is logged first. The
+same applies to the "own-device callsign comes back blank" paragraph above: via
+the API the filename was never the source. A log with no sent messages would show
+a blank callsign. Tracked as "Upload filename not passed to parsers" in
+`docs/ui-requirements.md`.
+
 ## What's present and reliable right now
 
 - **App metadata** — version, build number, ATAK version, device model, API
@@ -105,15 +121,31 @@ October logs return their callsign (BAMA, TESTLINE) and GID from the filename.
   carry `platformType: ANDROID`, `radioType: PRO_X_2`, the radio serial and
   `personalGid`.
 - **New message fields** — `receiverCallsign`, `receiverUUID`, `senderUUID`,
-  `version` (none appear in the existing ATAK test fixtures). Received messages name the local device as receiver; sent
-  broadcasts carry `receiverCallsign: ""` and `receiverGid: 0`.
-- **New event type `cotDispatchedToAtak`** (not in any existing ATAK test
-  fixture) — the largest record type: 206 of
+  `version` (absent from the older ATAK test fixtures; **not** `ebb7b8c5`-specific —
+  see the 2026-10-05 note below). Received messages name the local device as receiver; sent
+  broadcasts carry `receiverCallsign: ""` (and `receiverUUID: ""`) and
+  `receiverGid: 0` (placeholder, "no single receiver"); sent PRIVATE chats carry
+  the receiver identity and a non-zero `receiverGid`. Only sent **PLI**
+  broadcasts have a blank `senderUUID` / `originatorCallsign` — sent chat,
+  mapObject and fileTransfer carry them (checked against both real logs).
+- **Event type `cotDispatchedToAtak`** (absent from the older ATAK test
+  fixtures; also present in `e6227295`, see the 2026-10-05 note below) — the largest record type: 206 of
   462 (BAMA) and 200 of 408 (TESTLINE). Fields: `cotType`, `destination`
   (`EXTERNAL`, `INTERNAL`, `BROADCAST`), `cotXml`. Most CoT types appear as
   `EXTERNAL`/`INTERNAL` pairs (e.g. `a-f-G-U-C` 79/79 on BAMA); `b-t-f` does not
-  pair evenly (18/13 on BAMA, 16/13 on TESTLINE).
+  pair evenly (18/13 on BAMA, 16/13 on TESTLINE), and BAMA also has `b-t-f-d`
+  `INTERNAL` ×2 with no `EXTERNAL`. An observation, not a rule.
 - **No duplicate received entries** in either log.
+
+**Update 2026-10-05 — not `ebb7b8c5`-specific:** three real logs from the older
+plugin build `e6227295` (2026-08-24, `diagnostic_EUD-4_…_2026-08-24 18_08_17.821.log`
+and two siblings) already populate `originatorCallsign`, `receiverCallsign`,
+`senderUUID` and `receiverUUID` on most messages (71–82%), carry `version` `1` on
+every message, and contain `cotDispatchedToAtak` events (1994 / 2442 / 778). Their
+filenames also use the space + dotted-ms form. So the four message fields and the
+event are present in `e6227295` as well as `ebb7b8c5`, and absent only from the
+older ATAK test fixtures; population varies by build, and "empty" must never be
+pinned to a build boundary.
 
 ## What's missing or inconsistent — flagged honestly
 
@@ -185,6 +217,30 @@ October logs return their callsign (BAMA, TESTLINE) and GID from the filename.
 - **Frequency changes** — both ATAK logs record only the one `frequencyUpdated`
   at ~17:03. All four Pro+ logs also record changes at ~17:08, ~17:12 and
   ~17:18.
+
+## CoT XML in `cotDispatchedToAtak` — epoch-zero `<creator>` time (observed 2026-10-05)
+
+Observation only; no parser or UI decision is implied.
+
+In both 2026-10-02 `ebb7b8c5` logs, the embedded CoT XML in
+`cotDispatchedToAtak` records contains
+`<creator uid='resolve THIS' callsign='…' time='1970-01-01T00:00:00…Z' type='a-f-G-U-C'/>`.
+Counted read-only against the two logs: **4 occurrences per log**. Each log also
+holds further `<creator>` elements with ordinary 2026-10-02 times, so the 1970
+value is specific to these four.
+
+- **Which objects:** both map objects were created on an iOS device (the callsign
+  inside the element is that iOS device's callsign). One is a marker carrying
+  `<link production_time='…' parent_callsign='…'/>`; the other is a drawn circle
+  shape with `<contact callsign='Circle_…'/>`, stroke/fill colours and `<archive/>`.
+- **Occurrence arithmetic:** each object is dispatched `EXTERNAL` and `INTERNAL`,
+  so 2 objects x 2 destinations = 4.
+- **Reading the value:** `1970-01-01T00:00:00…Z` is an epoch-zero placeholder on
+  the `<creator>` element, not the object's real time.
+- **Quoting:** CoT XML attributes in these records are **single-quoted**.
+- **Why it matters:** this is what pushed the time-window slider range back to
+  1970 until `XML_TS_ATTR_RE` in `FileUpload.jsx` accepted single quotes (fixed
+  2026-10-05; see `ui-requirements.md`).
 
 ## Bugs found and fixed along the way
 

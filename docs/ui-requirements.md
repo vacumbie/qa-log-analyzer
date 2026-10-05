@@ -307,7 +307,8 @@ ATAK-only tab (`atakOnly`) — appears in the tab bar only when an ATAK plug-in 
 - **Message Delivery Status** — `atak_delivery_status` chart; includes `SUCCESS` (sender-side ACK), `FULLY_RECEIVED`, `SENT`, `DELIVERED`, `PARTIALLY_RECEIVED`
 - **Message Types** — `atak_message_types` chart; PLI · Chat · Map Objects · File Transfers
 - **Connection State Over Time** — `atak_connection_state` chart; CONNECTED vs CONNECTING health samples
-- **Device Events Timeline** — `atak_events_timeline` chart; connect / disconnect (with location) / power / PLI / frequency / firmwareUpdate changes
+- **Device Events Timeline** — `atak_events_timeline` chart; connect / disconnect (with location) / power / PLI / frequency / firmwareUpdate changes. **Excludes `cotDispatchedToAtak`** (about 200 per build `ebb7b8c5` log, one 30 px row each would bury the real events); those are summarised in the next card. Empty state reads "No device events (CoT dispatches are counted in their own card)" — a scoped count must state its scope, and "No events recorded" would be false for a log that is mostly CoT dispatches
+- **CoT Dispatched to ATAK** — `CotDispatchSummary` in `App.jsx`, shown only when a loaded log has `cotDispatchedToAtak` events. One card per device (callsign, or filename when no callsign): total dispatched, then a table with one row per `cot_type` (sorted by count, highest first) and one column per `destination` present in that log. Destinations come from the data, never a fixed list, since their meanings are unconfirmed. Empty cells show `·` in `C.dim`; counts in `C.accent`; device colour from `PALETTE`. Computed from `atak_events`, so it follows the time-window slider. **`cot_xml` is never rendered**, here or in the timeline
 - **Partially Received Messages** — `atak_partial_received` chart; shown only when `summary.partially_received > 0`. The Missing column shows `unknown` when `open_segments` is null (the -99 sentinel)
 - **SDK Logging 2.0 — sdkError Events** — shown only when `summary.sdk_error_count > 0`; KPI cards for total event count and radio types (e.g. `PRO_X_2`), plus tables of events by tag and top `additionalInfo`. Aggregated, never rendered per-record
 - **App Launches** — device cards; shown only when a log has more than one app launch (regular ATAK logs accumulate across launches)
@@ -604,6 +605,8 @@ the same visually separated Next-Gen Radio tab group as `ht-modem` (section
 - **TAK Server tab — `stale=` inflated the time-window range:** ✅ Fixed 2026-08-24. `extractTimeRange` scans raw text, so it matched the `time`/`start`/`stale` attributes inside each record's embedded CoT XML. `stale` is an expiry, not an observation — markers set it a full day out — so the 18.2-minute sample session was detected as a 24.2-hour range. `XML_TS_ATTR_RE` now strips attribute-form timestamps (`attr="…"`, or `attr=\"…\"` once escaped inside the JSON string) before the wall-clock scan, keeping the JSON members `"time"` and `"receivedAt"` that are the real session bounds; the `=` is the discriminator. Verified against every fixture: the sample reads 0.30 h, and all five non-TAK formats produce byte-identical ranges to before (their timestamps are bare, so the pattern matches nothing).
   Guarded by `tests/test_time_range_scan.py`, which reads the regex literals out of the JSX and re-runs them in Python — the scanner is client-side and there is no JS test runner, but the patterns are pure text-in/range-out, so this pins them in CI without adding npm packages.
   **Still true, and not this bug:** the slider snaps to hours *and* `RangeSlider` enforces a one-hour minimum window, so any sub-hour session — TAK or otherwise — occupies a single bucket and neither handle can move. Confirmed live by `karen` against the TAK sample: the slider renders and drags but changes nothing until a second, older log widens the overall range. That is slider design, not format-specific; it also keeps the map's "No event in this time window carries a GPS position" empty state unreachable for the current sample. ⏳ Worth a backlog item if sub-hour sessions become common.
+- **ATAK `cotDispatchedToAtak` — destination meanings unconfirmed, raw XML is heavy:** `destination` (`EXTERNAL`/`INTERNAL`/`BROADCAST` observed) is an open set with unconfirmed meanings, so it is never rendered through an allow-list. The raw `cot_xml` roughly doubles the `/parse` response (BAMA 219 KB to 422 KB) and adds a long column, containing positions, to the `atak_events` CSV export. Interpretive caveat — the data is parsed in full, so there is deliberately no `parse_errors` entry. Present in builds `e6227295` and `ebb7b8c5`.
+- **ATAK time-window slider — single-quoted CoT attributes:** ✅ Fixed 2026-10-05. Counterpart to the TAK `stale=` entry above. The CoT XML in `cotDispatchedToAtak` uses single-quoted attributes (`stale='…'`, `time='1970-01-01…'`); `XML_TS_ATTR_RE` stripped only double-quoted ones, so those values reached `TS_RE` and a 26-minute session read as 26 hours. `XML_TS_ATTR_RE` now accepts either quote.
 - **TAK Server tab — map legend lists unplotted callsigns:** `colorByCallsign` is built from all events rather than plotted ones, so callsigns with no GPS fix still get a legend swatch (6 swatches for 3 markers on the edge-case fixture). `PALETTE` also has 10 colours against 11 legend keys in the sample, so two callsigns share `#00d4ff`. Cosmetic; ⏳ pending.
 - **Topology tab** — Alpha/Beta feature; see Tab 14. Accuracy is inherently limited by what the logs can surface — the hardest data point in the dashboard to get right; must be clearly labeled as experimental in the UI
 - **Multi-log upload** — supported; drag-and-drop or file picker; multiple files processed simultaneously
@@ -1110,7 +1113,45 @@ shipped in PR #36. Docs-only wording fix; a good docs-agent task.
 
 ---
 
-### ATAK plugin v3.0 (build ebb7b8c5) — parser & UI gaps — ⏳ Pending (2026-10-04)
+### Upload filename not passed to parsers — ⏳ Pending (HIGH priority, 2026-10-05)
+
+`POST /parse` writes each upload to a `NamedTemporaryFile` and hands the temp path
+to the parser (`api/routes/parse.py`, `parse_*_log(tmp_path)`), so every parser sees
+a name like `tmpXXXX.log`. Only `result.source_filename` is restored afterwards
+(`upload.filename or result.source_filename`, `parse.py` ~line 1016). Anything a
+parser derives from `path.name` is therefore dead through the API and works only on
+direct calls (tests, scripts). Parsers that read the name today (all others only
+copy it into `source_filename`):
+
+- `parser/atak.py` — `_parse_filename(path.name, result)` (line ~553) extracts
+  callsign and GID via `_FILENAME_RE`. Through the API the UI always shows the
+  content fallbacks: callsign from the device's own sent `senderCallsign`, GID from
+  the first Device Health `gid` or own sent `senderGid`, whichever is logged first.
+- `parser/relay_manager.py` — `_detect_subtype` step 1, the filename signal for
+  `networkPolling` / `scheduledHealthRequest` (line ~431 passes `path.name`). Dead
+  through the API, so subtype is always decided by notification-type dominance or the
+  poll-interval fallback.
+
+**Scope:**
+1. Pass the original upload filename through `POST /parse` to every parser that
+   reads it (verify the list above when starting — it was checked by reading
+   `path.name` uses in `parser/` on 2026-10-05).
+2. Then widen ATAK `_FILENAME_RE` for the real v3 form: a space before the time and
+   a dot before the milliseconds, e.g.
+   `diagnostic_<CALLSIGN>_<GID>_2026-10-02 13_26_58.66.log` (also the form of the
+   three `e6227295` logs, 2026-08-24). Doing (2) before (1)
+   changes nothing in the UI.
+
+Not on branch `feat/atak-v3-update` — separate change. Related docs:
+`parsing-requirements.md` ATAK "Filename Convention", `log-field-definitions.md`
+"Filename Convention (ATAK)", `atak_v3_early_integration_notes.md` correction of
+2026-10-05.
+
+**Status:** ⏳ Pending — HIGH priority.
+
+---
+
+### ATAK plugin v3.0 (build ebb7b8c5) — parser & UI gaps — ✅ Items 1–3 built (2026-10-05, `feat/atak-v3-update`); item 4 not needed
 
 The 2026-10-02 BAMA and TESTLINE logs (plugin `3.0.0 (ebb7b8c5)`) detect and
 parse as `atak`, but four gaps surfaced. Observations are in
@@ -1132,8 +1173,121 @@ parse as `atak`, but four gaps surfaced. Observations are in
    Store as not-applicable on sent messages so no average or chart treats them
    as real values. Low priority — the RF map already excludes sent messages.
 
-**Status:** ⏳ Pending — not started. Branch: `feat/atak-v3-update`.
+**Status (2026-10-05):** Branch `feat/atak-v3-update`. All six quality gates
+passed (vera, task-completion-validator, jenny, karen — re-run after the UI
+fixes, 9/9 on both real logs — peer-reviewer, claude-md-compliance-checker);
+pytest 632 passed, 2 skipped.
+- **1 — ✅ Built.** `"Unknown"` and `""` are treated as absent at device level.
+  Fallback order: health, then `deviceConnected`, then sdkError `deviceState`.
+  BAMA and TESTLINE now report their real serials. Per-sample
+  serials stay as logged. See `parsing-requirements.md` ATAK rule 19.
+- **2 — ✅ Built.** `cot_type`, `destination` and `cot_xml` are captured and
+  serialized. The raw XML is kept (decided), which roughly doubles the
+  `/parse` response for these logs. The events are excluded from the Device
+  Events Timeline, so it now shows 3 rows per log. A new **CoT Dispatched to
+  ATAK** card is specified in §12. Browser-checked (karen, 2026-10-05): 3
+  timeline rows per log and every card cell matched on both real logs.
+- **3 — ✅ Built.** `receiver_callsign`, `receiver_uuid`, `sender_uuid` and
+  `version` are on `AtakMessage`, serialized and exported, but **not yet
+  rendered** by any UI component — a deliberate deferral, not an oversight
+  (no current view needs per-message receiver/sender identity). The older ATAK test fixtures give `""` / `null`. These fields (and `cotDispatchedToAtak`) are **not** `ebb7b8c5`-specific: build `e6227295` (2026-08-24) already carries them — see the 2026-10-05 note in `atak_v3_early_integration_notes.md`.
+- **4 — Not needed, already handled.** `AtakMessage.rssi_is_valid` already
+  excludes sent messages, and the summary hop statistics use received messages
+  only (`atak_received_messages`). No sent-message `0` reaches an average or a
+  chart.
+- **Found during this work, not fixed:** the real filenames
+  (`… 2026-10-02 13_26_58.66.log`, with a space and dotted milliseconds) do not
+  match `_FILENAME_RE`. Callsign and GID still resolve, from the own sent
+  `senderCallsign` and the first health `gid` or own sent `senderGid`, whichever is logged first. The regex was
+  deliberately left unchanged in this pass. Via `POST /parse` those content
+  fallbacks are the only path anyway — see "Upload filename not passed to
+  parsers" below.
+
+**Exposed by ebb7b8c5 logs during the browser check — ✅ Fixed (2026-10-05):**
+none of these was caused by the parser changes; the logs themselves triggered them.
+- **Time-window slider read a 26-minute session as 26 hours.** The CoT XML in
+  `cotDispatchedToAtak` records uses **single-quoted** attributes
+  (`stale='…'`, and even `time='1970-01-01…'`), and `XML_TS_ATTR_RE` in
+  `FileUpload.jsx` stripped only double-quoted ones, so those values reached
+  `TS_RE`. The regex now accepts either quote. Same class of bug as the TAK
+  `stale=` fix in Known Limitations.
+- **Battery tab "⚠ Multiple radio serials detected" with one radio.**
+  `hasMultiSerial` in `ChartPanel.jsx` counted the `"Unknown"` reconnect
+  placeholder on the first health sample as a second serial. It now ignores
+  `"Unknown"` (via `s !== 'Unknown'`, which re-derives the parser's placeholder set — see the extraction backlog entry below). The "Unknown (reconnecting)" chart line is unchanged, by design.
+- **ATAK tab footer** said callsign and UUID fields are always empty. It now reads "Callsign and UUID fields are populated only in some ATAK plugin builds; when empty, identity is GID-only." — population varies by build, matching `log-field-definitions.md`.
+- **Two small code fixes (2026-10-05):** `_SERIAL_PLACEHOLDERS` in `parser/atak.py` now includes `None`, so a JSON `null` `serialNumber` leaves `device.radio_serial` `""` rather than `null` (see `parsing-requirements.md` rule 19); and the `AtakEventsTimeline` empty state now reads "No device events (CoT dispatches are counted in their own card)" instead of "No events recorded".
+
+### Battery multi-serial warning — extract into a testable function — ⏳ Pending (2026-10-05)
+
+`hasMultiSerial` is an inline `const` inside `BatteryOverTime`
+(`ui/src/components/ChartPanel.jsx`). It was fixed 2026-10-05 to ignore the
+`"Unknown"` reconnect placeholder (see the `ebb7b8c5` section above), but only the
+API side is tested: `tests/test_atak.py` pins one real serial plus `"Unknown"` in
+serialized `atak_health_samples`. Nothing executes the JS that decides whether the
+warning shows.
+
+**Also:** its `s !== 'Unknown'` test re-derives the parser's placeholder set (`_SERIAL_PLACEHOLDERS` in `parser/atak.py`: `""`, `"Unknown"`, `None`) in JSX. Preferably serialize a per-sample placeholder flag so the UI doesn't repeat the definition.
+
+**Scope:** move it to a top-level function (e.g. `hasMultipleRadioSerials(results)`)
+so the node driver approach (`tests/js/`, lift-by-name, no npm packages) can
+execute it. Tests:
+- one real serial + `"Unknown"` -> `false`
+- two real serials -> `true`
+- empty/missing serial -> `false`
+
+**Status:** ⏳ Pending — low priority.
 
 ---
 
-_Last updated: 2026-10-04_
+### `CotDispatchSummary` device colour can differ from other ATAK cards — ⏳ Pending (2026-10-05)
+
+`CotDispatchSummary` indexes `PALETTE` by position in the *filtered* (has-dispatches) device list, so a device's colour here can differ from its colour in the other ATAK cards. Cosmetic; index by the device's position in the full ATAK result list instead.
+
+**Status:** ⏳ Pending — cosmetic.
+
+---
+
+### Time-window node tests don't cover head/tail sampling — ⏳ Pending (2026-10-05)
+
+`FileUpload.jsx` scans only the **first 64 KB and last 64 KB** of each file
+(`file.slice(0, 65536)` and `file.slice(Math.max(0, file.size - 65536))`,
+concatenated, ~line 339–346) inside the upload handler — not inside
+`extractTimeRange` itself. But `tests/js/run_extract_time_range.mjs` passes whole
+files to `extractTimeRange`, and its header comment and the docstring of
+`tests/test_time_range_exec.py` both say the head/tail sampling is covered. It is
+not. Pre-existing inaccuracy.
+
+**Why it matters:** sampling changes results. In the `ebb7b8c5` logs a whole-file
+scan with the old (double-quote-only) regex gave 1970 -> 2026-10-09, while the UI's
+sampled scan gave a narrower (still wrong) range. A test that feeds whole files
+cannot reproduce what the UI shows.
+
+**Scope:** either fix the docstrings to say sampling is not covered, or add a test
+that exercises the real head/tail sampling (keeping CLAUDE.md's top-level-function
+rule — the sampling would need to be lifted out of the handler into a named
+top-level function the driver can lift by name).
+
+**Status:** ⏳ Pending.
+
+### Narrow time windows — ATAK/Battery empty states and SDK card scope — ⏳ Pending (2026-10-05)
+
+Seen by karen with the two real ebb7b8c5 logs narrowed to a 16:00–17:00 UTC
+window that holds no health samples. Pre-existing, not caused by the ebb7b8c5
+work. Same principle as "An empty map must say it's empty" in CLAUDE.md.
+
+1. **Battery tab — misleading empty state.** "Battery % Over Time" says "No data
+   available for this log format" for ATAK logs that do carry battery data; the
+   window just holds no health samples. Should say the window is empty, not the
+   format (`BatteryOverTime` in `ChartPanel.jsx`).
+2. **ATAK tab — Radio Connection State Over Time** draws an empty grid with a
+   legend instead of a no-data message.
+3. **ATAK tab — SDK Logging 2.0 card** still shows the full-session counts (BAMA
+   47) inside the narrowed window. Unconfirmed whether it is meant to follow the
+   time window; decide, then either filter it or label it "whole session".
+
+**Status:** ⏳ Pending — low priority, UX honesty.
+
+---
+
+_Last updated: 2026-10-05_
