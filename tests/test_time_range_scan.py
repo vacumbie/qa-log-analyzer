@@ -182,13 +182,86 @@ def test_ctime_pattern_matches_nothing_outside_htmodem(fixture_name, scanner):
     assert scanner["CTIME_RE"].search(text) is None
 
 
+# ── Single-quoted CoT XML (ATAK plugin build ebb7b8c5) ───────────────────────
+# ebb7b8c5's cotDispatchedToAtak records embed CoT XML in a JSON string, like a
+# TAK stream does — but single-quoted (stale='…'), so the original double-quote-
+# only strip missed every attribute. The real logs carry two kinds of out-of-
+# session value there: a `stale` a full day out on markers, shapes and chats,
+# and a `time='1970-01-01…'` epoch placeholder on the `<creator>` element of map
+# objects drawn on an iOS device (four per real log, as EXTERNAL/INTERNAL pairs;
+# never on the token-request). The fixture carries both — the 1970 on a drawn
+# u-d-c-c circle's <creator> — so either one surviving the strip stretches an
+# ~8-minute session (17:00:00 -> 17:08:09 on 2026-10-02) to a day or to 56
+# years.
+
+ATAK_EBB7B8C5 = "diagnostic_ALPHA_90000000000001_2026-10-02 13_26_58.66.log"
+
+# Fixtures whose text legitimately carries XML attribute timestamps: every TAK
+# stream (each record embeds its raw CoT document) and the ebb7b8c5 ATAK log.
+# Explicit by name, not by format, because other ATAK fixtures — older plugin
+# builds — carry no CoT XML and must stay inside the sweep below.
+def _embeds_cot_xml(name: str) -> bool:
+    return name.startswith("tak_") or name == ATAK_EBB7B8C5
+
+
+def test_ebb7b8c5_fixture_still_carries_the_attributes_that_caused_the_bug():
+    """Fixture premise. If someone tidies the <creator> 1970 placeholder or the
+    day-out stale out of the fixture, the tests below would pass against the old
+    regex too and stop proving anything. The 1970 is checked on <creator>
+    specifically, because that is the only element the real logs carry it on."""
+    text = (FIXTURE_DIR / ATAK_EBB7B8C5).read_text(encoding="utf-8")
+    assert re.search(r"<creator [^>]*time='1970-01-01T", text) is not None
+    assert "stale='2026-10-03T" in text
+
+
+def test_single_quoted_cot_attribute_timestamps_are_all_stripped(scanner):
+    """Every time/start/stale attribute in the ebb7b8c5 CoT XML must go — one
+    survivor is enough to wreck the range."""
+    text = (FIXTURE_DIR / ATAK_EBB7B8C5).read_text(encoding="utf-8")
+    stripped = scanner["XML_TS_ATTR_RE"].sub("", text)
+    assert re.search(r"\w+='\d{4}-\d{2}-\d{2}", stripped) is None
+
+
+def test_ebb7b8c5_wall_clock_survivors_are_only_the_sdk_timestamp_members(scanner):
+    """The strip must remove attributes and nothing else: the two SDK Logging
+    2.0 records' JSON "timestamp" members are real session times and must
+    survive it. (The rest of this log's range comes from epoch-ms keys, which
+    the regex mirror here does not cover — test_time_range_exec.py asserts the
+    composed bounds.)"""
+    text = (FIXTURE_DIR / ATAK_EBB7B8C5).read_text(encoding="utf-8")
+    stripped = scanner["XML_TS_ATTR_RE"].sub("", text)
+    assert scanner["TS_RE"].findall(stripped) == ["2026-10-02T17:02:08", "2026-10-02T17:02:09"]
+
+
+def test_ebb7b8c5_wall_clock_span_is_seconds_not_days(scanner):
+    """Same mirror as the TAK span tests: with the strip applied the wall-clock
+    span is the 1 s between the two SDK records — not the 1970 placeholder and
+    not the next-day stale."""
+    text = (FIXTURE_DIR / ATAK_EBB7B8C5).read_text(encoding="utf-8")
+    assert _span_hours(text, scanner) < 1 / 60
+
+
 @pytest.mark.parametrize("fixture_name", sorted(
     f.name for f in FIXTURE_DIR.glob("*")
-    if f.is_file() and not f.name.startswith("tak_")
+    if f.is_file() and _embeds_cot_xml(f.name)
 ))
-def test_non_tak_fixtures_are_untouched_by_the_strip(fixture_name, scanner):
-    """The other five formats write bare timestamps with no preceding `=`, so
-    the pattern must match nothing in them. This is the regression guard: a
-    widened pattern would start eating real session timestamps."""
+def test_cot_xml_exemption_is_earned(fixture_name, scanner):
+    """Keeps the exemption list honest: every fixture excused from the sweep
+    below must actually contain something the strip removes. A fixture that
+    stops carrying CoT XML goes back under the guard instead of hiding there."""
+    text = (FIXTURE_DIR / fixture_name).read_text(encoding="utf-8", errors="replace")
+    assert scanner["XML_TS_ATTR_RE"].search(text) is not None
+
+
+@pytest.mark.parametrize("fixture_name", sorted(
+    f.name for f in FIXTURE_DIR.glob("*")
+    if f.is_file() and not _embeds_cot_xml(f.name)
+))
+def test_fixtures_without_cot_xml_are_untouched_by_the_strip(fixture_name, scanner):
+    """Formats with bare timestamps — diagnostic, rsdk, relay_manager, fw_log,
+    ht-modem, ht-router, and ATAK logs from builds that embed no CoT XML —
+    write no preceding `=` and quote, so the pattern must match nothing in
+    them. This is the regression guard: a widened pattern would start eating
+    real session timestamps."""
     text = (FIXTURE_DIR / fixture_name).read_text(encoding="utf-8", errors="replace")
     assert scanner["XML_TS_ATTR_RE"].sub("", text) == text

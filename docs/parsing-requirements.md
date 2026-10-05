@@ -77,7 +77,7 @@ Both log types share the **same JSON format and record structure**. The differen
 |---------|---------|----------|
 | Format | Newline-delimited JSON | Newline-delimited JSON |
 | Record types | Same 5 types | Same 5 types |
-| Callsign/UUID fields | `senderCallsign` populated in v3.0+ plugin logs (was always empty before); `originatorCallsign`/`originatorUUID`/`receiverCallsign` still always empty | Same |
+| Callsign/UUID fields | `senderCallsign` populated in v3.0+ plugin logs (was always empty before). In builds `e6227295` (2026-08-24) and `ebb7b8c5` (2026-10-02) received messages also carry `originatorCallsign`, `receiverCallsign`, `receiverUUID` and `senderUUID`; in `ebb7b8c5` sent chat, mapObject and fileTransfer carry `originatorCallsign` and `senderUUID` too, and only sent PLI broadcasts leave those two `""` (sent broadcasts always leave `receiverCallsign`/`receiverUUID` `""`). Empty in the older samples analysed (pre-v3 and earlier v3 repo fixtures); population varies by build | Same |
 | `frequencyUpdated` event | ✅ Present (full channel list) | ❌ Not observed |
 | `powerLevelUpdated` event | ❌ Not observed | ✅ Present |
 | `pliSettingUpdated` event | ✅ Present | ✅ Present |
@@ -100,10 +100,12 @@ diagnostic_[ATAK_]<CALLSIGN>_<GID>_<YYYY-MM-DD>_<HH_MM_SS_mmm>.log
 ```
 
 The `ATAK_` segment is optional — older captures include it, ATAK plugin
-v3.0 (2026-07+) drops it. Both are accepted. If neither the callsign nor GID
+v3.0 (2026-07+) drops it. Both are accepted by the regex, **but the real v3 form with a space before the time and dotted milliseconds (`…_2026-10-02 13_26_58.66.log`) does not match** (see Known Limitations). If neither the callsign nor GID
 can be extracted from the filename (unrecognized name, or GID missing),
 `device.callsign` falls back to `senderCallsign` on the device's own first
-sent message, and `device.gid` falls back to `senderGid` the same way.
+sent message, and `device.gid` falls back to `senderGid` the same way. GID comes from the first Device Health `gid` or the own sent message's `senderGid`, whichever is logged first.
+
+> ⚠️ **Filename parsing only applies when `parse_atak_log()` is called directly** (tests, scripts). Through `POST /parse`, `api/routes/parse.py` writes the upload to a `NamedTemporaryFile` and parses that, so `_FILENAME_RE` sees a temp name and the UI always shows the content-fallback callsign/GID. Only `result.source_filename` is restored afterwards. See the "Upload filename not passed to parsers" backlog item in `ui-requirements.md`.
 
 ### Fields to Parse
 
@@ -158,7 +160,7 @@ All rules from the enhanced log apply. Additional rules for the regular log:
 
 ### Known Limitations — ATAK Regular Log
 
-- **Callsign/UUID fields:** `senderCallsign` is populated in v3.0+ plugin logs (was always empty before); `originatorCallsign`/`originatorUUID`/`receiverCallsign`/other UUIDs remain always empty — same as enhanced log
+- **Callsign/UUID fields:** `senderCallsign` is populated in v3.0+ plugin logs (was always empty before). Builds `e6227295` and `ebb7b8c5` also populate `originatorCallsign`, `receiverCallsign`, `receiverUUID` and `senderUUID` on received messages (see rule 21 under the enhanced-log parsing rules); they are empty in the older samples analysed — population varies by build, same as enhanced log
 - **`transmitPowerDifferential`** real values (5–16) observed in regular log vs (1–3) in enhanced; meaning remains undocumented
 - **Multi-session accumulation** means the log may contain data from very different dates/contexts — always segment by App Info `launchTimeInMillis`
 - **`frequencyUpdated` vs `powerLevelUpdated`** — these appear to be different event types for overlapping purposes; relationship not yet fully documented
@@ -331,7 +333,7 @@ misleading 5/5. See the Health Score spec in `ui-requirements.md` (section 10).
 - **Pro+ Application:** 1 log type per platform confirmed. iOS: rsdk_log_JonathaniOS.txt analyzed. Android: rsdk_log_wendell_and.txt analyzed.
 - **Relay Health Manager — iOS:** Not yet confirmed whether an iOS version exists.
 - **Pro+ diagnostic (block format) — firmware 3.1.11 omits originator identity:** Some firmware-3.1.11 diagnostic logs omit the originator callsign and GID from Received Message blocks, so the sender of those messages cannot be identified. `parser/diagnostic.py` now surfaces this in `parse_errors` with a `DATA LIMITATION —` entry, emitted **only when it actually manifests** (a Received Message block carrying neither originator identity field) and reporting the affected count (`{n} of {total}`). Logs that include the fields emit nothing.
-- **Android ATAK Plug-in v3.0 — early integration (brand new FW/radio, expect churn):** Filenames drop the `ATAK_` segment (both conventions now accepted). `senderCallsign` is populated for the first time (was always empty pre-v3.0) and is used as a `device.callsign` fallback. Some early builds emit **zero device-health (`connectionState`) records** for a session — no battery/thermal/firmware/radio-health data at all; `parser/atak.py` surfaces this via a `DATA LIMITATION —` entry when it happens. RSSI has also been observed as always `0` in early v3.0 captures. See `docs/atak_v3_early_integration_notes.md` for the running baseline of what's actually available as the plugin/FW matures.
+- **Android ATAK Plug-in v3.0 — early integration (brand new FW/radio, expect churn):** Filenames drop the `ATAK_` segment (both conventions accepted by the regex, but the real space + dotted-ms form does not match, and via `POST /parse` the filename never reaches the parser — see Filename Convention). `senderCallsign` is populated for the first time (was always empty pre-v3.0) and is used as a `device.callsign` fallback. Some early builds emit **zero device-health (`connectionState`) records** for a session — no battery/thermal/firmware/radio-health data at all; `parser/atak.py` surfaces this via a `DATA LIMITATION —` entry when it happens. RSSI has also been observed as always `0` in early v3.0 captures. See `docs/atak_v3_early_integration_notes.md` for the running baseline of what's actually available as the plugin/FW matures.
 - **TAK server — server-side viewpoint, no radio identity:** The first non-device format. No serial, GID, firmware version, battery, thermal, RSSI or hop count — identity is callsign + CoT `uid` only, so it is excluded from the Health Score. Position uses the CoT `(0,0)` no-fix sentinel; `latency_ms` can legitimately be negative (device clock ahead of server, tracked as P8); GeoChat `<remarks>` bodies are not extracted (surfaced as a `DATA LIMITATION —` entry). See [TAK Server (CoT Event Stream)](#tak-server-cot-event-stream).
 - All temperatures stored internally in Celsius and must be converted to Fahrenheit for display.
 
@@ -438,10 +440,10 @@ One record per RF message sent or received.
 | `message.objectType` | string | `"PIN"` | Map object subtype (mapObject only) |
 | `message.fileName` | string | `"UNKNOWN"` | File name (fileTransfer only) |
 | `senderCallsign` | string | `""` | ⚠️ Empty in enhanced log — see Known Limitations |
-| `senderUUID` | string | `""` | ⚠️ Empty in enhanced log |
+| `senderUUID` | string | `""` | ⚠️ Empty in enhanced log (older samples analysed; populated in builds `e6227295` and `ebb7b8c5` — see rule 21) |
 | `originatorCallsign` | string | `""` | ⚠️ Empty in enhanced log |
 | `originatorUUID` | string | `""` | ⚠️ Empty in enhanced log |
-| `receiverGid` | int | `90215634664458` | `0` when isSender=true |
+| `receiverGid` | int | `90215634664458` | `0` on sent broadcasts — placeholder, not a GID (rule 21) |
 | `hopCount` | int | `1` | RF hops; `0` when isSender=true |
 | `rssi` | int | `-19` | dBm; `0` when isSender=true |
 | `receiverCallsign` | string | `""` | ⚠️ Empty in enhanced log |
@@ -487,6 +489,9 @@ Lifecycle and configuration change events.
 | `event.updateStatus` | string | `"STARTED"` | Present on `firmwareUpdate` only |
 | `event.updateTimeInMillis` | int | `1780500003000` | Present on `firmwareUpdate` only |
 | `event.isRelayModeEnabled` | bool | `true` | Present on `relayModeUpdated` only → `AtakEvent.relay_mode_enabled`. **Optional[bool]** — absent key stores `None`, not `False`; unknown relay state must never render as a confirmed OFF |
+| `event.cotType` | string | `"a-f-G-U-C"` | Present on `cotDispatchedToAtak` only → `AtakEvent.cot_type` |
+| `event.destination` | string | `"EXTERNAL"` | Present on `cotDispatchedToAtak` only → `AtakEvent.destination`. `EXTERNAL`, `INTERNAL`, `BROADCAST` observed; meanings unconfirmed — treat as an open set |
+| `event.cotXml` | string | `<event …>` | Present on `cotDispatchedToAtak` only → `AtakEvent.cot_xml`. Raw CoT XML, kept verbatim (contains positions). Serialized, never rendered in the UI |
 
 **Event types observed:**
 
@@ -498,6 +503,7 @@ Lifecycle and configuration change events.
 | `pliSettingUpdated` | 1 | PLI interval/mode changed |
 | `firmwareUpdate` | — | Firmware update lifecycle (`updateStatus`, `updateTimeInMillis`) — significant QA event |
 | `relayModeUpdated` | 2 | Relay mode toggled on/off (`isRelayModeEnabled`). This is the **confirmed** relay state — a discrete event, unlike the continuous `health.mode` telemetry. Only 2 observations to date, so absence of the flag is plausible and stays `None` |
+| `cotDispatchedToAtak` | 206 / 200 | Absent from the older ATAK test fixtures; present in builds `e6227295` (three 2026-08-24 logs: 1994 / 2442 / 778) and `ebb7b8c5` (BAMA / TESTLINE, 2026-10-02) — the largest record type in those logs (~45%). The plugin handing a CoT event to ATAK, not a radio lifecycle change. See rule 20 |
 
 #### 5. SDK Error Record (SDK Logging 2.0) — NEW
 
@@ -540,11 +546,11 @@ are general structured log events, not error-only records.
    - Has `event` → Event record
 3. **Timestamps:** All are Unix epoch milliseconds — divide by 1000 for seconds, then convert to datetime
 4. **Temperature:** `powerAmpTemperature` and `systemTemperature` are Celsius — convert to Fahrenheit for display
-5. **Callsigns/UUIDs:** All empty strings in this enhanced log format — do not rely on these fields
+5. **Callsigns/UUIDs:** All empty strings in this enhanced log format — do not rely on these fields. (Builds `e6227295` and `ebb7b8c5` populate several of them on received messages — see rule 21.)
 6. **Negative `deliveryTimeInMillis`:** Occurs in 767 records (18%) — caused by clock skew between devices, especially at high hop counts (3–4 hops). Flag but do not discard
 7. **`transmitPowerDifferential` = 255:** Seen during `CONNECTING` state — indicates value not yet valid; treat as null
 8. **`systemTemperature` = 0 during CONNECTING:** Placeholder, not a real reading — treat as null
-9. **Filename parsing:** Extract callsign, GID, and export timestamp from filename
+9. **Filename parsing:** Extract callsign, GID, and export timestamp from filename. Direct calls only — via `POST /parse` the parser sees a temp filename, so the UI shows the content fallbacks (see the note under "Filename Convention")
 10. **`numberOfOpenSegments` = -99:** Sentinel meaning the transfer was cancelled/timed out before the open-segment count was known — store as `null`, never the literal -99. Positive values (e.g. 183) are genuine and preserved.
 11. **`deliveryStatus` = SUCCESS:** Sender-side final-ACK confirmation; distinct from `FULLY_RECEIVED` (receiver assembled all segments). Only `deliveryTimeInMillis` on `SUCCESS`/`isSender` records is meaningful; receiver-side `0` is a placeholder.
 12. **`message.fileName`:** Real filename on completed `fileTransfer` records; `"UNKNOWN"` when incomplete.
@@ -562,6 +568,19 @@ are general structured log events, not error-only records.
 17. **Command status is an open set and is never confirmed state:** `QUEUED`, `COMPLETED`, `FAILED`, `CANCELLED`, and `TIMEOUT` are observed so far — do not treat that list as exhaustive, and never filter the UI through a hardcoded allow-list (a dropped status silently undercounts attempts). Missing `status` stores `""` with the record still retained. See "Radio Command Layer vs Confirmed State" below for why even `COMPLETED` is not confirmation.
 
 18. **`--- RSDK LOGS ---` divider:** Some field logs append a second, unwrapped section after the main JSON array closes — a divider line followed by bare `sdkError` records of the same shape. `_load_records()` skips the divider and the mid-file array-close artifact transparently, without logging parse errors. The skip is deliberately shaped to the known artifacts; genuinely malformed records must still surface a `parse_errors` entry rather than disappearing.
+
+19. **Radio serial — `"Unknown"` is a placeholder (build `ebb7b8c5`, 2026-10-05):** The first Device Health record of each 2026-10-02 log (`connectionState: CONNECTING`) carries `serialNumber: "Unknown"`. At **device level**, `"Unknown"` and `""` are treated as absent, so `device.radio_serial` takes the first real serial, in this priority order:
+    1. the first Device Health record with a real `serialNumber`
+    2. `deviceConnected` `event.serialNumber`
+    3. the SDK Logging 2.0 `deviceState.serialNumber` (retained sample first, then the distinct `serial_numbers`)
+
+    The fallbacks run after all records are read, so the priority holds regardless of record order (in these logs the order is the `"Unknown"` `CONNECTING` health record, then `deviceConnected`, then the first health record with a real serial — so `deviceConnected` is written before the first health record *with a real serial*). Each `AtakDeviceHealth.serial_number` keeps the value **as logged**, placeholder included — only the device-level identity skips it. The placeholder set (`_SERIAL_PLACEHOLDERS`, `parser/atak.py:38`) is `""`, `"Unknown"` and `None`, so a JSON `null` `serialNumber` also leaves `device.radio_serial` `""` rather than `null`. If no source has a real serial, `device.radio_serial` stays `""`. Verified on both real 2026-10-02 logs (BAMA, TESTLINE): each previously reported `Unknown` and now reports its real radio serial.
+
+20. **`cotDispatchedToAtak` events (present in builds `e6227295` and `ebb7b8c5`; absent from the older ATAK test fixtures):** Stored as `AtakEvent` with `cot_type`, `destination` and `cot_xml`. The raw XML is kept verbatim (decided 2026-10-05) so the JSON and CSV exports lose nothing. Observed destinations: `EXTERNAL`, `INTERNAL`, and `BROADCAST` (the last only on a single `token-request` per log); meanings unconfirmed, so the set is open. Observed in `ebb7b8c5`: most CoT types pair evenly `EXTERNAL`/`INTERNAL`; `b-t-f` does not (18/13 BAMA, 16/13 TESTLINE), and BAMA also has `b-t-f-d` `INTERNAL` ×2 with no `EXTERNAL`. These events are **excluded from the Device Events Timeline** and summarised on the ATAK tab instead (see `ui-requirements.md`). Every other `atak_events` consumer filters by `event_type`, so they are unaffected. `cot_xml` roughly doubles the `/parse` response for these logs (BAMA 219 KB to 422 KB) and appears as a long column in the `atak_events` CSV export.
+
+21. **New message fields (present in builds `e6227295` and `ebb7b8c5`):** `receiverCallsign` to `receiver_callsign`, `receiverUUID` to `receiver_uuid`, `senderUUID` to `sender_uuid`, and `version` to `version`. Absent from the older ATAK test fixtures (population varies by build; `e6227295` logs carry them on most messages, ~80%, with `version` `1`): the strings default to `""` and `version` to `None`, never invented. On received messages the receiver is the local device. Sent broadcasts carry `receiverCallsign` `""`, `receiverUUID` `""` and `receiverGid: 0`; sent PRIVATE chats carry the receiver's callsign/UUID and a non-zero `receiverGid`. `senderUUID` and `originatorCallsign` are blank only on sent **PLI** broadcasts (build `ebb7b8c5`; checked against both real 2026-10-02 logs; not checked for `e6227295`) — sent chat, mapObject and fileTransfer broadcasts carry them. All stored as logged. `version` is `1` on every message observed.
+
+    **`receiverGid: 0` on a sent broadcast is a placeholder** meaning "broadcast — no single receiver", not a GID. Same treatment as `rssi: 0` on sent messages: the parser keeps `receiver_gid == 0` as logged (never rewritten to `None`), and consumers must not treat `0` as a real GID — e.g. the cross-device delivery matrix (P3) must skip it when keying on receiver.
 
 ### Radio Command Layer vs Confirmed State — ATAK Enhanced Log
 
@@ -593,14 +612,15 @@ reason to believe the ack implies adoption.
 
 ### Known Limitations — ATAK Enhanced Log
 
-- **`senderCallsign` is populated starting with ATAK plugin v3.0** (was always empty in earlier plugin versions/samples) — used as the `device.callsign` fallback when the filename doesn't yield one. `originatorCallsign`/`receiverCallsign`/`senderUUID`/`receiverUUID` remain always empty; identity for those is GID-only (`originatorUUID` does carry an `ANDROID-*` UUID)
+- **`senderCallsign` is populated starting with ATAK plugin v3.0** (was always empty in earlier plugin versions/samples) — used as the `device.callsign` fallback when the filename doesn't yield one. In the older samples analysed (pre-v3 and earlier v3 repo fixtures), `originatorCallsign`/`receiverCallsign`/`senderUUID`/`receiverUUID` are empty and identity for those is GID-only (`originatorUUID` does carry an `ANDROID-*` UUID). Builds `e6227295` and `ebb7b8c5` populate them on received messages, and `ebb7b8c5` also on sent chat/mapObject/fileTransfer for `senderUUID`/`originatorCallsign` (rule 21). Population varies by build — never assume empty from the version alone
 - **Negative `deliveryTimeInMillis`** (767 records, 18%) indicates clock skew between originator and receiver devices; most common at hop counts 3–4. **Distinguish two patterns:** *sporadic* negatives (varying per message/hop, ~18% here) are normal inter-device skew; a *constant whole-session* offset uniform across all senders and hop counts is **host-clock skew** on the receiving device (see P6 — KNOT showed a fixed ≈ −2 h offset across all 50 senders). The parser captures both honestly; interpretation differs.
 - **`transmitPowerDifferential`** meaning is not fully documented — observed values 1–3 during normal operation and 255 during connecting state
 - **Regular user log format** not yet confirmed — need example to compare against enhanced format
 - **`PARTIALLY_RECEIVED` records** all appear to be `fileTransfer` type — may indicate file transfers are unreliable over mesh; needs further investigation
 - **`numberOfOpenSegments = -99` is a sentinel** meaning the transfer was cancelled before the segment count was known — treated as `null`/unknown in the UI, never displayed as -99
 - **Receiver-side `deliveryTimeInMillis = 0` on `fileTransfer`** is a placeholder, not a real delivery time — only meaningful when `isSender=true` and `deliveryStatus=SUCCESS`
-- **`serialNumber = "Unknown"` in Device Health records** is expected behavior during BLE reconnection (the health poll fires before the serial resolves) — not a parser error
+- **`serialNumber = "Unknown"` in Device Health records** is expected behavior during BLE reconnection (the health poll fires before the serial resolves) — not a parser error. It is a placeholder, so it is kept on the per-sample record but never used as `device.radio_serial` (rule 19)
+- **v3.0 filenames with a space and dotted milliseconds are not matched by `_FILENAME_RE`** (observed 2026-10-05 on the real build `ebb7b8c5` files, e.g. `diagnostic_<CALLSIGN>_<GID>_2026-10-02 13_26_58.66.log`). Callsign and GID still resolve, from content fallbacks: callsign from the device's own sent `senderCallsign`, GID from the first Device Health `gid` or the own sent message's `senderGid`, whichever is logged first (`parser/atak.py:159`, `parser/atak.py:216`). The three `e6227295` logs (2026-08-24) use the same space + dotted-ms filename form and likewise don't match. A log with no sent messages would have a blank callsign. Regex change deferred — not changed in this pass. **Through `POST /parse` the content fallbacks are the *only* path**, for every ATAK log, not just these (correction 2026-10-05): the upload is written to a temp file, so `_FILENAME_RE` sees `tmpXXXX.log`. Tracked as "Upload filename not passed to parsers" in `ui-requirements.md`
 - **SDK Logging 2.0 / `sdkError` record volume** (56,179 across 7 logs) is very high; the baseline for healthy sessions is unknown — the total count is flagged as informational in `parse_errors` until a baseline is established. The `ERROR|BLE` subset is the one exception that drives a pass/fail signal (the BLE Health Score dimension via `summary.ble_fail_count`); that threshold is likewise unvalidated and may change once a BLE-error baseline is established
 - **Both `action=SET` and `action=GET` occur, and both are kept.** `atak_frequency_set_attempts` holds every `Frequency(channels=` command regardless of action, and `atak_radio_mode_queries` holds every `NetworkMode`/`TetherMode` record. GETs are deliberately **not** filtered out — dropping records would lose real observations. `action` distinguishes them, and consumers must split on it: the real MESMER log has 28 Frequency commands (16 SET / 12 GET) and 2,028 mode records (2,016 GET polls / 12 SET change commands, 6 COMPLETED). Counting them together reports queries as change attempts and buries genuine mode-change commands inside a poll count. The UI splits on `action` and labels each group; records whose `action` didn't parse get their own bucket rather than being folded into SET
 - **The model names lag the data.** `AtakFrequencySetAttempt` holds GETs too, and `AtakRadioModeQuery` holds SETs. Renaming them (plus the two serialized keys) is ~69 references of pure churn for no behavior change, so it was deliberately deferred — the docstrings and this section state what the fields actually hold

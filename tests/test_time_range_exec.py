@@ -162,6 +162,37 @@ def test_xml_attribute_strip_applies_before_the_scan(node):
     assert (r["maxMs"] - r["minMs"]) / HOUR_MS < 1.0
 
 
+ATAK_EBB7B8C5 = "diagnostic_ALPHA_90000000000001_2026-10-02 13_26_58.66.log"
+
+
+def test_ebb7b8c5_range_is_bounded_by_its_records_not_its_cot_xml(node):
+    """ATAK plugin build ebb7b8c5 embeds single-quoted CoT XML in its
+    cotDispatchedToAtak records, carrying a `time='1970-01-01…'` placeholder
+    on the <creator> of iOS-drawn map objects and `stale` attributes a day
+    out. Before the strip accepted single quotes,
+    both reached TS_RE and a 26-minute real session read as a 26-hour slider.
+
+    The bounds must be the log's own record timestamps: launchTimeInMillis
+    (17:00:00.000) to the last timestampInMillis (17:08:09.000). Exact
+    equality, not a span check — a range that is the right length but anchored
+    on the wrong values would still pass a span check."""
+    r = _range(node, ATAK_EBB7B8C5)
+    assert (r["minMs"], r["maxMs"]) == (1790960400000, 1790960889000)
+
+
+def test_ebb7b8c5_1970_placeholder_does_not_set_the_range_start(node):
+    """Separate from the bounds test so a failure says which attribute leaked:
+    the <creator> element's 1970 `time` drags the start back 56 years."""
+    r = _range(node, ATAK_EBB7B8C5)
+    assert _utc(r["minMs"]).year == 2026
+
+
+def test_ebb7b8c5_day_out_stale_does_not_set_the_range_end(node):
+    """...and the next-day `stale` pushes the end out by a day."""
+    r = _range(node, ATAK_EBB7B8C5)
+    assert _utc(r["maxMs"]) < datetime(2026, 10, 2, 18, 0, 0)
+
+
 def test_atak_epoch_ms_still_works(node):
     r = _range(node, "atak_sample.json")
     assert r is not None and r["maxMs"] > r["minMs"]
@@ -190,7 +221,7 @@ def test_fw_log_is_the_only_range_unavailable_format(node):
     for name in (
         "htmodem_sample.log", "htrouter_sample3.log", "diagnostic_sample.txt",
         "atak_sample.json", "tak_stream_sample.json", "tak_ndjson_real_sample.log",
-        "rsdk_sample_ios.txt", "relay_manager_sample.txt",
+        "rsdk_sample_ios.txt", "relay_manager_sample.txt", ATAK_EBB7B8C5,
     ):
         assert _range(node, name) is not None, f"{name} lost its time-window slider"
 

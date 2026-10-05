@@ -3,6 +3,7 @@ tests/test_atak.py
 Tests for parser/atak.py — ATAK plug-in log parser.
 """
 
+import json
 import pytest
 from pathlib import Path
 
@@ -85,6 +86,39 @@ TRUNCATED_RECORD_FIXTURE = FIXTURE_DIR / "atak_truncated_final_record.json"
 # not a poll; the UI splits on `action` to label them, so `action` must survive
 # serialization. The last record omits `action` entirely: unknown, not SET.
 MIXED_ACTION_FIXTURE = FIXTURE_DIR / "atak_mixed_action_commands.json"
+
+# Synthetic ATAK plugin v3.0 build ebb7b8c5 log (2026-10-02 shape). All
+# identities and positions are fake. Named in the real build's filename form --
+# a space before the time and dotted milliseconds -- deliberately: _FILENAME_RE
+# does not match that form (deferred, see parsing-requirements.md), so this
+# fixture proves callsign/GID still resolve from content, exactly as they must
+# for the real files. Contains: a CONNECTING health record with serialNumber
+# "Unknown" ahead of real-serial records; cotDispatchedToAtak EXTERNAL/INTERNAL
+# pairs (a PLI and an iOS-created u-d-c-c circle whose <creator> carries the
+# real logs' time='1970-01-01…' placeholder), an unpaired b-t-f GeoChat and the
+# BROADCAST token-request; received, sent-broadcast and sent-private messages
+# with the new identity fields; one older-shape message without them; and the
+# '--- RSDK LOGS ---' sdk section.
+V3_EBB7B8C5_FIXTURE = FIXTURE_DIR / "diagnostic_ALPHA_90000000000001_2026-10-02 13_26_58.66.log"
+ALPHA_UUID = "ANDROID-0000000000000001"
+BRAVO_UUID = "ANDROID-0000000000000002"
+CHARLIE_UUID = "00000000-0000-4000-8000-000000000003"   # iOS-style sender UUID
+
+# Radio-serial source fixtures (ATAK rule 19). Serials are distinct per source
+# -- health PNE000000001, deviceConnected PNE000000002, sdkError deviceState
+# PNE000000003 -- so each test can tell which source won.
+SERIAL_SOURCES_DISAGREE = FIXTURE_DIR / "atak_v3_serial_sources_disagree.json"
+SERIAL_FROM_DEVICE_CONNECTED = FIXTURE_DIR / "atak_v3_serial_from_device_connected.json"
+SERIAL_FROM_SDK_DEVICE_STATE = FIXTURE_DIR / "atak_v3_serial_from_sdk_device_state.json"
+SERIAL_UNKNOWN_EVERYWHERE = FIXTURE_DIR / "atak_v3_serial_unknown_everywhere.json"
+
+# JSON-null serialNumber variants of the fixtures above. No real log has been
+# seen with a null serial -- these exist because record.get("serialNumber", "")
+# returns None (not the "" default) when the key is present but null, and that
+# None once leaked through to device.radio_serial and serialized as null.
+SERIAL_NULL_THEN_REAL = FIXTURE_DIR / "atak_v3_serial_null_then_real.json"
+SERIAL_NULL_EVERYWHERE = FIXTURE_DIR / "atak_v3_serial_null_everywhere.json"
+SERIAL_NULL_ON_DEVICE_CONNECTED = FIXTURE_DIR / "atak_v3_serial_null_on_device_connected.json"
 
 
 # ── Fixture availability ──────────────────────────────────────────────────────
@@ -941,3 +975,407 @@ def test_serial_number_serialized_per_sample():
     samples = _result_to_dict(parse_atak_log(MULTISERIAL))["atak_health_samples"]
     serials = {s["serial_number"] for s in samples if s.get("serial_number")}
     assert serials == {"PNE234100406", "PNE234299999"}
+
+
+# ── ATAK plugin v3.0 build ebb7b8c5 — identity from a real-form filename ──────
+
+def test_v3_ebb7b8c5_fixture_exists():
+    assert V3_EBB7B8C5_FIXTURE.exists(), f"Fixture missing: {V3_EBB7B8C5_FIXTURE}"
+
+
+def test_ebb7b8c5_callsign_resolves_from_own_sent_message():
+    """The real build's filename form (space + dotted ms) does not match
+    _FILENAME_RE, so callsign must come from the device's own sent
+    senderCallsign. Received messages name other callsigns (BRAVO, CHARLIE) --
+    picking one of those would mislabel the whole device."""
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    assert result.device.callsign == "ALPHA"
+
+
+def test_ebb7b8c5_gid_resolves_from_health_record():
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    assert result.device.gid == "90000000000001"
+
+
+# ── Build ebb7b8c5 — radio serial: "Unknown" is a placeholder (ATAK rule 19) ──
+
+def test_unknown_serial_on_first_health_record_not_used_as_radio_serial():
+    """The first health record (CONNECTING) logs serialNumber "Unknown" before
+    the radio reports in. Before the fix, first-record-wins made every
+    build ebb7b8c5 device report its radio as "Unknown"."""
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    assert result.device.radio_serial == "PNE000000001"
+
+
+def test_connecting_health_sample_keeps_unknown_serial_as_logged():
+    """Only the device-level identity skips the placeholder -- the per-sample
+    record stays exactly as logged, so the Battery chart still sees it."""
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    first = result.atak_health_samples[0]
+    assert first.connection_state == "CONNECTING"
+    assert first.serial_number == "Unknown"
+
+
+def test_health_samples_after_connect_carry_the_real_serial():
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    later_serials = []
+    for sample in result.atak_health_samples[1:]:
+        later_serials.append(sample.serial_number)
+    assert later_serials == ["PNE000000001", "PNE000000001", "PNE000000001"]
+
+
+def test_health_serial_wins_over_earlier_device_connected_and_sdk_serials():
+    """Priority is health > deviceConnected > sdkError deviceState, regardless
+    of record order. deviceConnected (PNE000000002) is logged *before* the first
+    real health serial here, as in the real logs -- a first-seen-wins
+    implementation would pick it."""
+    result = parse_atak_log(SERIAL_SOURCES_DISAGREE)
+    assert result.device.radio_serial == "PNE000000001"
+
+
+def test_device_connected_serial_used_when_health_only_reports_unknown():
+    """Every health record is CONNECTING/"Unknown". deviceConnected
+    (PNE000000002) must win over the sdkError deviceState (PNE000000003)."""
+    result = parse_atak_log(SERIAL_FROM_DEVICE_CONNECTED)
+    assert result.device.radio_serial == "PNE000000002"
+
+
+def test_sdk_device_state_serial_used_when_no_other_source_has_one():
+    """No deviceConnected event and no real health serial. The retained sdkError
+    sample itself carries "Unknown" (precondition below), so the fallback must
+    skip it and take the real serial from the distinct serial_numbers."""
+    result = parse_atak_log(SERIAL_FROM_SDK_DEVICE_STATE)
+    assert result.atak_sdk_error_summary.sample.serial_number == "Unknown"
+    assert result.device.radio_serial == "PNE000000003"
+
+
+def test_radio_serial_stays_empty_when_no_source_has_a_real_serial():
+    """"" means unknown; "Unknown" would read as an actual serial in the UI."""
+    result = parse_atak_log(SERIAL_UNKNOWN_EVERYWHERE)
+    assert result.device.radio_serial == ""
+
+
+def test_resolved_radio_serial_serialized_for_ui():
+    d = _result_to_dict(parse_atak_log(V3_EBB7B8C5_FIXTURE))
+    assert d["device"]["radio_serial"] == "PNE000000001"
+
+
+def test_unknown_serial_on_health_sample_survives_serialization():
+    """The as-logged placeholder must reach the API too -- not be blanked or
+    back-filled with the resolved serial on the way out."""
+    samples = _result_to_dict(parse_atak_log(V3_EBB7B8C5_FIXTURE))["atak_health_samples"]
+    assert samples[0]["serial_number"] == "Unknown"
+
+
+def test_health_samples_carry_one_real_serial_beside_the_placeholder():
+    """The exact input the Battery chart's multi-serial warning sees for a
+    single-radio ebb7b8c5 session: one real serial plus the "Unknown"
+    reconnect placeholder. hasMultiSerial in ChartPanel.jsx must count that as
+    ONE radio; this pins the API side of that contract (the JSX predicate
+    itself has no test runner to guard it)."""
+    samples = _result_to_dict(parse_atak_log(V3_EBB7B8C5_FIXTURE))["atak_health_samples"]
+    serials = {s["serial_number"] for s in samples}
+    assert serials == {"Unknown", "PNE000000001"}
+
+
+# ── Radio serial: JSON null is a placeholder too (ATAK rule 19) ───────────────
+
+def test_null_serial_on_first_health_record_not_used_as_radio_serial():
+    """A null serial on the CONNECTING record must not claim the device serial;
+    the later real health serial wins. Regression guard only -- this also passed
+    before None joined _SERIAL_PLACEHOLDERS, because a None radio_serial is
+    falsy and the next real serial overwrote it."""
+    result = parse_atak_log(SERIAL_NULL_THEN_REAL)
+    assert result.device.radio_serial == "PNE000000001"
+
+
+def test_null_serial_health_sample_keeps_none_as_logged():
+    """Pins current behaviour: the per-sample serial_number is stored exactly as
+    the JSON had it, so a null serialNumber stays None on the sample (only the
+    device-level identity treats it as a placeholder). Not a judgement that None
+    is the ideal per-sample value -- change this test deliberately if that
+    contract changes."""
+    result = parse_atak_log(SERIAL_NULL_THEN_REAL)
+    first = result.atak_health_samples[0]
+    assert first.connection_state == "CONNECTING"
+    assert first.serial_number is None
+
+
+def test_radio_serial_is_empty_string_not_none_when_every_source_is_null():
+    """Health, deviceConnected and sdkError deviceState all carry null. "" is the
+    'unknown' value per rule 19; None would serialize as null."""
+    result = parse_atak_log(SERIAL_NULL_EVERYWHERE)
+    assert result.device.radio_serial == ""
+
+
+def test_null_radio_serial_serializes_as_empty_string_not_null():
+    d = _result_to_dict(parse_atak_log(SERIAL_NULL_EVERYWHERE))
+    assert d["device"]["radio_serial"] == ""
+
+
+def test_null_device_connected_serial_skipped_in_favour_of_sdk_device_state():
+    """Health only reports "Unknown" and deviceConnected's serial is null, so the
+    fallback must move past deviceConnected to the sdkError deviceState serial
+    (PNE000000003) rather than stopping at the null."""
+    result = parse_atak_log(SERIAL_NULL_ON_DEVICE_CONNECTED)
+    assert result.device.radio_serial == "PNE000000003"
+
+
+# ── Build ebb7b8c5 — cotDispatchedToAtak events (ATAK rule 20) ───────────────
+
+def _cot_dispatches(events):
+    """cotDispatchedToAtak events from parsed AtakEvents or serialized dicts."""
+    dispatches = []
+    for e in events:
+        event_type = e["event_type"] if isinstance(e, dict) else e.event_type
+        if event_type == "cotDispatchedToAtak":
+            dispatches.append(e)
+    return dispatches
+
+
+def _raw_cot_xml_in_file(path):
+    """Every cotXml string exactly as it appears in the fixture, in file order.
+    Read straight from the JSON so the comparison does not go through the
+    parser under test."""
+    raw = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if '"cotDispatchedToAtak"' not in line:
+            continue
+        line = line.lstrip("[").rstrip(",").rstrip("]")
+        raw.append(json.loads(line)["event"]["cotXml"])
+    return raw
+
+
+def test_every_cot_dispatch_captured():
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    assert len(_cot_dispatches(result.atak_events)) == 8
+
+
+def test_cot_dispatch_counts_by_type_and_destination():
+    """The ATAK tab card counts by (cot_type, destination). A PLI and a drawn
+    map object (u-d-c-c circle) pair evenly EXTERNAL/INTERNAL; GeoChat (b-t-f)
+    does not -- one chat here was dispatched EXTERNAL only, matching the real
+    logs' uneven b-t-f split."""
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    counts = {}
+    for e in _cot_dispatches(result.atak_events):
+        key = (e.cot_type, e.destination)
+        counts[key] = counts.get(key, 0) + 1
+    assert counts == {
+        ("token-request", "BROADCAST"): 1,
+        ("a-f-G-U-C", "EXTERNAL"): 1,
+        ("a-f-G-U-C", "INTERNAL"): 1,
+        ("b-t-f", "EXTERNAL"): 2,
+        ("b-t-f", "INTERNAL"): 1,
+        ("u-d-c-c", "EXTERNAL"): 1,
+        ("u-d-c-c", "INTERNAL"): 1,
+    }
+
+
+def test_broadcast_destination_is_the_token_request():
+    """BROADCAST has only ever been seen on the single token-request at session
+    start. Destination is an open set -- it must pass through verbatim."""
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    broadcast = [e for e in _cot_dispatches(result.atak_events) if e.destination == "BROADCAST"]
+    assert len(broadcast) == 1
+    assert broadcast[0].cot_type == "token-request"
+
+
+def test_unpaired_geochat_dispatch_is_kept():
+    """CHARLIE's chat was dispatched EXTERNAL with no INTERNAL twin. An
+    implementation that de-duplicated or paired dispatches would lose it."""
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    charlie_destinations = []
+    for e in _cot_dispatches(result.atak_events):
+        if e.cot_type == "b-t-f" and "senderCallsign='CHARLIE'" in e.cot_xml:
+            charlie_destinations.append(e.destination)
+    assert charlie_destinations == ["EXTERNAL"]
+
+
+def test_cot_xml_preserved_verbatim():
+    """The raw XML is kept so the JSON and CSV exports lose nothing. Any strip,
+    unescape, truncation or reformat would break this equality."""
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    parsed = [e.cot_xml for e in _cot_dispatches(result.atak_events)]
+    assert parsed == _raw_cot_xml_in_file(V3_EBB7B8C5_FIXTURE)
+
+
+def test_lifecycle_events_have_empty_cot_fields():
+    """cot_* fields belong to cotDispatchedToAtak only. A deviceConnected or
+    deviceDisconnected carrying a cot_type would be counted on the CoT card."""
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    lifecycle = [e for e in result.atak_events if e.event_type != "cotDispatchedToAtak"]
+    assert [e.event_type for e in lifecycle] == ["deviceDisconnected", "deviceConnected"]
+    for e in lifecycle:
+        assert (e.cot_type, e.destination, e.cot_xml) == ("", "", "")
+
+
+def test_cot_dispatches_do_not_displace_lifecycle_fields():
+    """Adding a branch to _handle_event must not disturb the existing ones --
+    the deviceConnected serial is a radio-serial fallback source."""
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    connected = [e for e in result.atak_events if e.event_type == "deviceConnected"]
+    assert connected[0].serial_number == "PNE000000001"
+
+
+def test_cot_fields_serialized_for_api():
+    """UI-data-path guard: the CoT Dispatched card and the CSV export read the
+    serialized atak_events, not the dataclass."""
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    serialized = _cot_dispatches(_result_to_dict(result)["atak_events"])
+    parsed = _cot_dispatches(result.atak_events)
+    assert len(serialized) == len(parsed) == 8
+    for s, p in zip(serialized, parsed):
+        assert (s["cot_type"], s["destination"], s["cot_xml"]) == (p.cot_type, p.destination, p.cot_xml)
+
+
+def test_older_logs_serialize_cot_keys_as_empty_strings():
+    """Pre-ebb7b8c5 logs have no cotDispatchedToAtak. The keys must still be
+    present (one row schema for the CSV export) and empty, never null."""
+    events = _result_to_dict(parse_atak_log(ENHANCED))["atak_events"]
+    assert len(events) > 0
+    for e in events:
+        assert (e["cot_type"], e["destination"], e["cot_xml"]) == ("", "", "")
+
+
+# ── Build ebb7b8c5 — new message identity fields (ATAK rule 21) ──────────────
+
+def _message(result, log_id):
+    for m in result.atak_messages:
+        if m.log_id == log_id:
+            return m
+    raise AssertionError(f"no message with logId {log_id} in fixture")
+
+
+RECEIVED_PLI_FROM_BRAVO = -700000001
+SENT_PLI_BROADCAST = 700000002
+SENT_PRIVATE_CHAT_TO_CHARLIE = -700000005
+SENT_BROADCAST_CHAT = 700000006
+OLDER_STYLE_PLI_FROM_DELTA = 700000007
+
+
+def test_received_message_names_the_local_device_as_receiver():
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    received = _message(result, RECEIVED_PLI_FROM_BRAVO)
+    assert received.receiver_callsign == "ALPHA"
+    assert received.receiver_uuid == ALPHA_UUID
+
+
+def test_received_message_carries_sender_uuid():
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    assert _message(result, RECEIVED_PLI_FROM_BRAVO).sender_uuid == BRAVO_UUID
+
+
+def test_received_message_from_ios_sender_keeps_non_android_uuid():
+    """UUIDs are not always ANDROID-*; an iOS sender's plain UUID must pass
+    through untouched."""
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    from_charlie = [m for m in result.atak_messages if m.sender_gid == 90000000000003]
+    assert from_charlie[0].sender_uuid == CHARLIE_UUID
+
+
+def test_message_schema_version_captured():
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    assert _message(result, RECEIVED_PLI_FROM_BRAVO).version == 1
+
+
+def test_sent_broadcast_keeps_receiver_fields_exactly_as_logged():
+    """A broadcast has no single receiver: the log writes receiverCallsign ""
+    and receiverGid 0. Both are stored as logged -- receiver_gid is the literal
+    0, NOT converted to None. That is current behaviour, pinned here so any
+    change to it is a deliberate decision (open question: 0 here is a
+    "no receiver" placeholder, like sent-message rssi 0)."""
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    sent = _message(result, SENT_BROADCAST_CHAT)
+    assert sent.receiver_callsign == ""
+    assert sent.receiver_uuid == ""
+    assert sent.receiver_gid == 0
+
+
+def test_sent_pli_broadcast_logs_blank_sender_uuid():
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    assert _message(result, SENT_PLI_BROADCAST).sender_uuid == ""
+
+
+def test_sent_non_pli_broadcast_keeps_its_sender_uuid():
+    """In the real logs only sent PLI broadcasts blank senderUUID; sent chat,
+    mapObject and fileTransfer broadcasts carry the local device's UUID. The
+    parser must not assume "sent means blank"."""
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    assert _message(result, SENT_BROADCAST_CHAT).sender_uuid == ALPHA_UUID
+
+
+def test_sent_private_message_names_its_receiver():
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    sent = _message(result, SENT_PRIVATE_CHAT_TO_CHARLIE)
+    assert sent.receiver_callsign == "CHARLIE"
+    assert sent.receiver_uuid == CHARLIE_UUID
+    assert sent.receiver_gid == 90000000000003
+
+
+def test_older_style_message_defaults_new_strings_to_empty():
+    """A record without the ebb7b8c5 fields gets "" -- never a value borrowed
+    from a neighbouring record or the device itself."""
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    older = _message(result, OLDER_STYLE_PLI_FROM_DELTA)
+    assert (older.receiver_callsign, older.receiver_uuid, older.sender_uuid) == ("", "", "")
+
+
+def test_older_style_message_version_is_none_not_guessed():
+    """Every observed version is 1, which makes defaulting to 1 tempting.
+    Absent must stay None."""
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    assert _message(result, OLDER_STYLE_PLI_FROM_DELTA).version is None
+
+
+def test_pre_ebb7b8c5_fixtures_get_no_invented_identity_fields():
+    """Sweep the real-shaped older fixtures: none of their messages carry the
+    new fields, so all must come through as "" / None."""
+    for fixture in (FIXTURE, ENHANCED):
+        for m in parse_atak_log(fixture).atak_messages:
+            assert (m.receiver_callsign, m.receiver_uuid, m.sender_uuid) == ("", "", ""), fixture.name
+            assert m.version is None, fixture.name
+
+
+def test_new_message_fields_serialized_for_api():
+    msgs = _result_to_dict(parse_atak_log(V3_EBB7B8C5_FIXTURE))["atak_messages"]
+    received = next(m for m in msgs if m["log_id"] == RECEIVED_PLI_FROM_BRAVO)
+    assert received["receiver_callsign"] == "ALPHA"
+    assert received["receiver_uuid"] == ALPHA_UUID
+    assert received["sender_uuid"] == BRAVO_UUID
+    assert received["version"] == 1
+
+
+def test_absent_message_version_serializes_as_null():
+    msgs = _result_to_dict(parse_atak_log(V3_EBB7B8C5_FIXTURE))["atak_messages"]
+    older = next(m for m in msgs if m["log_id"] == OLDER_STYLE_PLI_FROM_DELTA)
+    assert older["version"] is None
+
+
+# ── Build ebb7b8c5 — parse_errors ────────────────────────────────────────────
+# DATA LIMITATION decision (vera): none of the three ebb7b8c5 changes warrants a
+# new entry. The "Unknown" serial is a placeholder handled without loss (the
+# sample keeps it; the device resolves a real one); cot_xml is parsed in full and
+# serialized; absent message fields are an older schema, not missing data.
+# The only entry this fixture should raise is the pre-existing sdkError one.
+
+def test_ebb7b8c5_fixture_reports_no_hard_parse_errors():
+    """The '--- RSDK LOGS ---' section and the long single-quoted XML strings
+    must not produce JSON parse errors."""
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    hard_errors = [e for e in result.parse_errors if not e.startswith("DATA LIMITATION")]
+    assert hard_errors == []
+
+
+def test_ebb7b8c5_fixture_raises_only_the_sdk_volume_limitation():
+    result = parse_atak_log(V3_EBB7B8C5_FIXTURE)
+    limits = [e for e in result.parse_errors if e.startswith("DATA LIMITATION —")]
+    assert len(limits) == 1
+    assert "sdkError" in limits[0]
+
+
+def test_unknown_serial_is_not_reported_as_a_parse_error():
+    """Even when no source has a real serial, "Unknown" is expected
+    reconnection behaviour (CLAUDE.md known limitations), not an error."""
+    result = parse_atak_log(SERIAL_UNKNOWN_EVERYWHERE)
+    assert result.parse_errors == []

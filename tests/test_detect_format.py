@@ -118,6 +118,17 @@ def test_android_ble_alone_is_rsdk():
 
 ATAK_JSON_FIXTURES = sorted(f.name for f in FIXTURE_DIR.glob("atak_*.json"))
 
+# ATAK plugin v3.0 fixtures named by the device's own filename convention rather
+# than atak_*.json, so the glob above misses them. Listed explicitly: a broader
+# glob such as diagnostic_*.log would also sweep in any future Pro+ fixture.
+# The ebb7b8c5 one matters most here -- its records embed CoT XML, the vocabulary
+# of the TAK format checked just before ATAK.
+ATAK_NAMED_LOG_FIXTURES = [
+    "diagnostic_KESTREL_11223_2026-07-28_09_00_00_000.log",
+    "diagnostic_ALPHA_90000000000001_2026-10-02 13_26_58.66.log",
+]
+ATAK_FIXTURES = ATAK_JSON_FIXTURES + ATAK_NAMED_LOG_FIXTURES
+
 
 def test_atak_fixture_discovery_is_not_empty():
     """The parametrized guard below is only worth anything if the glob matched —
@@ -125,7 +136,22 @@ def test_atak_fixture_discovery_is_not_empty():
     assert len(ATAK_JSON_FIXTURES) >= 5
 
 
-@pytest.mark.parametrize("fixture_name", ATAK_JSON_FIXTURES)
+def test_named_atak_fixtures_exist():
+    """A renamed file would otherwise surface as a bare FileNotFoundError inside
+    the sweeps below; this names the missing fixture directly."""
+    for name in ATAK_NAMED_LOG_FIXTURES:
+        assert (FIXTURE_DIR / name).exists(), f"Fixture missing: {name}"
+
+
+def test_ebb7b8c5_log_detected_as_atak_by_content():
+    """The real build ebb7b8c5 filename has no ATAK_ segment, so detection
+    rests on content -- and the content opens with cotDispatchedToAtak records
+    full of CoT XML, which must not tip it towards the TAK parser."""
+    name = "diagnostic_ALPHA_90000000000001_2026-10-02 13_26_58.66.log"
+    assert _detect_format(name, _content(name)) == "atak"
+
+
+@pytest.mark.parametrize("fixture_name", ATAK_FIXTURES)
 def test_tak_content_check_does_not_capture_atak_logs(fixture_name):
     assert _detect_format(fixture_name, _content(fixture_name)) == "atak"
 
@@ -157,7 +183,7 @@ def test_atak_content_wins_over_a_colliding_tak_filename(filename):
     assert _detect_format(filename, _content("atak_sample.json")) == "atak"
 
 
-@pytest.mark.parametrize("fixture_name", ATAK_JSON_FIXTURES)
+@pytest.mark.parametrize("fixture_name", ATAK_FIXTURES)
 def test_server_callsign_collision_holds_for_every_atak_fixture(fixture_name):
     """Same collision, swept across every real ATAK fixture — the guard must not
     depend on which markers a particular log happens to carry."""

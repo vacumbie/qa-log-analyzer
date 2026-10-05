@@ -347,9 +347,12 @@ function BatteryOverTime({ results }) {
       + 'disconnect attribution uses LIFO assumption (most recent connection disconnects first). '
       + 'Simultaneous multi-radio connection cannot be ruled out from log data alone.'
     : null
+  // "Unknown" is the placeholder a health sample carries while the radio is
+  // reconnecting — not a second radio — so it must not trip the warning.
   const hasMultiSerial = results.some(r => {
     const src3 = r.log_format === 'atak' ? (r.atak_health_samples || []) : (r.system_samples || [])
-    return new Set(src3.map(s => s.serial_number).filter(Boolean)).size > 1
+    const serials = src3.map(s => s.serial_number).filter(s => s && s !== 'Unknown')
+    return new Set(serials).size > 1
   })
 
   const allLabels = datasets.map(d => d.label)
@@ -706,8 +709,18 @@ function AtakConnectionState({ results }) {
 function AtakEventsTimeline({ results }) {
   const atak = results.filter(r => r.log_format === 'atak')
   const eventColors = { deviceConnected:'#00e5a0', deviceDisconnected:'#ff4757', powerLevelUpdated:'#ffd166', pliSettingUpdated:'#00d4ff', frequencyUpdated:'#c77dff', firmwareUpdate:'#ff6b35', relayModeUpdated:'#3b82f6' }
-  const allEvents = atak.flatMap(r => (r.atak_events||[]).map(e => ({ ...e, device: shortLabel(r) }))).sort((a,b)=>a.timestamp?.localeCompare(b.timestamp))
-  if (!allEvents.length) return <ChartCard title="Device Events Timeline" height={60}><NoData message="No events recorded" /></ChartCard>
+  // cotDispatchedToAtak is excluded: ~200 per ebb7b8c5 log, it is the plugin
+  // handing CoT to ATAK rather than a radio lifecycle change, and at 30 px per
+  // row it would bury the handful of real events. CotDispatchSummary in App.jsx
+  // counts them instead.
+  const allEvents = atak
+    .flatMap(r => (r.atak_events||[])
+      .filter(e => e.event_type !== 'cotDispatchedToAtak')
+      .map(e => ({ ...e, device: shortLabel(r) })))
+    .sort((a,b)=>a.timestamp?.localeCompare(b.timestamp))
+  // Scoped wording: a window can hold only CoT dispatches, and "No events
+  // recorded" would then contradict the CoT card's count just below.
+  if (!allEvents.length) return <ChartCard title="Device Events Timeline" height={60}><NoData message="No device events (CoT dispatches are counted in their own card)" /></ChartCard>
 
   const getDetail = e => {
     if (e.event_type==='deviceConnected')    return `Serial: ${e.serial_number} via ${e.connection_type}`

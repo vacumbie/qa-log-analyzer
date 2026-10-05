@@ -104,7 +104,12 @@ const CTIME_MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, A
 // (attr=\"…\" once escaped inside the JSON string), JSON writes "key": "…".
 // Stripping the attribute form before scanning leaves the JSON members intact,
 // and matches nothing in the other five formats, whose timestamps are bare.
-const XML_TS_ATTR_RE = /\w+=\\?"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[^"\\]*/g
+//
+// ATAK plugin build ebb7b8c5 embeds the same kind of CoT XML in its
+// cotDispatchedToAtak records, but single-quoted (stale='…', and even
+// time='1970-01-01…'), so the quote may be either kind. Without that, a
+// 26-minute ATAK session read as a 26-hour slider range.
+const XML_TS_ATTR_RE = /\w+=\\?["']\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[^"'\\]*/g
 
 // Returns the min/max timestamp in the text as epoch ms, or null if none found.
 // Unions THREE timestamp dialects, so a file carrying more than one — an ATAK
