@@ -1,5 +1,5 @@
 # QA Log Analyzer — Session Summary
-_Last updated: 2026-08-28_
+_Last updated: 2026-10-05_
 
 ---
 
@@ -129,8 +129,8 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | `relay_manager` | Prod logs not analyzed — stage/prod behavioral differences unknown |
 | `rsdk` | GRIP hop count and RSSI only when `GRIP_Receiver` incoming fields lines are present |
 | `diagnostic` | Firmware 3.1.11 omits callsign and GID from Received Message blocks |
-| `atak` | `originatorCallsign`/`receiverCallsign`/UUIDs always empty — identity for those is GID-only. `senderCallsign` IS populated in ATAK plugin v3.0+ (was always empty before) and is now the `device.callsign` fallback when filename parsing doesn't yield one |
-| `atak` | ATAK v3.0 filenames drop the `ATAK_` segment (`diagnostic_<CALLSIGN>_<GID>_...`) — both conventions now accepted by the filename regex |
+| `atak` | `originatorCallsign`/`receiverCallsign`/UUIDs are empty in the older samples analysed — identity for those is GID-only. Population varies by build: builds `e6227295` (2026-08-24) and `ebb7b8c5` (2026-10-02) populate them on received messages (`receiver_callsign`, `receiver_uuid`, `sender_uuid` now parsed and serialized, plus `version`). Never pin "empty" to a build boundary. `senderCallsign` IS populated in ATAK plugin v3.0+ (was always empty before) and is now the `device.callsign` fallback when filename parsing doesn't yield one |
+| `atak` | ATAK v3.0 filenames drop the `ATAK_` segment (`diagnostic_<CALLSIGN>_<GID>_...`) — both conventions accepted by the filename regex, **but the real v3 form (space + dotted ms) does not match, and via `POST /parse` the filename never reaches the parser** (temp file). Callsign/GID come from content: own sent `senderCallsign`; GID from the first health `gid` or own sent `senderGid`, whichever is logged first |
 | `atak` | Some early ATAK v3.0 builds emit **zero device-health (`connectionState`) records** for a session — no battery/thermal/firmware/radio-health data at all. Flagged via `DATA LIMITATION —` in `parse_errors`, fires only when it actually happens. RSSI also observed as always `0` in early v3.0 captures. See `docs/atak_v3_early_integration_notes.md` |
 | `atak` | `sdkError` (SDK Logging 2.0) volume baseline unknown — count is informational, not pass/fail |
 | `atak` | **Radio commands are not confirmed state.** `atak_frequency_set_attempts` / `atak_radio_mode_queries` are the raw command layer. Confirmed frequency = `frequencyUpdated` event only; confirmed mode = Device Health `mode`; confirmed relay = `relayModeUpdated`. A `COMPLETED` SET is an ack, NOT confirmation (decided 2026-08-04). Enhanced logs emit no `frequencyUpdated`, so they honestly show "confirmed frequency unknown" + attempt counts |
@@ -140,7 +140,9 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | `atak` | `isRelayModeEnabled` has only 2 observations — absent flag stores `None` (unknown), not `False` |
 | `atak` | `numberOfOpenSegments = -99` is a sentinel → stored as null |
 | `atak` | Receiver-side `deliveryTimeInMillis = 0` on fileTransfer is a placeholder |
-| `atak` | `serialNumber = "Unknown"` during BLE reconnection is expected, not an error |
+| `atak` | `serialNumber = "Unknown"` during BLE reconnection is expected, not an error. It is a placeholder: kept on the per-sample health record, never used as `device.radio_serial` (2026-10-05) |
+| `atak` | Real build `ebb7b8c5` filenames (`… 2026-10-02 13_26_58.66.log`, space + dotted ms) do not match `_FILENAME_RE`. Callsign/GID still resolve from content (own sent `senderCallsign`; first health `gid` or own sent `senderGid`, whichever is logged first). The `e6227295` logs (2026-08-24) use the same form. Regex change deferred |
+| `atak` | `cotDispatchedToAtak` (present in `e6227295` and `ebb7b8c5`, absent from the older fixtures) destination meanings (`EXTERNAL`/`INTERNAL`/`BROADCAST`) unconfirmed — open set; `cot_xml` kept raw, roughly doubles the `/parse` payload for these logs |
 | `fw_log` | Timestamps are relative ms from boot — not wall clock |
 | `fw_log` | Serial number and FW version in binary RHC payload — not plaintext |
 | `fw_log` | Battery stabilization errors are a known FW quirk — counted separately |
@@ -185,6 +187,7 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | diagnostic 3.1.11 `parse_errors` emission (callsign + GID omitted) | ✅ Done (PR #19) |
 | rsdk GRIP-availability `parse_errors` emission | ✅ Done (PR #19) |
 | Quality-gate agent deduplication (single-owner responsibilities) | ✅ Done (PR #20) |
+| Upload filename not passed to parsers — `POST /parse` parses a temp file, so `atak` `_parse_filename` and `relay_manager` `_detect_subtype` filename signal never see the real name; then widen ATAK `_FILENAME_RE` for the v3 form (space before time, dot before ms) | ⏳ Pending — **HIGH priority** (2026-10-05); not on `feat/atak-v3-update` |
 | General DATA LIMITATION banner for diagnostic/rsdk/atak tabs | ⏳ Pending — jenny (PR #19 gate) found CLAUDE.md:299 promises a UI banner per limitation, but diagnostic 3.1.11 & atak sdkError entries reach `parse_errors` + the file-list ⚠ glyph only (rsdk shown via HopsTab note); CLAUDE.md qualified, banner deferred |
 | API route double-translates CRLF → diagnostic CRLF uploads parse to 0 blocks | ✅ Fixed (PR #21, merged) — karen found during PR #19 gate; temp file now opened with `newline=""`, plus `tests/test_parse_route.py` API-path regression test |
 | FW Log — RHC payload decoding (hash→serial, FW version) | ⛔ Blocked — waiting on mapping tables from QA |
@@ -221,6 +224,11 @@ Fonts: `'Barlow Condensed'` (display) · `'Rajdhani'` (body) · `'Share Tech Mon
 | `current` badge on the wrong frequency config | ✅ Done (2026-08-04) — karen found on VALERIE; `lastKey` came from `segments` (first-seen order) instead of the chronologically last confirmed change, so a radio returning to an earlier config showed the wrong one as current |
 | `action` GET/SET conflation in Frequency + mode records | ✅ Done (2026-08-04) — UI splits on `action`; both actions still stored. Verified against the real 144 MB MESMER log: Frequency 16 SET / 12 GET, mode 2,016 polls / 12 change cmds. The old empty-state "10 COMPLETED SET commands" was itself wrong — only 6 were SETs |
 | Rename `AtakFrequencySetAttempt` / `AtakRadioModeQuery` to neutral names | ⏸ Deferred — ~69 references incl. serialized keys, tests, docs; churn with no behavior change |
+| ATAK plugin v3.0 build `ebb7b8c5` — radio serial `Unknown`, `cotDispatchedToAtak`, new message fields | ✅ Built 2026-10-05 (items 1–3) on `feat/atak-v3-update`, PR pending; item 4 (sent rssi/hopCount) not needed — already handled. All six quality gates passed 2026-10-05 (karen re-run after the three ebb7b8c5-exposed UI fixes: 9/9 on both real logs). pytest 632 passed, 2 skipped. Ready to commit |
+| Battery multi-serial warning — extract into a testable function | ⏳ Pending (2026-10-05) — also stop re-deriving the parser's placeholder set (`s !== 'Unknown'` duplicates `_SERIAL_PLACEHOLDERS`); `hasMultiSerial` is inline in `BatteryOverTime`; move to a top-level `hasMultipleRadioSerials(results)` so the node driver can test it (one serial + Unknown -> false; two serials -> true; empty -> false). Low priority |
+| `CotDispatchSummary` device colour indexes `PALETTE` by the filtered device list, so it can differ from other ATAK cards | ⏳ Pending (2026-10-05) — cosmetic; index by position in the full ATAK result list |
+| Time-window node tests don't cover head/tail sampling | ⏳ Pending (2026-10-05) — `FileUpload.jsx` scans first + last 64 KB, but `run_extract_time_range.mjs` passes whole files and its docstrings claim sampling is covered. Fix the docstrings or add a real sampling test. Sampling changes results (ebb7b8c5: whole-file old regex 1970 -> 2026-10-09 vs narrower sampled range) |
+| Narrow time windows — ATAK/Battery empty states and SDK card scope | ⏳ Pending (2026-10-05), low priority — in a window with no health samples: Battery says "No data available for this log format" (misleading — the window is empty, not the format); Radio Connection State draws an empty grid; SDK Logging 2.0 keeps full-session counts (undecided whether it should follow the window). Pre-existing; found by karen |
 | `_CSV_TYPES` decision for the two new ATAK tables | ⏳ Pending — `atak_radio_mode_queries` is flat and CSV-ready; `atak_frequency_set_attempts` nests `channels`, so JSON-only is defensible — but record the choice in `export.py` either way |
 
 ---
@@ -279,6 +287,102 @@ pytest tests/test_atak.py -v  # single file verbose
 ---
 
 ## Most Recent Work (Last Few PRs)
+
+**2026-10-05 — ATAK plugin v3.0 build `ebb7b8c5` gaps, items 1–3 (branch
+`feat/atak-v3-update`, uncommitted). pytest before tests: 533 passed, 2
+skipped; vera's counts below.** Verified against the two real 2026-10-02 logs (BAMA,
+TESTLINE), which stay outside the repo.
+
+- **Radio serial.** `"Unknown"`/`""` are placeholders at device level. Order:
+  first real health serial, then `deviceConnected`, then sdkError
+  `deviceState` (post-loop, so record order does not matter). BAMA and
+  TESTLINE now report their real serials instead of `Unknown`. Per-sample
+  `serial_number` unchanged.
+- **`cotDispatchedToAtak`.** `AtakEvent.cot_type` / `destination` / `cot_xml`
+  through the full chain. Removed from the Device Events Timeline (now 3 rows
+  per log instead of 209 / 203). New **CoT Dispatched to ATAK** card on the
+  ATAK tab (`CotDispatchSummary` in `App.jsx`): cotType × destination counts per
+  device, destinations read from data, XML never rendered. Other `atak_events`
+  consumers (PLI settings, frequency, relay/Modes, time-window filter) all
+  filter by `event_type` or by timestamp only — unaffected. `cot_xml` doubles
+  the `/parse` response (BAMA 219 KB → 422 KB) and is a long column in the
+  `atak_events` CSV; noted in `export.py`.
+- **Message fields.** `receiver_callsign`, `receiver_uuid`, `sender_uuid`,
+  `version` on `AtakMessage`, serialized. Older logs: `""` / `null`.
+- **Item 4 not needed** — `rssi_is_valid` and received-only hop stats already
+  keep sent-message `0`s out of every average and chart.
+- **Found, not fixed:** the real filenames do not match `_FILENAME_RE` (space
+  before the time, dot before ms). Content fallbacks cover it today.
+- **Two small code fixes (2026-10-05):** `_SERIAL_PLACEHOLDERS` in
+  `parser/atak.py` now includes `None`, so a JSON `null` `serialNumber` leaves
+  `device.radio_serial` `""` not `null`; `AtakEventsTimeline` empty state now
+  reads "No device events (CoT dispatches are counted in their own card)"
+  instead of "No events recorded" (scoped-count rule).
+- **Doc correction (2026-10-05):** three real `e6227295` logs (2026-08-24)
+  already populate the callsign/UUID fields (71–82%), `version` 1, and contain
+  `cotDispatchedToAtak` (1994 / 2442 / 778), so none of these is
+  `ebb7b8c5`-specific; "empty before `ebb7b8c5`" claims were removed across docs.
+- **CLAUDE.md** backlog row and the `atak` callsign limitation row updated by
+  hand (build-specific wording), plus a new HIGH-priority "upload filename never
+  reaches the parsers" backlog row.
+- **Browser check (karen):** all five checks passed on both real logs (serials,
+  3-row timeline, every CoT card cell, no XML on screen, other ATAK cards).
+- **Three issues the ebb7b8c5 logs exposed, fixed same day** (not caused by the
+  parser changes): `XML_TS_ATTR_RE` now strips single-quoted CoT attributes
+  (`stale='…'`, `time='1970…'`) that made a 26-min session read as 26 h on the
+  slider; Battery `hasMultiSerial` ignores the `"Unknown"` reconnect placeholder;
+  ATAK tab footer reworded (build-neutral after jenny). Details in `ui-requirements.md` →
+  ATAK plugin v3.0 backlog entry. Tests by vera; gates re-run after.
+- **Tests (vera, same day, uncommitted).** pytest after this round: **598
+  passed, 2 skipped** (the two skips are the intentionally-absent real-data
+  NAMED_FIXTURE); **615 passed, 2 skipped** after the second round below. New
+  synthetic fixture `diagnostic_ALPHA_90000000000001_2026-10-02 13_26_58.66.log`
+  — named in the real build's space / dotted-ms form on purpose, so it proves
+  identity resolves from content; all serials, GIDs, UUIDs, callsigns, IPs and
+  positions are fake (grep-checked against the real logs' identifiers). Four
+  small serial-source fixtures `atak_v3_serial_*.json` pin rule 19's priority
+  (health > `deviceConnected` > sdkError `deviceState`, including the
+  deviceConnected-logged-first order) and the stays-`""` case. 37 tests in
+  `test_atak.py` (38 after the second round), 4 route tests in `test_parse_route.py` (incl. `cot_xml`
+  round-tripping verbatim through the CSV export), and the two ATAK detection
+  sweeps in `test_detect_format.py` now also cover the two named v3 `.log`
+  fixtures. Each fix was mutation-checked (reverting it fails ≥1 test).
+  **No new DATA LIMITATION** — none of the three changes loses data.
+  **Found, not fixed:** (a) through `POST /parse` the ATAK parser reads a temp
+  file, so `_FILENAME_RE` never sees the upload name — filename-derived
+  callsign/GID never applies via the API, for any ATAK log; (b) the docs say
+  sent messages carry `senderUUID` `""`, but in the real logs only sent **PLI**
+  broadcasts do — sent chat/mapObject/fileTransfer broadcasts carry it, and
+  sent PRIVATE messages carry receiver identity with a non-zero `receiverGid`;
+  (c) open question: sent-broadcast `receiverGid` `0` is stored as logged, not
+  as `None`.
+  **Resolved by docs 2026-10-05:** (a) is now a HIGH-priority backlog item,
+  "Upload filename not passed to parsers" (also kills `relay_manager`'s filename
+  subtype signal); (b) was a docs-only overstatement, corrected in the specs and
+  `models.py` comments — verified against both real logs: only sent PLI
+  broadcasts blank `senderUUID`/`originatorCallsign`, sent broadcasts carry
+  `receiverCallsign` `""` and `receiverGid` `0`, sent PRIVATE chats carry receiver
+  identity and a non-zero `receiverGid`; (c) decided: `0` stays as logged and is
+  documented as the "broadcast, no single receiver" placeholder (consumers such as
+  the P3 delivery matrix must not treat it as a GID).
+- **Six-gate pass (2026-10-05). Final pytest: 632 passed, 2 skipped.**
+  - task-completion-validator: rejected once on stale status lines in these
+    docs only; fixed, code needed no re-check.
+  - jenny: passed. Found that "empty before `ebb7b8c5`" was false — build
+    `e6227295` (2026-08-24) already populates the identity fields and carries
+    `version` and `cotDispatchedToAtak` — so all wording is now "varies by
+    build" (docs, `models.py`, CLAUDE.md, ATAK footer). Also fixed: JSON-null
+    `serialNumber` (now a placeholder; vera added 5 tests), the scoped timeline
+    empty state, record-order wording, `b-t-f-d` pairing.
+  - karen re-run: 9/9 on both real logs, incl. slider (16:00 → 18:00, was 26 h),
+    no multi-serial warning, new footer, empty state reached via a 16:00–17:00
+    window. Noted, pre-existing: Battery "No data available
+    for this log format" in an empty window, empty Radio Connection State grid,
+    SDK Logging 2.0 counts not following the window — now backlogged as "Narrow time windows".
+  - peer-reviewer: no critical/should-fix; two comment nits fixed.
+  - claude-md-compliance-checker: passed; stale status lines and two
+    "`ebb7b8c5`+" comments (`parse.py`, `App.jsx`) fixed; the four new
+    `AtakMessage` fields recorded as serialized-but-unrendered by decision.
 
 **2026-08-28 — full six-gate quality pass on `integration-test`, PR #36 pushed.
 44 commits ahead of `main`. pytest: 533 passed, 2 skipped. ESLint clean.**
@@ -1279,6 +1383,21 @@ overstates what exists on the remote. Dev servers on :8000 and :5173 were stoppe
 ## What to Work On Next
 
 Based on the backlog, the most actionable items (not blocked):
+
+0. **Commit and PR ATAK build `ebb7b8c5` (branch `feat/atak-v3-update`).** All
+   six gates passed 2026-10-05. Next: commit, open the PR. Widening `_FILENAME_RE` for the
+   space / dotted-ms filename form is moot via the API until `POST /parse` passes
+   the upload name to the parsers — now a **HIGH-priority** backlog item,
+   "Upload filename not passed to parsers" (also affects `relay_manager`'s filename
+   subtype signal); not on this branch.
+
+0. **Two low-priority test-honesty items from the `ebb7b8c5` work (2026-10-05).**
+   "Battery multi-serial warning — extract into a testable function" (move
+   `hasMultiSerial` to a top-level `hasMultipleRadioSerials(results)` and add node
+   tests) and "Time-window node tests don't cover head/tail sampling" (fix the
+   docstrings, or test the real 64 KB head/tail sampling). Full scope in
+   `docs/ui-requirements.md`. Also new: `atak_v3_early_integration_notes.md`
+   records the epoch-zero `<creator>` time in `cotDispatchedToAtak` CoT XML.
 
 0. **Leftovers from PR #33 (merged — these are follow-ups on `main`, not blockers).**
    The whole ATAK radio-command feature shipped; nothing about it is half-finished. What
