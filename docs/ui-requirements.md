@@ -1288,6 +1288,21 @@ work. Same principle as "An empty map must say it's empty" in CLAUDE.md.
 
 **Status:** ⏳ Pending — low priority, UX honesty.
 
+### Starlette `TestClient` deprecation warning in pytest — ⏳ Pending (2026-10-05)
+
+CI's pytest run (PR #40) ends with `1 warning`: importing FastAPI's `TestClient`
+(`fastapi/testclient.py`) raises `StarletteDeprecationWarning: Using httpx with
+starlette.testclient is deprecated; install httpx2 instead.` First triggered in
+`tests/test_parse_route.py`. Not caused by any code in this repo, and nothing
+fails today — it only matters when a future Starlette release drops `httpx`
+support, at which point every route test would break at import.
+
+**Scope:** when upgrading FastAPI/Starlette, switch the test dependency to what
+Starlette then requires (currently `httpx2`) and confirm the warning is gone.
+Don't silence it with a `filterwarnings` ignore — the warning is the early notice.
+
+**Status:** ⏳ Pending — low priority, test infrastructure.
+
 ---
 
 _Last updated: 2026-10-05_
