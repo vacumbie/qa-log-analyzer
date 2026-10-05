@@ -2648,7 +2648,7 @@ function AtakTab({ results }) {
       )}
 
       <Note>
-        ⚠ Callsign and UUID fields are always empty in ATAK log format — identity is GID-only.
+        ⚠ Callsign and UUID fields are populated only in some ATAK plugin builds; when empty, identity is GID-only.
         {totalClockSkew > 0 && ` ${totalClockSkew} records have negative delivery times due to clock skew between devices (most common at hop counts 3–4).`}
       </Note>
     </div>
