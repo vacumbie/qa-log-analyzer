@@ -347,9 +347,12 @@ function BatteryOverTime({ results }) {
       + 'disconnect attribution uses LIFO assumption (most recent connection disconnects first). '
       + 'Simultaneous multi-radio connection cannot be ruled out from log data alone.'
     : null
+  // "Unknown" is the placeholder a health sample carries while the radio is
+  // reconnecting — not a second radio — so it must not trip the warning.
   const hasMultiSerial = results.some(r => {
     const src3 = r.log_format === 'atak' ? (r.atak_health_samples || []) : (r.system_samples || [])
-    return new Set(src3.map(s => s.serial_number).filter(Boolean)).size > 1
+    const serials = src3.map(s => s.serial_number).filter(s => s && s !== 'Unknown')
+    return new Set(serials).size > 1
   })
 
   const allLabels = datasets.map(d => d.label)
