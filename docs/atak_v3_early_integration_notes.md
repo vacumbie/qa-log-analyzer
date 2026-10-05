@@ -1,5 +1,5 @@
 # ATAK Plugin v3.0 — Early Integration Notes
-_Created: 2026-07-29_
+_Created: 2026-07-29 · Updated: 2026-10-04 (build `ebb7b8c5` logs)_
 
 ## Purpose
 
@@ -17,10 +17,24 @@ that used to be missing shows up).
 |---|---|---|---|---|
 | `diagnostic_BARK_65043_2026-07-28_15_09_17_944.log` | BARK | 65043 | 2026-07-28 18:06:21 → 20:02:15 UTC | 1,215 (713 sent / 502 recv) |
 | `diagnostic_EUD-009_54498_2026-07-29_04_02_14_14.log` | EUD-009 | 54498 | 2026-07-28 20:17:28 → 21:02:16 UTC | 267 (90 sent / 177 recv) |
+| `diagnostic_BAMA_90361464844400_2026-10-02_13_26_58_66.log` | BAMA | 90361464844400 | 2026-10-02 17:01:56 → 17:27:00 UTC | 147 (33 sent / 114 recv) |
+| `diagnostic_TESTLINE_90168163972632_2026-10-02_13_26_57_921.log` | TESTLINE | 90168163972632 | 2026-10-02 17:01:55 → 17:27:00 UTC | 149 (34 sent / 115 recv) |
 
 Both: app version `3.0.0 (dae7d160) - [5.6.0]`, ATAK version `5.6.0.21`,
 device `Samsung SM-S931U1`, Android API 36. Parsed cleanly by the existing
 `atak` parser — 0 parse errors on either file.
+
+**2026-10-02 logs (newer build):** app version `3.0.0 (ebb7b8c5) - [5.6.0]`,
+ATAK version `5.6.0.17`, build number `1790946073` on both. BAMA: `Samsung
+SM-S901U1` (Galaxy S22); TESTLINE: `Samsung SM-S931U` (Galaxy S25); both
+Android API 36. Radio `PRO_X_2`, firmware `3.2.11`, chip `LEGACY_NXP`, BLE.
+Same group test as the four Pro+ logs in
+`docs/proplus_early_integration_notes.md`. Detected as `atak` and parsed with
+0 parse errors (one informational sdkError DATA LIMITATION each).
+
+**GID format changed between builds:** the July (`dae7d160`) logs carry short
+GIDs (`65043`, `54498`); the October (`ebb7b8c5`) logs carry 14-digit GIDs, the
+same form the Pro+ app uses.
 
 ## Filename convention (changed)
 
@@ -36,6 +50,10 @@ back blank** on every v3.0-named log. GID is unaffected (it has a fallback via
 `senderGid` on the device's own sent messages). This is a parser gap, not a
 data limitation from the FW/radio — tracked as a fix candidate whenever it's
 worth doing given the naming may change again.
+
+**Update 2026-10-04:** fixed in PR #33 — `_FILENAME_RE` now treats the `ATAK_`
+segment as optional, and the own sent `senderCallsign` is a fallback. Both
+October logs return their callsign (BAMA, TESTLINE) and GID from the filename.
 
 ## What's present and reliable right now
 
@@ -58,6 +76,45 @@ worth doing given the naming may change again.
 - **Session continuity** — no gaps detected in either log (continuous
   sessions).
 
+**New in build `ebb7b8c5` (2026-10-02 logs):**
+
+- **Device-health telemetry** — 58 (BAMA) and 45 (TESTLINE) `connectionState`
+  records: battery %, charging, firmware, serial, mode (`NORMAL`), stored
+  messages, transmit power differential, hardware `9` / bootloader `20`,
+  `errorCode: SystemErrorCodes(errorValue=0)` throughout.
+  - PA temperature: 105.8–125.6 °F (BAMA), 104.0–136.4 °F (TESTLINE).
+  - System temperature: 102.2–107.6 °F (BAMA), 96.8–105.8 °F (TESTLINE).
+  - Logged in °C; the figures above are converted.
+- **RSSI on received messages** — populated on every received message:
+  −20 / −19 dBm on BAMA; −31 to −19 dBm on TESTLINE.
+- **`fileTransfer`** — one 170-segment JPEG (`goTenna_ATAK_1790961198265.jpg`)
+  sent by TESTLINE: `SUCCESS` after 186,705 ms (~3 min 7 s); BAMA received it
+  `FULLY_RECEIVED` at 1 hop, −19 dBm.
+- **Delivery statuses** — `SENT`, `FULLY_RECEIVED`, `DELIVERED` (2 private chats
+  on BAMA) and **`SUCCESS`** (3 on TESTLINE: two map objects and the file
+  transfer). `SUCCESS` is already in the UI's status colour map.
+- **Message types** — `pli`, `textChat`, `mapObject` (`PIN`, `SHAPE`, `CIRCLE`,
+  `ROUTE`), `fileTransfer`.
+- **`frequencyUpdated`** — one per log (~17:03): power 5.0, bandwidth 11.8,
+  16 channels (3 control: 461037.5, 464500.0, 469500.0).
+- **`deviceDisconnected` → `deviceConnected`** — one pair per log at ~17:01:55,
+  each disconnect with a location.
+- **SDK Logging 2.0 `deviceState` records** (`WARNING`, `PROCESSING`), all
+  `INCOMING` firmware nacks: BAMA 47 (204 ×25, 205 ×20, 228 ×2, last at
+  17:16:17); TESTLINE 10 (204 ×4, 205 ×4, 228 ×2, last at 17:12:22). These
+  carry `platformType: ANDROID`, `radioType: PRO_X_2`, the radio serial and
+  `personalGid`.
+- **New message fields** — `receiverCallsign`, `receiverUUID`, `senderUUID`,
+  `version` (none appear in the existing ATAK test fixtures). Received messages name the local device as receiver; sent
+  broadcasts carry `receiverCallsign: ""` and `receiverGid: 0`.
+- **New event type `cotDispatchedToAtak`** (not in any existing ATAK test
+  fixture) — the largest record type: 206 of
+  462 (BAMA) and 200 of 408 (TESTLINE). Fields: `cotType`, `destination`
+  (`EXTERNAL`, `INTERNAL`, `BROADCAST`), `cotXml`. Most CoT types appear as
+  `EXTERNAL`/`INTERNAL` pairs (e.g. `a-f-G-U-C` 79/79 on BAMA); `b-t-f` does not
+  pair evenly (18/13 on BAMA, 16/13 on TESTLINE).
+- **No duplicate received entries** in either log.
+
 ## What's missing or inconsistent — flagged honestly
 
 - **No device-health telemetry** — zero `connectionState` records in either
@@ -66,17 +123,68 @@ worth doing given the naming may change again.
   render empty. Unknown whether this is "not implemented yet in this FW/plugin
   build" or "just didn't fire in these two sessions" — needs more samples to
   tell apart.
+  **Update 2026-10-04:** present in build `ebb7b8c5` (see above).
 - **RSSI always `0`** — every single message in both logs, sent and received,
   reports `rssi: 0`. The field exists and the parser reads it correctly; it
   simply isn't being populated by this FW/radio combo yet. No signal-strength
   insight is currently possible from this log type.
+  **Update 2026-10-04:** populated on received messages in build `ebb7b8c5`.
+  Sent messages still report `0`.
 - **PLI interval churn** — BARK's session shows four distinct interval values
   (`5`, `15`, `60`, and blank `""`) within one continuous session. Could be
   legitimate setting changes mid-session, could be a reporting quirk on the
   new FW. Worth watching across more logs before treating it as either normal
   or a bug.
+  **Update 2026-10-04:** blank `""` still appears — 14 of 120 PLIs (BAMA) and
+  17 of 124 (TESTLINE); every other PLI reports `60`.
 - **No SDK Logging 2.0 (`sdkError`) records** — expected, since these are
   "regular" logs rather than "enhanced" debug logs; not a gap.
+  **Update 2026-10-04:** build `ebb7b8c5` regular logs do contain them
+  (firmware nack warnings, see above).
+
+**Observed in build `ebb7b8c5` (2026-10-02 logs):**
+
+- **Radio serial shows as `Unknown`** — the first health record of each log
+  (`connectionState: CONNECTING`) carries the placeholder `serialNumber:
+  "Unknown"`. `atak.py` keeps the first serial it sees, so the device summary
+  reports `Unknown`. The real serial is in every later health record (57 / 44),
+  in `deviceConnected`, and in the sdkError records. Parser gap.
+- **`cotDispatchedToAtak` detail not captured** — `atak.py` records only the
+  event type; `cotType`, `destination` and `cotXml` are dropped. The Device
+  Events Timeline lists every event at 30 px per row, so these ~200 records per
+  log would show as blank-detail rows (from reading the code; not yet confirmed
+  in the browser). Parser/UI gap.
+- **New message fields not captured** — `receiverCallsign`, `receiverUUID`,
+  `senderUUID` and `version` are not in `AtakMessage`. Parser gap.
+- **Sent messages report `rssi: 0` and `hopCount: 0`** — placeholders, not
+  measurements. The RF map already excludes sent messages.
+- **Hop count is `1` on every received message** — all devices were within
+  direct range, so this test shows no multi-hop behaviour.
+- **Narrow RSSI range** (−31 to −19 dBm) — consistent with devices close
+  together.
+- **Irregular health cadence** — gaps from 0 to 60 s; 12 (BAMA) and 17
+  (TESTLINE) gaps are the full 60 s, the rest shorter.
+- **Meanings unconfirmed** — firmware nack codes 204 / 205 / 228;
+  `cotDispatchedToAtak` destinations `EXTERNAL` vs `INTERNAL`; `bandwidth: 11.8`
+  unit; frequencies logged like `461037.5` (read as kHz).
+
+## Cross-check with the Pro+ logs from the same test (2026-10-02)
+
+- **TESTLINE's file transfer and the short GID** — TESTLINE's own log shows the
+  transfer sent from its full GID `90168163972632`, and BAMA received it under
+  that same GID. Only the Pro+ receivers logged it as `27628` (logID
+  `27628:2605`).
+- **GIDs match across apps** — BAMA and TESTLINE see each Pro+ device under the
+  GID that device reports in its own `radioStatus`: AndPro S20
+  `90177632067335`, AndPro S24 `90163251493958`, iOSPro 13 `90167828132566`,
+  iOSPro 16 `90033540780181`.
+- **Callsigns match** — the Pro+ devices appear here as "AndPro S20",
+  "AndPro S24", "iOSPro 13" and "iOSPro 16".
+- **Duplicates** — neither ATAK log has duplicate received entries; the iOS
+  Pro+ logs do.
+- **Frequency changes** — both ATAK logs record only the one `frequencyUpdated`
+  at ~17:03. All four Pro+ logs also record changes at ~17:08, ~17:12 and
+  ~17:18.
 
 ## Bugs found and fixed along the way
 
@@ -122,6 +230,11 @@ conclusion either way:
 - `firmwareUpdate`, `powerLevelUpdated`, `frequencyUpdated` events
 - Any delivery status other than `SENT` / `FULLY_RECEIVED` / `DELIVERED`
   (e.g. `FAILED`)
+
+**Update 2026-10-04:** `fileTransfer`, `frequencyUpdated` and `SUCCESS` are now
+observed (see above). Still not observed: `firmwareUpdate`,
+`powerLevelUpdated`, `FAILED`, retries (`retryCount` > 0), open segments > 0.
+`ledStateUpdated` and `pliSettingUpdated` did not appear in the October logs.
 
 ## How to use this doc
 
