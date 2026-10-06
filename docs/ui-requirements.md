@@ -1098,8 +1098,35 @@ unavailable.
   `messageTimestamp` + `senderUUID`, with the duplicate count reported.
 - Track the record `version` field.
 
-**Status:** ⏳ Pending — findings recorded, requirements not started.
-Branch: `feat/proplus-log-format`.
+**Scope added 2026-10-06 (build 310 logs from the 2026-10-05 test):**
+- Support **both builds**, 307 and 310. `logID` is a composite string in 307
+  and a plain number in 310; `messageUUID` exists only in 310. Never parse
+  meaning out of `logID`.
+- iOS deduplication: keep `logID` + `messageTimestamp` + `senderUUID`. It works
+  on both builds (in 310 the copies also share `messageUUID`).
+- Cross-log matching key (for future multi-log views): `senderGid` +
+  `messageTimestamp`. In 310, `logID` also matches the ATAK sender's `logId`,
+  but values can repeat, so never use it alone.
+- `retryCount`, `segmentCount`, `numberOfOpenSegments` and `receiverGid` are
+  omitted in 310 unless they apply. Absent = not applicable, never 0.
+- Hop count and RSSI are now populated on received PLIs and file transfers.
+  The "absent → not reported" rule still applies to everything else.
+- `applicationInfo` appears once per app launch (2–4 per log): record every
+  launch, don't assume one.
+- A session can switch radios (seen on Keri_iOS). Device identity must not be
+  "first radio wins" — the same problem found in the ATAK parser on 2026-10-05.
+- `userEvent` can carry `WARNING` severity and `didSucceed: false` (a failed
+  frequency update): surface it, don't drop it.
+- `frequencyUpdated` repeats the same configuration every ~15 minutes: tell
+  real configuration changes apart from repeats.
+- `TAK_Srvr_Conn` gains `disconnectedTimestamp`.
+- `deviceDisconnected` events carry GPS coordinates: decide whether the UI or
+  exports show them.
+- Fixtures must cover both builds, using the real record shapes with fake
+  values.
+
+**Status:** ⏳ Pending — findings recorded (build 307 and 310), requirements not
+started. Branch: `feat/proplus-log-format`.
 
 ---
 
